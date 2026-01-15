@@ -193,7 +193,7 @@ We welcome contributions! Whether it's a new Skill, a UI fix, or a security impr
 Join our WeChat group for support and discussion:
 
 <p align="center">
-  <img src="resources/wechat.jpg" alt="WeChat Group" width="200" />
+  <img src="resources/WeChat.jpg" alt="WeChat Group" width="200" />
 </p>
 
 ---
