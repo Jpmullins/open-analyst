@@ -32,15 +32,49 @@ export class ClaudeAgentRunner {
 
   private getDefaultClaudeCodePath(): string {
     const platform = process.platform;
+    const { execSync } = require('child_process');
+    
+    // Try to find claude-code using 'which' command first (works with nvm, etc.)
+    try {
+      const claudePath = execSync('which claude', { encoding: 'utf-8' }).trim();
+      if (claudePath) {
+        console.log('[ClaudeAgentRunner] Found claude via which:', claudePath);
+        return claudePath;
+      }
+    } catch (e) {
+      // which command failed, try fallback paths
+    }
+    
+    // Try npm root -g to find global node_modules
+    try {
+      const npmRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
+      const cliPath = path.join(npmRoot, '@anthropic-ai', 'claude-code', 'cli.js');
+      const fs = require('fs');
+      if (fs.existsSync(cliPath)) {
+        console.log('[ClaudeAgentRunner] Found claude-code via npm root:', cliPath);
+        return cliPath;
+      }
+    } catch (e) {
+      // npm root failed
+    }
+    
+    // Fallback to platform-specific defaults
     if (platform === 'win32') {
-      // Windows: check common npm global paths
       const appData = process.env.APPDATA || '';
       return path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
     } else if (platform === 'darwin') {
-      // macOS
-      return '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js';
+      // macOS: check common locations
+      const possiblePaths = [
+        '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+        '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+        path.join(process.env.HOME || '', '.nvm/versions/node', process.version, 'lib/node_modules/@anthropic-ai/claude-code/cli.js'),
+      ];
+      const fs = require('fs');
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) return p;
+      }
+      return possiblePaths[0];
     } else {
-      // Linux
       return '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js';
     }
   }
@@ -54,6 +88,7 @@ export class ClaudeAgentRunner {
     console.log('[ClaudeAgentRunner] Model:', this.model);
     console.log('[ClaudeAgentRunner] ANTHROPIC_AUTH_TOKEN:', process.env.ANTHROPIC_AUTH_TOKEN ? '✓ Set' : '✗ Not set');
     console.log('[ClaudeAgentRunner] ANTHROPIC_BASE_URL:', process.env.ANTHROPIC_BASE_URL || '(default)');
+    console.log('[ClaudeAgentRunner] Skills enabled: settingSources=[user, project], Skill tool enabled');
   }
 
   // Handle user's answer to AskUserQuestion
@@ -172,6 +207,12 @@ export class ClaudeAgentRunner {
         maxTurns: 50,
         abortController: controller,
         env: { ...process.env },
+        
+        // Skills support: load from user and project .claude/skills/ directories
+        settingSources: ['project', 'user'],
+        
+        // Enable Skill tool along with other commonly used tools
+        allowedTools: ['Skill', 'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite', 'AskUserQuestion', 'Task'],
         
         // System prompt: use Claude Code default + custom instructions
         systemPrompt: {
