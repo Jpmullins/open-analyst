@@ -6,11 +6,11 @@ import {
   Send,
   Square,
   Plus,
-  ChevronDown,
+  Loader2,
 } from 'lucide-react';
 
 export function ChatView() {
-  const { activeSessionId, sessions, messagesBySession, partialMessage, isLoading } = useAppStore();
+  const { activeSessionId, sessions, messagesBySession, partialMessage, isLoading, appConfig } = useAppStore();
   const { continueSession, stopSession } = useIPC();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,7 +75,7 @@ export function ChatView() {
             </div>
           ) : (
             messages.map((message) => (
-              <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : ''}>
+              <div key={message.id}>
                 <MessageCard message={message} />
               </div>
             ))
@@ -94,15 +94,25 @@ export function ChatView() {
               isStreaming
             />
           )}
+
+          {/* Status indicator */}
+          {isRunning && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
+              <Loader2 className="w-4 h-4 text-accent animate-spin" />
+              <span className="text-sm text-text-secondary">
+                Processing...
+              </span>
+            </div>
+          )}
           
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* Input - Right aligned */}
+      {/* Input */}
       <div className="border-t border-border bg-surface/80 backdrop-blur-sm">
-        <div className="w-full p-4 flex justify-end">
-          <form onSubmit={handleSubmit} className="relative w-full max-w-3xl">
+        <div className="max-w-3xl mx-auto p-4">
+          <form onSubmit={handleSubmit} className="relative w-full">
             <div className="flex items-end gap-2 p-3 rounded-3xl bg-surface" style={{ border: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <button
                 type="button"
@@ -128,14 +138,10 @@ export function ChatView() {
               />
 
               <div className="flex items-center gap-2">
-                {/* Model selector */}
-                <button
-                  type="button"
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-muted hover:bg-surface-hover transition-colors"
-                >
-                  <span>Opus 4.5</span>
-                  <ChevronDown className="w-3 h-3" />
-                </button>
+                {/* Model display */}
+                <span className="px-2 py-1 text-xs text-text-muted">
+                  {appConfig?.model || 'No model'}
+                </span>
 
                 {isRunning ? (
                   <button

@@ -63,7 +63,7 @@ export function Sidebar() {
     <div className="w-64 bg-surface border-r border-border flex flex-col">
       {/* Header with App Title and Dark Mode Toggle */}
       <div className="px-4 pt-6 pb-4 border-b border-border flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-text-primary">Cowork</h1>
+        <h1 className="text-lg font-semibold text-text-primary">Open Cowork</h1>
         <button
           onClick={toggleTheme}
           className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-hover transition-colors text-text-secondary"
@@ -98,7 +98,7 @@ export function Sidebar() {
               <p>No tasks yet</p>
             </div>
           ) : (
-            sessions.map((session) => (
+            [...sessions].reverse().map((session) => (
               <div
                 key={session.id}
                 onClick={() => handleSessionClick(session.id)}

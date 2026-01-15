@@ -31,8 +31,8 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
   return (
     <div className="animate-fade-in">
       {isUser ? (
-        // User message - neutral gray background, fit content width with min width
-        <div className="message-user p-4 max-w-[90%] min-w-[120px] inline-block">
+        // User message - compact styling with smaller padding and radius
+        <div className="message-user px-4 py-2.5 max-w-[80%] break-words">
           {message.content.length === 0 ? (
             <span className="text-text-muted italic">Empty message</span>
           ) : (
@@ -82,7 +82,7 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
       // Simple text display for user messages, Markdown for assistant
       if (isUser) {
         return (
-          <p className="text-text-primary whitespace-pre-wrap">
+          <p className="text-text-primary whitespace-pre-wrap break-words text-left">
             {text}
             {isStreaming && <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />}
           </p>
@@ -90,13 +90,13 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
       }
       
       return (
-        <div className="prose prose-sm max-w-none text-text-primary">
+        <div className="prose-chat max-w-none text-text-primary">
           <ReactMarkdown
             components={{
               code({ className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || '');
                 const isInline = !match;
-                
+
                 if (isInline) {
                   return (
                     <code className="px-1.5 py-0.5 rounded bg-surface-muted text-accent font-mono text-sm" {...props}>
@@ -104,7 +104,7 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
                     </code>
                   );
                 }
-                
+
                 return (
                   <CodeBlock language={match[1]}>
                     {String(children).replace(/\n$/, '')}
@@ -112,7 +112,13 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
                 );
               },
               p({ children }) {
-                return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>;
+                return <p>{children}</p>;
+              },
+              strong({ children }) {
+                return <strong>{children}</strong>;
+              },
+              em({ children }) {
+                return <em>{children}</em>;
               },
             }}
           >

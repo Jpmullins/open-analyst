@@ -163,7 +163,7 @@ export function ContextPanel() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-hover cursor-pointer transition-colors opacity-50">
                   <Globe className="w-4 h-4 text-text-muted" />
-                  <span className="text-sm text-text-muted">Web search (coming soon)</span>
+                  <span className="text-sm text-text-muted">Connectors (coming soon)</span>
                 </div>
               </div>
             </div>

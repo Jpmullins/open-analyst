@@ -63,11 +63,8 @@ function App() {
 
   // Handle config modal close
   const handleConfigClose = useCallback(() => {
-    // Only allow closing if already configured
-    if (isConfigured) {
-      setShowConfigModal(false);
-    }
-  }, [isConfigured, setShowConfigModal]);
+    setShowConfigModal(false);
+  }, [setShowConfigModal]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
