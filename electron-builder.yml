@@ -11,11 +11,14 @@ files:
   - dist-electron/**/*
   - package.json
   - node_modules/@anthropic-ai/claude-code/**/*
+  - .claude/skills/**/*
 
 # Unpack claude-code so it can be executed as a CLI
+# Also unpack skills so they can be read/written at runtime
 asarUnpack:
   - node_modules/@anthropic-ai/claude-code/**/*
   - node_modules/better-sqlite3/**/*
+  - .claude/skills/**/*
 
 win:
   target:

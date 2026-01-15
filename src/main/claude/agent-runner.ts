@@ -39,12 +39,19 @@ export class ClaudeAgentRunner {
    */
   private getBuiltinSkillsPath(): string {
     // In development, skills are in the project's .claude/skills directory
-    // In production, they're bundled with the app
+    // In production, they're bundled with the app (in app.asar.unpacked for asarUnpack files)
+    const appPath = app.getAppPath();
+    
+    // For asarUnpack files, replace .asar with .asar.unpacked
+    const unpackedPath = appPath.replace(/\.asar$/, '.asar.unpacked');
+    
     const possiblePaths = [
       // Development: relative to this file
       path.join(__dirname, '..', '..', '..', '.claude', 'skills'),
-      // Production: in app resources
-      path.join(app.getAppPath(), '.claude', 'skills'),
+      // Production: in app.asar.unpacked (for asarUnpack files)
+      path.join(unpackedPath, '.claude', 'skills'),
+      // Fallback: in app resources (if not unpacked)
+      path.join(appPath, '.claude', 'skills'),
       // Alternative: in resources folder
       path.join(process.resourcesPath || '', 'skills'),
     ];
