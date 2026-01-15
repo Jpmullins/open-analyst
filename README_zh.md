@@ -58,21 +58,6 @@ https://github.com/user-attachments/assets/30299ded-0260-468f-b11d-d282bb9c97f2
 
 ### 3. 从文件生成 XLSX 表格 📉
 https://github.com/user-attachments/assets/f57b9106-4b2c-4747-aecd-a07f78af5dfc
-=======
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=MyuiO70R0h8">
-    <img src="https://img.youtube.com/vi/MyuiO70R0h8/maxresdefault.jpg" alt="Open Cowork 演示 1" width="420" />
-  </a>
-</p>
->>>>>>> a712121279317af82322d37b72eba2bb19752cd9
-
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=piEEor1ohHo">
-    <img src="https://img.youtube.com/vi/piEEor1ohHo/maxresdefault.jpg" alt="Open Cowork 演示 2" width="420" />
-  </a>
-</p>
-
-> 💡 **提示**：点击上方缩略图可在 YouTube 上观看演示视频。
 
 ---
 
