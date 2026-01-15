@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import type { Skill } from '../../renderer/types';
-import type { InMemoryDatabase } from '../db/database';
+import type { DatabaseInstance } from '../db/database';
 
 interface McpServerConfig {
   command: string;
@@ -27,11 +27,11 @@ interface SkillConfig {
  * 3. Built-in skills
  */
 export class SkillsManager {
-  private db: InMemoryDatabase;
+  private db: DatabaseInstance;
   private loadedSkills: Map<string, Skill> = new Map();
   private runningServers: Map<string, { process: any; skill: Skill }> = new Map();
 
-  constructor(db: InMemoryDatabase) {
+  constructor(db: DatabaseInstance) {
     this.db = db;
     this.loadBuiltinSkills();
   }

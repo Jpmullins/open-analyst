@@ -39,6 +39,7 @@ interface AppState {
   setActiveSession: (sessionId: string | null) => void;
   
   addMessage: (sessionId: string, message: Message) => void;
+  setMessages: (sessionId: string, messages: Message[]) => void;
   setPartialMessage: (partial: string) => void;
   clearPartialMessage: () => void;
   
@@ -130,6 +131,14 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: [...(state.messagesBySession[sessionId] || []), message],
       },
       partialMessage: '', // Clear partial when full message arrives
+    })),
+  
+  setMessages: (sessionId, messages) =>
+    set((state) => ({
+      messagesBySession: {
+        ...state.messagesBySession,
+        [sessionId]: messages,
+      },
     })),
   
   setPartialMessage: (partial) =>

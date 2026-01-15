@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { useIPC } from '../hooks/useIPC';
 import {
@@ -10,9 +10,37 @@ import {
 } from 'lucide-react';
 
 export function Sidebar() {
-  const { sessions, activeSessionId, settings, setActiveSession, updateSettings, setShowConfigModal, isConfigured } = useAppStore();
-  const { deleteSession } = useIPC();
+  const { sessions, activeSessionId, settings, messagesBySession, setActiveSession, setMessages, updateSettings, setShowConfigModal, isConfigured } = useAppStore();
+  const { deleteSession, getSessionMessages, isElectron } = useIPC();
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState<string | null>(null);
+
+  // Handle session click - load messages if needed
+  const handleSessionClick = useCallback(async (sessionId: string) => {
+    if (activeSessionId === sessionId) return;
+    
+    setActiveSession(sessionId);
+    
+    // Check if we already have messages loaded for this session
+    const existingMessages = messagesBySession[sessionId];
+    if (!existingMessages || existingMessages.length === 0) {
+      // Load messages from persistent storage
+      if (isElectron) {
+        setLoadingSession(sessionId);
+        try {
+          const messages = await getSessionMessages(sessionId);
+          if (messages && messages.length > 0) {
+            setMessages(sessionId, messages);
+            console.log('[Sidebar] Loaded', messages.length, 'messages for session:', sessionId);
+          }
+        } catch (error) {
+          console.error('[Sidebar] Failed to load messages:', error);
+        } finally {
+          setLoadingSession(null);
+        }
+      }
+    }
+  }, [activeSessionId, messagesBySession, setActiveSession, setMessages, getSessionMessages, isElectron]);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
@@ -73,7 +101,7 @@ export function Sidebar() {
             sessions.map((session) => (
               <div
                 key={session.id}
-                onClick={() => setActiveSession(session.id)}
+                onClick={() => handleSessionClick(session.id)}
                 onMouseEnter={() => setHoveredSession(session.id)}
                 onMouseLeave={() => setHoveredSession(null)}
                 className={`group relative px-3 py-2.5 rounded-xl cursor-pointer transition-all ${
@@ -84,6 +112,7 @@ export function Sidebar() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    loadingSession === session.id ? 'bg-accent animate-pulse' :
                     session.status === 'running' ? 'bg-accent' :
                     session.status === 'completed' ? 'bg-success' :
                     session.status === 'error' ? 'bg-error' : 'bg-border'

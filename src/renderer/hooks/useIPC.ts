@@ -310,6 +310,23 @@ export function useIPC() {
     send({ type: 'session.list', payload: {} });
   }, [send]);
 
+  // Get messages for a session (from persistent storage)
+  const getSessionMessages = useCallback(
+    async (sessionId: string): Promise<Message[]> => {
+      if (!isElectron) {
+        console.log('[useIPC] Browser mode - no persistent messages');
+        return [];
+      }
+      console.log('[useIPC] Getting messages for session:', sessionId);
+      const messages = await invoke<Message[]>({
+        type: 'session.getMessages',
+        payload: { sessionId },
+      });
+      return messages || [];
+    },
+    [invoke]
+  );
+
   const respondToPermission = useCallback(
     (toolUseId: string, result: PermissionResult) => {
       send({
@@ -348,6 +365,7 @@ export function useIPC() {
     stopSession,
     deleteSession,
     listSessions,
+    getSessionMessages,
     respondToPermission,
     respondToQuestion,
     selectFolder,

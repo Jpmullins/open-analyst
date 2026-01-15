@@ -6,6 +6,7 @@ import * as path from 'path';
 
 interface AgentRunnerOptions {
   sendToRenderer: (event: ServerEvent) => void;
+  saveMessage?: (message: Message) => void;
 }
 
 /**
@@ -24,6 +25,7 @@ interface PendingQuestion {
 
 export class ClaudeAgentRunner {
   private sendToRenderer: (event: ServerEvent) => void;
+  private saveMessage?: (message: Message) => void;
   private pathResolver: PathResolver;
   private activeControllers: Map<string, AbortController> = new Map();
   private sdkSessions: Map<string, string> = new Map(); // sessionId -> sdk session_id
@@ -47,6 +49,7 @@ export class ClaudeAgentRunner {
 
   constructor(options: AgentRunnerOptions, pathResolver: PathResolver) {
     this.sendToRenderer = options.sendToRenderer;
+    this.saveMessage = options.saveMessage;
     this.pathResolver = pathResolver;
     this.model = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'anthropic/claude-sonnet-4';
     
@@ -607,6 +610,11 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
   }
 
   private sendMessage(sessionId: string, message: Message): void {
+    // Save message to database for persistence
+    if (this.saveMessage) {
+      this.saveMessage(message);
+    }
+    // Send to renderer for UI update
     this.sendToRenderer({ type: 'stream.message', payload: { sessionId, message } });
   }
 

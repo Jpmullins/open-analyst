@@ -1,29 +1,32 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Session, Message, ServerEvent, PermissionResult, ContentBlock } from '../../renderer/types';
-import type { InMemoryDatabase } from '../db/database';
+import type { Session, Message, ServerEvent, PermissionResult, ContentBlock, TextContent } from '../../renderer/types';
+import type { DatabaseInstance } from '../db/database';
 import { PathResolver } from '../sandbox/path-resolver';
 import { ClaudeAgentRunner } from '../claude/agent-runner';
 
 export class SessionManager {
-  private db: InMemoryDatabase;
+  private db: DatabaseInstance;
   private sendToRenderer: (event: ServerEvent) => void;
   private pathResolver: PathResolver;
   private agentRunner: ClaudeAgentRunner;
   private activeSessions: Map<string, AbortController> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
 
-  constructor(db: InMemoryDatabase, sendToRenderer: (event: ServerEvent) => void) {
+  constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
     this.db = db;
     this.sendToRenderer = sendToRenderer;
     this.pathResolver = new PathResolver();
     
-    // Initialize Claude Agent Runner
+    // Initialize Claude Agent Runner with message save callback
     this.agentRunner = new ClaudeAgentRunner(
-      { sendToRenderer: this.sendToRenderer },
+      { 
+        sendToRenderer: this.sendToRenderer,
+        saveMessage: (message: Message) => this.saveMessage(message),
+      },
       this.pathResolver
     );
     
-    console.log('[SessionManager] Initialized');
+    console.log('[SessionManager] Initialized with persistent database');
   }
 
   // Create and start a new session
@@ -67,63 +70,54 @@ export class SessionManager {
 
   // Save session to database
   private saveSession(session: Session) {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO sessions 
-      (id, title, claude_session_id, status, cwd, mounted_paths, allowed_tools, memory_enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      session.id,
-      session.title,
-      session.claudeSessionId || null,
-      session.status,
-      session.cwd || null,
-      JSON.stringify(session.mountedPaths),
-      JSON.stringify(session.allowedTools),
-      session.memoryEnabled ? 1 : 0,
-      session.createdAt,
-      session.updatedAt
-    );
+    this.db.sessions.create({
+      id: session.id,
+      title: session.title,
+      claude_session_id: session.claudeSessionId || null,
+      status: session.status,
+      cwd: session.cwd || null,
+      mounted_paths: JSON.stringify(session.mountedPaths),
+      allowed_tools: JSON.stringify(session.allowedTools),
+      memory_enabled: session.memoryEnabled ? 1 : 0,
+      created_at: session.createdAt,
+      updated_at: session.updatedAt,
+    });
   }
 
   // Load session from database
   private loadSession(sessionId: string): Session | null {
-    const stmt = this.db.prepare('SELECT * FROM sessions WHERE id = ?');
-    const row = stmt.get(sessionId) as Record<string, unknown> | undefined;
-
+    const row = this.db.sessions.get(sessionId);
     if (!row) return null;
 
     return {
-      id: row.id as string,
-      title: row.title as string,
-      claudeSessionId: row.claude_session_id as string | undefined,
+      id: row.id,
+      title: row.title,
+      claudeSessionId: row.claude_session_id || undefined,
       status: row.status as Session['status'],
-      cwd: row.cwd as string | undefined,
-      mountedPaths: JSON.parse(row.mounted_paths as string),
-      allowedTools: JSON.parse(row.allowed_tools as string),
-      memoryEnabled: (row.memory_enabled as number) === 1,
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
+      cwd: row.cwd || undefined,
+      mountedPaths: JSON.parse(row.mounted_paths),
+      allowedTools: JSON.parse(row.allowed_tools),
+      memoryEnabled: row.memory_enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 
   // List all sessions
   listSessions(): Session[] {
-    const stmt = this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC');
-    const rows = stmt.all() as Record<string, unknown>[];
+    const rows = this.db.sessions.getAll();
 
     return rows.map((row) => ({
-      id: row.id as string,
-      title: row.title as string,
-      claudeSessionId: row.claude_session_id as string | undefined,
+      id: row.id,
+      title: row.title,
+      claudeSessionId: row.claude_session_id || undefined,
       status: row.status as Session['status'],
-      cwd: row.cwd as string | undefined,
-      mountedPaths: JSON.parse(row.mounted_paths as string),
-      allowedTools: JSON.parse(row.allowed_tools as string),
-      memoryEnabled: (row.memory_enabled as number) === 1,
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
+      cwd: row.cwd || undefined,
+      mountedPaths: JSON.parse(row.mounted_paths),
+      allowedTools: JSON.parse(row.allowed_tools),
+      memoryEnabled: row.memory_enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     }));
   }
 
@@ -157,7 +151,18 @@ export class SessionManager {
       const controller = new AbortController();
       this.activeSessions.set(session.id, controller);
 
-      // Get existing messages for context
+      // Save user message to database for persistence
+      const userMessage: Message = {
+        id: uuidv4(),
+        sessionId: session.id,
+        role: 'user',
+        content: [{ type: 'text', text: prompt } as TextContent],
+        timestamp: Date.now(),
+      };
+      this.saveMessage(userMessage);
+      console.log('[SessionManager] User message saved:', userMessage.id);
+
+      // Get existing messages for context (including the one we just saved)
       const existingMessages = this.getMessages(session.id);
       
       // Run the agent - this handles everything including sending messages
@@ -193,19 +198,15 @@ export class SessionManager {
     // Stop if running
     this.stopSession(sessionId);
 
-    // Delete from database
-    const stmt = this.db.prepare('DELETE FROM sessions WHERE id = ?');
-    stmt.run(sessionId);
-
-    // Delete messages
-    const msgStmt = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
-    msgStmt.run(sessionId);
+    // Delete from database (messages will be deleted automatically via CASCADE)
+    this.db.sessions.delete(sessionId);
+    
+    console.log('[SessionManager] Session deleted:', sessionId);
   }
 
   // Update session status
   private updateSessionStatus(sessionId: string, status: Session['status']): void {
-    const stmt = this.db.prepare('UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?');
-    stmt.run(status, Date.now(), sessionId);
+    this.db.sessions.update(sessionId, { status, updated_at: Date.now() });
 
     this.sendToRenderer({
       type: 'session.status',
@@ -215,33 +216,29 @@ export class SessionManager {
 
   // Save message to database
   saveMessage(message: Message): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO messages (id, session_id, role, content, timestamp, token_usage)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      message.id,
-      message.sessionId,
-      message.role,
-      JSON.stringify(message.content),
-      message.timestamp,
-      message.tokenUsage ? JSON.stringify(message.tokenUsage) : null
-    );
+    this.db.messages.create({
+      id: message.id,
+      session_id: message.sessionId,
+      role: message.role,
+      content: JSON.stringify(message.content),
+      timestamp: message.timestamp,
+      token_usage: message.tokenUsage ? JSON.stringify(message.tokenUsage) : null,
+    });
+    
+    console.log('[SessionManager] Message saved:', message.id, 'role:', message.role);
   }
 
   // Get messages for a session
   getMessages(sessionId: string): Message[] {
-    const stmt = this.db.prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC');
-    const rows = stmt.all(sessionId) as Record<string, unknown>[];
+    const rows = this.db.messages.getBySessionId(sessionId);
 
     return rows.map((row) => ({
-      id: row.id as string,
-      sessionId: row.session_id as string,
+      id: row.id,
+      sessionId: row.session_id,
       role: row.role as Message['role'],
-      content: JSON.parse(row.content as string) as ContentBlock[],
-      timestamp: row.timestamp as number,
-      tokenUsage: row.token_usage ? JSON.parse(row.token_usage as string) : undefined,
+      content: JSON.parse(row.content) as ContentBlock[],
+      timestamp: row.timestamp,
+      tokenUsage: row.token_usage ? JSON.parse(row.token_usage) : undefined,
     }));
   }
 

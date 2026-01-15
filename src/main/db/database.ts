@@ -1,194 +1,326 @@
 /**
- * In-memory database implementation
- * This is a fallback when better-sqlite3 native module has issues
- * In production, switch back to better-sqlite3 after proper native rebuild
+ * SQLite database implementation using better-sqlite3
+ * Provides persistent storage for sessions, messages, and other data
  */
 
-export interface InMemoryDatabase {
-  sessions: Map<string, Record<string, unknown>>;
-  messages: Map<string, Record<string, unknown>>;
-  memoryEntries: Map<string, Record<string, unknown>>;
-  skills: Map<string, Record<string, unknown>>;
-  settings: Map<string, string>;
-  prepare: (sql: string) => InMemoryStatement;
+import Database from 'better-sqlite3';
+import { app } from 'electron';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+
+export interface DatabaseInstance {
+  // Raw database access (for advanced queries)
+  raw: Database.Database;
+  
+  // Session operations
+  sessions: {
+    create: (session: SessionRow) => void;
+    update: (id: string, updates: Partial<SessionRow>) => void;
+    get: (id: string) => SessionRow | undefined;
+    getAll: () => SessionRow[];
+    delete: (id: string) => void;
+  };
+  
+  // Message operations
+  messages: {
+    create: (message: MessageRow) => void;
+    getBySessionId: (sessionId: string) => MessageRow[];
+    delete: (id: string) => void;
+    deleteBySessionId: (sessionId: string) => void;
+  };
+  
+  // For compatibility with old interface
+  prepare: (sql: string) => Database.Statement;
   exec: (sql: string) => void;
-  pragma: (pragma: string) => void;
+  pragma: (pragma: string) => unknown;
   close: () => void;
 }
 
-interface InMemoryStatement {
-  run: (...params: unknown[]) => void;
-  get: (...params: unknown[]) => Record<string, unknown> | undefined;
-  all: (...params: unknown[]) => Record<string, unknown>[];
+export interface SessionRow {
+  id: string;
+  title: string;
+  claude_session_id: string | null;
+  status: string;
+  cwd: string | null;
+  mounted_paths: string; // JSON string
+  allowed_tools: string; // JSON string
+  memory_enabled: number;
+  created_at: number;
+  updated_at: number;
 }
 
-let db: InMemoryDatabase | null = null;
+export interface MessageRow {
+  id: string;
+  session_id: string;
+  role: string;
+  content: string; // JSON string
+  timestamp: number;
+  token_usage: string | null; // JSON string
+}
 
-export function initDatabase(): InMemoryDatabase {
-  if (db) return db;
+let db: DatabaseInstance | null = null;
 
-  // In-memory storage
-  const sessions = new Map<string, Record<string, unknown>>();
-  const messages = new Map<string, Record<string, unknown>>();
-  const memoryEntries = new Map<string, Record<string, unknown>>();
-  const skills = new Map<string, Record<string, unknown>>();
-  const settings = new Map<string, string>();
-
-  function getStore(table: string): Map<string, Record<string, unknown>> {
-    switch (table) {
-      case 'sessions':
-        return sessions;
-      case 'messages':
-        return messages;
-      case 'memory_entries':
-        return memoryEntries;
-      case 'skills':
-        return skills;
-      default:
-        return new Map();
-    }
+/**
+ * Get the database file path
+ */
+function getDatabasePath(): string {
+  // Use electron's userData path for persistent storage
+  const userDataPath = app.getPath('userData');
+  const dbDir = join(userDataPath, 'data');
+  
+  // Ensure directory exists
+  if (!existsSync(dbDir)) {
+    mkdirSync(dbDir, { recursive: true });
   }
+  
+  return join(dbDir, 'cowork.db');
+}
 
+/**
+ * Initialize the database schema
+ */
+function initializeSchema(database: Database.Database): void {
+  // Enable WAL mode for better performance
+  database.pragma('journal_mode = WAL');
+  
+  // Create sessions table
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      claude_session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'idle',
+      cwd TEXT,
+      mounted_paths TEXT NOT NULL DEFAULT '[]',
+      allowed_tools TEXT NOT NULL DEFAULT '[]',
+      memory_enabled INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  
+  // Create messages table
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      token_usage TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+  
+  // Create index for faster message queries
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_session_id 
+    ON messages(session_id)
+  `);
+  
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_timestamp 
+    ON messages(session_id, timestamp)
+  `);
+  
+  // Create memory_entries table (for future use)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memory_entries (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+  
+  // Create skills table (for future use)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      type TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  
+  console.log('[Database] Schema initialized');
+}
+
+/**
+ * Initialize the database
+ */
+export function initDatabase(): DatabaseInstance {
+  if (db) return db;
+  
+  const dbPath = getDatabasePath();
+  console.log('[Database] Opening database at:', dbPath);
+  
+  const rawDb = new Database(dbPath);
+  
+  // Enable foreign keys
+  rawDb.pragma('foreign_keys = ON');
+  
+  // Initialize schema
+  initializeSchema(rawDb);
+  
+  // Prepare statements for better performance
+  const insertSession = rawDb.prepare(`
+    INSERT OR REPLACE INTO sessions 
+    (id, title, claude_session_id, status, cwd, mounted_paths, allowed_tools, memory_enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  // Note: Dynamic update queries are built in sessions.update() for flexibility
+  // const updateSessionStmt = rawDb.prepare(`
+  //   UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?
+  // `);
+  
+  const getSessionStmt = rawDb.prepare(`
+    SELECT * FROM sessions WHERE id = ?
+  `);
+  
+  const getAllSessionsStmt = rawDb.prepare(`
+    SELECT * FROM sessions ORDER BY updated_at DESC
+  `);
+  
+  const deleteSessionStmt = rawDb.prepare(`
+    DELETE FROM sessions WHERE id = ?
+  `);
+  
+  const insertMessage = rawDb.prepare(`
+    INSERT INTO messages (id, session_id, role, content, timestamp, token_usage)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  
+  const getMessagesBySessionStmt = rawDb.prepare(`
+    SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC
+  `);
+  
+  const deleteMessageStmt = rawDb.prepare(`
+    DELETE FROM messages WHERE id = ?
+  `);
+  
+  const deleteMessagesBySessionStmt = rawDb.prepare(`
+    DELETE FROM messages WHERE session_id = ?
+  `);
+  
   db = {
-    sessions,
-    messages,
-    memoryEntries,
-    skills,
-    settings,
+    raw: rawDb,
     
-    prepare: (sql: string): InMemoryStatement => {
-      // Parse SQL and create appropriate operations
-      const insertOrReplace = /INSERT OR REPLACE INTO (\w+)/i.exec(sql);
-      const insert = /INSERT INTO (\w+)/i.exec(sql);
-      const select = /SELECT \* FROM (\w+)/i.exec(sql);
-      const selectWhere = /SELECT \* FROM (\w+) WHERE (\w+) = \?/i.exec(sql);
-      const deleteFrom = /DELETE FROM (\w+) WHERE (\w+) = \?/i.exec(sql);
-      const update = /UPDATE (\w+) SET/i.exec(sql);
-
-      return {
-        run: (...params: unknown[]) => {
-          if (insertOrReplace || insert) {
-            const table = (insertOrReplace || insert)![1];
-            const id = params[0] as string;
-            const store = getStore(table);
-            
-            if (table === 'sessions') {
-              store.set(id, {
-                id: params[0],
-                title: params[1],
-                claude_session_id: params[2],
-                status: params[3],
-                cwd: params[4],
-                mounted_paths: params[5],
-                allowed_tools: params[6],
-                memory_enabled: params[7],
-                created_at: params[8],
-                updated_at: params[9],
-              });
-            } else if (table === 'messages') {
-              store.set(id, {
-                id: params[0],
-                session_id: params[1],
-                role: params[2],
-                content: params[3],
-                timestamp: params[4],
-                token_usage: params[5],
-              });
-            }
-          } else if (deleteFrom) {
-            const table = deleteFrom[1];
-            const store = getStore(table);
-            const id = params[0] as string;
-            
-            if (table === 'messages') {
-              // Delete by session_id
-              for (const [key, msg] of store.entries()) {
-                if (msg.session_id === id) {
-                  store.delete(key);
-                }
-              }
-            } else {
-              store.delete(id);
-            }
-          } else if (update) {
-            const table = update[1];
-            const store = getStore(table);
-            // Simplified update - get last param as ID
-            const id = params[params.length - 1] as string;
-            const existing = store.get(id);
-            if (existing) {
-              // Update status and updated_at for sessions
-              if (table === 'sessions' && params.length >= 3) {
-                existing.status = params[0];
-                existing.updated_at = params[1];
-              }
-              store.set(id, existing);
-            }
-          }
-        },
+    sessions: {
+      create: (session: SessionRow) => {
+        insertSession.run(
+          session.id,
+          session.title,
+          session.claude_session_id,
+          session.status,
+          session.cwd,
+          session.mounted_paths,
+          session.allowed_tools,
+          session.memory_enabled,
+          session.created_at,
+          session.updated_at
+        );
+      },
+      
+      update: (id: string, updates: Partial<SessionRow>) => {
+        // Build dynamic update query
+        const setClauses: string[] = [];
+        const values: unknown[] = [];
         
-        get: (...params: unknown[]): Record<string, unknown> | undefined => {
-          if (selectWhere) {
-            const table = selectWhere[1];
-            const store = getStore(table);
-            const id = params[0] as string;
-            return store.get(id);
+        for (const [key, value] of Object.entries(updates)) {
+          if (value !== undefined) {
+            setClauses.push(`${key} = ?`);
+            values.push(value);
           }
-          return undefined;
-        },
+        }
         
-        all: (...params: unknown[]): Record<string, unknown>[] => {
-          if (select) {
-            const table = select[1];
-            const store = getStore(table);
-            
-            if (selectWhere) {
-              // Filter by condition
-              const field = selectWhere[2];
-              const value = params[0];
-              return Array.from(store.values()).filter(
-                (item) => item[field] === value
-              );
-            }
-            
-            return Array.from(store.values());
-          }
-          return [];
-        },
-      };
+        if (setClauses.length === 0) return;
+        
+        // Always update updated_at
+        setClauses.push('updated_at = ?');
+        values.push(Date.now());
+        values.push(id);
+        
+        const sql = `UPDATE sessions SET ${setClauses.join(', ')} WHERE id = ?`;
+        rawDb.prepare(sql).run(...values);
+      },
+      
+      get: (id: string): SessionRow | undefined => {
+        return getSessionStmt.get(id) as SessionRow | undefined;
+      },
+      
+      getAll: (): SessionRow[] => {
+        return getAllSessionsStmt.all() as SessionRow[];
+      },
+      
+      delete: (id: string) => {
+        // Messages will be deleted automatically due to ON DELETE CASCADE
+        deleteSessionStmt.run(id);
+      },
     },
     
-    exec: (_sql: string) => {
-      // No-op for in-memory - tables are implicit
+    messages: {
+      create: (message: MessageRow) => {
+        insertMessage.run(
+          message.id,
+          message.session_id,
+          message.role,
+          message.content,
+          message.timestamp,
+          message.token_usage
+        );
+      },
+      
+      getBySessionId: (sessionId: string): MessageRow[] => {
+        return getMessagesBySessionStmt.all(sessionId) as MessageRow[];
+      },
+      
+      delete: (id: string) => {
+        deleteMessageStmt.run(id);
+      },
+      
+      deleteBySessionId: (sessionId: string) => {
+        deleteMessagesBySessionStmt.run(sessionId);
+      },
     },
     
-    pragma: (_pragma: string) => {
-      // No-op for in-memory
-    },
-    
+    // Compatibility layer for old interface
+    prepare: (sql: string) => rawDb.prepare(sql),
+    exec: (sql: string) => rawDb.exec(sql),
+    pragma: (pragma: string) => rawDb.pragma(pragma),
     close: () => {
-      sessions.clear();
-      messages.clear();
-      memoryEntries.clear();
-      skills.clear();
-      settings.clear();
+      rawDb.close();
+      db = null;
     },
   };
-
-  console.log('In-memory database initialized');
+  
+  console.log('[Database] SQLite database initialized successfully');
   return db;
 }
 
-export function getDatabase(): InMemoryDatabase {
+/**
+ * Get the existing database instance
+ */
+export function getDatabase(): DatabaseInstance {
   if (!db) {
-    throw new Error('Database not initialized');
+    throw new Error('Database not initialized. Call initDatabase() first.');
   }
   return db;
 }
 
-export function closeDatabase() {
+/**
+ * Close the database connection
+ */
+export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    console.log('[Database] Database closed');
   }
 }

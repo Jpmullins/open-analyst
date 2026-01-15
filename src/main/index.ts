@@ -227,6 +227,9 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
       sendToRenderer({ type: 'session.list', payload: { sessions } });
       return sessions;
 
+    case 'session.getMessages':
+      return sessionManager.getMessages(event.payload.sessionId);
+
     case 'permission.response':
       return sessionManager.handlePermissionResponse(
         event.payload.toolUseId,
