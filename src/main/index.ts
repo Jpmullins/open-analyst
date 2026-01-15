@@ -36,13 +36,16 @@ function createWindow() {
     titleBarSymbol: '#1a1a1a',
   };
 
-  mainWindow = new BrowserWindow({
+  // Platform-specific window configuration
+  const isMac = process.platform === 'darwin';
+  const isWindows = process.platform === 'win32';
+
+  // Base window options
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 12 },
     backgroundColor: THEME.background,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -50,7 +53,22 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
     },
-  });
+  };
+
+  if (isMac) {
+    // macOS: Use hiddenInset for native traffic light buttons
+    windowOptions.titleBarStyle = 'hiddenInset';
+    windowOptions.trafficLightPosition = { x: 16, y: 12 };
+  } else if (isWindows) {
+    // Windows: Use frameless window with custom titlebar
+    // Note: frame: false removes native frame, allowing custom titlebar
+    windowOptions.frame = false;
+  } else {
+    // Linux: Use frameless window
+    windowOptions.frame = false;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
 
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
