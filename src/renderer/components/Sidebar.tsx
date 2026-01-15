@@ -98,7 +98,7 @@ export function Sidebar() {
               <p>No tasks yet</p>
             </div>
           ) : (
-            [...sessions].reverse().map((session) => (
+            sessions.map((session) => (
               <div
                 key={session.id}
                 onClick={() => handleSessionClick(session.id)}

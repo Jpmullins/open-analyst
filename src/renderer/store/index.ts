@@ -61,7 +61,7 @@ interface AppState {
 }
 
 const defaultSettings: Settings = {
-  theme: 'dark',
+  theme: 'light',
   defaultTools: ['read', 'glob', 'grep'],
   permissionRules: [
     { tool: 'read', action: 'allow' },

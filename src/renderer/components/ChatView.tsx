@@ -126,7 +126,8 @@ export function ChatView() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  // Enter to send, Shift+Enter for new line
+                  if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit();
                   }
@@ -164,7 +165,7 @@ export function ChatView() {
             </div>
 
             <p className="text-xs text-text-muted text-right mt-2">
-              Claude is AI and can make mistakes. Please double-check responses.
+              Open Cowork is AI-powered and may make mistakes. Please double-check responses.
             </p>
           </form>
         </div>
