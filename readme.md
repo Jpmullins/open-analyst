@@ -36,6 +36,7 @@ It provides a sandboxed workspace where AI can manage files, read documents, and
 ## ✨ Key Features
 
 - **Zero Coding Required**: Pre-built installers for Windows and macOS, just download and run.
+- **Multi-Model Support**: Supports **Claude**, and popular Chinese models like **GLM** and **Kimi**. (**Minimax** support coming soon).
 - **Bring Your Own Key**: Use your OpenRouter or Anthropic API key, pay only for what you use.
 - **File Management**: AI can read, write, and organize files within your workspace.
 - **Skills System**: Built-in workflows for PPTX, DOCX, PDF, XLSX generation and processing.
@@ -46,16 +47,16 @@ It provides a sandboxed workspace where AI can manage files, read documents, and
 
 ## 🎬 Demo
 
-See Open Cowork in action:
+See Open Cowork in action (Video links coming soon):
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=MyuiO70R0h8">
-    <img src="https://img.youtube.com/vi/MyuiO70R0h8/maxresdefault.jpg" alt="Open Cowork Demo 1" width="400" />
-  </a>
-  <a href="https://www.youtube.com/watch?v=piEEor1ohHo">
-    <img src="https://img.youtube.com/vi/piEEor1ohHo/maxresdefault.jpg" alt="Open Cowork Demo 2" width="400" />
-  </a>
-</p>
+### 1. Folder Organization & Cleanup 📂
+https://github.com/user-attachments/assets/dbeb0337-2d19-4b5d-a438-5220f2a87ca7
+
+### 2. Generate PPT from Files 📊
+https://github.com/user-attachments/assets/30299ded-0260-468f-b11d-d282bb9c97f2
+
+### 3. Generate XLSX Spreadsheets 📉
+https://github.com/user-attachments/assets/f57b9106-4b2c-4747-aecd-a07f78af5dfc
 
 ---
 
@@ -140,7 +141,17 @@ We welcome contributions! Whether it's a new Skill, a UI fix, or a security impr
 
 ---
 
-## 📄 License
+## � Community
+
+Join our WeChat group for support and discussion:
+
+<p align="center">
+  <img src="resources/wechat_group.jpg" alt="WeChat Group" width="200" />
+</p>
+
+---
+
+## �📄 License
 
 MIT © Open Cowork Team
 
