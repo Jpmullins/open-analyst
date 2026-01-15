@@ -178,7 +178,7 @@ open-cowork/
 
 ---
 
-## 🤝 Contributing
+## 🛠️ Contributing
 
 We welcome contributions! Whether it's a new Skill, a UI fix, or a security improvement:
 
