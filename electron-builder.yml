@@ -10,6 +10,12 @@ files:
   - dist/**/*
   - dist-electron/**/*
   - package.json
+  - node_modules/@anthropic-ai/claude-code/**/*
+
+# Unpack claude-code so it can be executed as a CLI
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-code/**/*
+  - node_modules/better-sqlite3/**/*
 
 win:
   target:
@@ -17,6 +23,7 @@ win:
       arch:
         - x64
   artifactName: ${productName}-${version}-win-${arch}.${ext}
+  signAndEditExecutable: false
 
 mac:
   target:

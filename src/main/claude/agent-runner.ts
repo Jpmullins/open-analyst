@@ -170,50 +170,144 @@ Then follow the workflow described in that file.
   private getDefaultClaudeCodePath(): string {
     const platform = process.platform;
     const { execSync } = require('child_process');
+    const home = process.env.HOME || process.env.USERPROFILE || '';
     
-    // Try to find claude-code using 'which' command first (works with nvm, etc.)
-    try {
-      const claudePath = execSync('which claude', { encoding: 'utf-8' }).trim();
-      if (claudePath) {
-        console.log('[ClaudeAgentRunner] Found claude via which:', claudePath);
-        return claudePath;
+    // 1. FIRST: Check bundled version in app's node_modules (highest priority)
+    const bundledPaths = [
+      // Production: inside asar or unpacked
+      path.join(app.getAppPath(), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+      // Development: relative to dist-electron
+      path.join(__dirname, '..', '..', '..', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+      // Alternative: resources folder (for unpacked native modules)
+      path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+    ];
+    
+    for (const bundledPath of bundledPaths) {
+      if (fs.existsSync(bundledPath)) {
+        console.log('[ClaudeAgentRunner] Found bundled claude-code at:', bundledPath);
+        return bundledPath;
       }
-    } catch (e) {
-      // which command failed, try fallback paths
     }
     
-    // Try npm root -g to find global node_modules
-    try {
-      const npmRoot = execSync('npm root -g', { encoding: 'utf-8' }).trim();
-      const cliPath = path.join(npmRoot, '@anthropic-ai', 'claude-code', 'cli.js');
-      const fs = require('fs');
-      if (fs.existsSync(cliPath)) {
-        console.log('[ClaudeAgentRunner] Found claude-code via npm root:', cliPath);
-        return cliPath;
+    // 2. Try to find claude using shell with full environment (works with nvm, etc.)
+    if (platform !== 'win32') {
+      try {
+        // Use login shell to get full PATH including nvm, etc.
+        const claudePath = execSync('/bin/bash -l -c "which claude"', { 
+          encoding: 'utf-8',
+          timeout: 5000,
+        }).trim();
+        if (claudePath && fs.existsSync(claudePath)) {
+          console.log('[ClaudeAgentRunner] Found claude via bash -l:', claudePath);
+          return claudePath;
+        }
+      } catch (e) {
+        console.log('[ClaudeAgentRunner] bash -l which failed, trying fallbacks');
       }
-    } catch (e) {
-      // npm root failed
     }
     
-    // Fallback to platform-specific defaults
+    // 3. Try npm root -g with shell environment
+    if (platform !== 'win32') {
+      try {
+        const npmRoot = execSync('/bin/bash -l -c "npm root -g"', { 
+          encoding: 'utf-8',
+          timeout: 5000,
+        }).trim();
+        const cliPath = path.join(npmRoot, '@anthropic-ai', 'claude-code', 'cli.js');
+        if (fs.existsSync(cliPath)) {
+          console.log('[ClaudeAgentRunner] Found claude-code via npm root:', cliPath);
+          return cliPath;
+        }
+      } catch (e) {
+        // npm root failed
+      }
+    }
+    
+    // 4. Build list of possible system paths based on platform
+    const possiblePaths: string[] = [];
+    
     if (platform === 'win32') {
       const appData = process.env.APPDATA || '';
-      return path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+      possiblePaths.push(
+        path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+        path.join(home, 'AppData', 'Roaming', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+      );
     } else if (platform === 'darwin') {
-      // macOS: check common locations
-      const possiblePaths = [
-        '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+      // macOS: check many common locations
+      possiblePaths.push(
+        // Homebrew (Apple Silicon)
         '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js',
-        path.join(process.env.HOME || '', '.nvm/versions/node', process.version, 'lib/node_modules/@anthropic-ai/claude-code/cli.js'),
-      ];
-      const fs = require('fs');
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) return p;
+        // Homebrew (Intel)
+        '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+        // pnpm global
+        path.join(home, 'Library/pnpm/global/5/node_modules/@anthropic-ai/claude-code/cli.js'),
+        path.join(home, '.local/share/pnpm/global/5/node_modules/@anthropic-ai/claude-code/cli.js'),
+      );
+      
+      // Scan nvm versions directory for all installed node versions
+      const nvmDir = path.join(home, '.nvm/versions/node');
+      if (fs.existsSync(nvmDir)) {
+        try {
+          const versions = fs.readdirSync(nvmDir);
+          for (const version of versions) {
+            possiblePaths.push(
+              path.join(nvmDir, version, 'lib/node_modules/@anthropic-ai/claude-code/cli.js')
+            );
+          }
+        } catch (e) {
+          // Failed to read nvm directory
+        }
       }
-      return possiblePaths[0];
+      
+      // fnm (Fast Node Manager)
+      const fnmDir = path.join(home, 'Library/Application Support/fnm/node-versions');
+      if (fs.existsSync(fnmDir)) {
+        try {
+          const versions = fs.readdirSync(fnmDir);
+          for (const version of versions) {
+            possiblePaths.push(
+              path.join(fnmDir, version, 'installation/lib/node_modules/@anthropic-ai/claude-code/cli.js')
+            );
+          }
+        } catch (e) {
+          // Failed to read fnm directory
+        }
+      }
     } else {
-      return '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js';
+      // Linux
+      possiblePaths.push(
+        '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+        '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+        path.join(home, '.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js'),
+      );
+      
+      // nvm on Linux
+      const nvmDir = path.join(home, '.nvm/versions/node');
+      if (fs.existsSync(nvmDir)) {
+        try {
+          const versions = fs.readdirSync(nvmDir);
+          for (const version of versions) {
+            possiblePaths.push(
+              path.join(nvmDir, version, 'lib/node_modules/@anthropic-ai/claude-code/cli.js')
+            );
+          }
+        } catch (e) {
+          // Failed to read nvm directory
+        }
+      }
     }
+    
+    // Check all possible paths
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        console.log('[ClaudeAgentRunner] Found claude-code at:', p);
+        return p;
+      }
+    }
+    
+    // Return empty string if not found - will show error to user
+    console.error('[ClaudeAgentRunner] Claude Code not found. Searched paths:', possiblePaths);
+    return '';
   }
 
   constructor(options: AgentRunnerOptions, pathResolver: PathResolver) {
@@ -285,6 +379,19 @@ Then follow the workflow described in that file.
       // Use query from @anthropic-ai/claude-agent-sdk
       const claudeCodePath = process.env.CLAUDE_CODE_PATH || this.getDefaultClaudeCodePath();
       console.log('[ClaudeAgentRunner] Claude Code path:', claudeCodePath);
+      
+      // Check if Claude Code is found
+      if (!claudeCodePath || !fs.existsSync(claudeCodePath)) {
+        const errorMsg = !claudeCodePath 
+          ? 'Claude Code 未找到。请先安装: npm install -g @anthropic-ai/claude-code，或在设置中手动指定路径。'
+          : `Claude Code 路径不存在: ${claudeCodePath}。请检查路径或在设置中重新配置。`;
+        console.error('[ClaudeAgentRunner]', errorMsg);
+        this.sendToRenderer({
+          type: 'error',
+          payload: { message: errorMsg },
+        });
+        throw new Error(errorMsg);
+      }
 
       // SANDBOX: Path validation function
       const isPathInsideWorkspace = (targetPath: string): boolean => {
