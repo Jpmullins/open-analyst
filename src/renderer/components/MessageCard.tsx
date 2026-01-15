@@ -32,8 +32,8 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
   return (
     <div className="animate-fade-in">
       {isUser ? (
-        // User message - orange/cream background
-        <div className="bg-accent-muted border border-accent/20 rounded-2xl p-4 max-w-[90%]">
+        // User message - neutral gray background, fit content width with min width
+        <div className="message-user p-4 max-w-[90%] min-w-[120px] inline-block">
           {message.content.length === 0 ? (
             <span className="text-text-muted italic">Empty message</span>
           ) : (
@@ -479,7 +479,7 @@ function ToolResultBlock({ block }: { block: ToolResultContent }) {
       <button
         onClick={() => setExpanded(!expanded)}
         className={`w-full px-4 py-3 flex items-center gap-3 transition-colors ${
-          block.isError ? 'bg-red-50 hover:bg-red-100' : 'bg-green-50 hover:bg-green-100'
+          block.isError ? 'bg-error/10 hover:bg-error/20' : 'bg-success/10 hover:bg-success/20'
         }`}
       >
         {block.isError ? (

@@ -79,8 +79,9 @@ export class ClaudeAgentRunner {
       // No need to send it again from backend
 
       // Send initial thinking trace
+      const thinkingStepId = uuidv4();
       this.sendTraceStep(session.id, {
-        id: uuidv4(),
+        id: thinkingStepId,
         type: 'thinking',
         status: 'running',
         title: 'Processing request...',
@@ -522,16 +523,13 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             for (const block of content) {
               if (block.type === 'tool_result') {
                 const isError = block.is_error === true;
-                
-                this.sendTraceStep(session.id, {
-                  id: uuidv4(),
-                  type: 'tool_result',
+
+                // Update the existing tool_call trace step instead of creating a new one
+                this.sendTraceUpdate(session.id, block.tool_use_id, {
                   status: isError ? 'error' : 'completed',
-                  title: isError ? 'Tool failed' : 'Tool done',
-                  toolOutput: typeof block.content === 'string' 
-                    ? block.content.slice(0, 800) 
+                  toolOutput: typeof block.content === 'string'
+                    ? block.content.slice(0, 800)
                     : JSON.stringify(block.content).slice(0, 800),
-                  timestamp: Date.now(),
                 });
 
                 // Send tool result message
@@ -557,13 +555,10 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
         }
       }
 
-      // Complete
-      this.sendTraceStep(session.id, {
-        id: uuidv4(),
-        type: 'thinking',
+      // Complete - update the initial thinking step
+      this.sendTraceUpdate(session.id, thinkingStepId, {
         status: 'completed',
         title: 'Task completed',
-        timestamp: Date.now(),
       });
 
     } catch (error) {
@@ -604,6 +599,11 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
   private sendTraceStep(sessionId: string, step: TraceStep): void {
     console.log(`[Trace] ${step.type}: ${step.title}`);
     this.sendToRenderer({ type: 'trace.step', payload: { sessionId, step } });
+  }
+
+  private sendTraceUpdate(sessionId: string, stepId: string, updates: Partial<TraceStep>): void {
+    console.log(`[Trace] Update step ${stepId}:`, updates);
+    this.sendToRenderer({ type: 'trace.update', payload: { sessionId, stepId, updates } });
   }
 
   private sendMessage(sessionId: string, message: Message): void {

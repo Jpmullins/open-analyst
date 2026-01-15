@@ -5,12 +5,50 @@
 @tailwind utilities;
 
 @layer base {
+  /* Define CSS variables for theming */
+  :root {
+    /* Dark theme (default) */
+    --color-background: #0f0f0f;
+    --color-background-secondary: #1a1a1a;
+    --color-surface: #1e1e1e;
+    --color-surface-hover: #2a2a2a;
+    --color-surface-active: #303030;
+    --color-surface-muted: #171717;
+    --color-border: #2a2a2a;
+    --color-border-muted: #242424;
+    --color-accent: #f97316;
+    --color-accent-hover: #ea580c;
+    --color-accent-muted: rgba(249, 115, 22, 0.1);
+    --color-text-primary: #ececec;
+    --color-text-secondary: #a0a0a0;
+    --color-text-muted: #6b6b6b;
+  }
+
+  /* Light theme override */
+  .light {
+    --color-background: #f5f3ee;
+    --color-background-secondary: #faf9f6;
+    --color-surface: #ffffff;
+    --color-surface-hover: #faf9f6;
+    --color-surface-active: #f0eeea;
+    --color-surface-muted: #f7f6f3;
+    --color-border: #e5e3de;
+    --color-border-muted: #ebe9e4;
+    --color-accent: #f97316;
+    --color-accent-hover: #ea580c;
+    --color-accent-muted: #fff7ed;
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #5c5c5c;
+    --color-text-muted: #8c8c8c;
+  }
+
   * {
     @apply border-border;
   }
 
   body {
-    @apply bg-background text-text-primary;
+    background-color: var(--color-background);
+    color: var(--color-text-primary);
     font-family: 'Inter', system-ui, sans-serif;
   }
 
@@ -37,7 +75,7 @@
   /* Button styles */
   .btn {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium transition-all duration-150;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent/30;
+    @apply focus:outline-none focus:ring-2 focus:ring-accent focus:ring-opacity-30;
   }
 
   .btn-primary {
@@ -57,17 +95,21 @@
   .input {
     @apply w-full px-4 py-3 rounded-xl bg-surface border border-border;
     @apply text-text-primary placeholder:text-text-muted;
-    @apply focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10;
+    @apply focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent focus:ring-opacity-10;
     @apply transition-all duration-150;
   }
 
   /* Card styles */
   .card {
-    @apply bg-surface rounded-2xl border border-border shadow-card;
+    @apply bg-surface rounded-3xl shadow-card;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .card-hover {
-    @apply hover:shadow-elevated hover:border-border-muted cursor-pointer transition-all duration-150;
+    @apply hover:shadow-elevated cursor-pointer transition-all duration-150;
+    &:hover {
+      border-color: rgba(255, 255, 255, 0.12);
+    }
   }
 
   /* Tag/Chip styles - like the quick action buttons */
@@ -78,7 +120,8 @@
   }
 
   .tag-active {
-    @apply bg-accent-muted border-accent/30 text-accent;
+    @apply bg-accent-muted text-accent;
+    border-color: rgba(249, 115, 22, 0.3);
   }
 
   /* Badge styles */
@@ -95,11 +138,11 @@
   }
 
   .badge-completed {
-    @apply bg-green-50 text-success;
+    @apply bg-success/10 text-success;
   }
 
   .badge-error {
-    @apply bg-red-50 text-error;
+    @apply bg-error/10 text-error;
   }
 
   /* Section header */
@@ -121,7 +164,7 @@
   }
 
   .progress-circle-completed {
-    @apply border-success bg-green-50;
+    @apply border-success bg-success/10;
   }
 }
 
@@ -137,15 +180,18 @@
 
   /* Message bubbles */
   .message-user {
-    @apply bg-accent-muted border border-accent/10 rounded-2xl;
+    @apply bg-surface rounded-3xl;
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .message-assistant {
-    @apply bg-surface border border-border rounded-2xl;
+    @apply bg-surface rounded-3xl;
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
 
   /* Code block */
   .code-block {
-    @apply bg-surface-muted rounded-xl p-4 font-mono text-sm overflow-x-auto;
+    @apply bg-surface-muted rounded-2xl p-4 font-mono text-sm overflow-x-auto;
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
 }

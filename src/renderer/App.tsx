@@ -8,7 +8,7 @@ import { PermissionDialog } from './components/PermissionDialog';
 import { ContextPanel } from './components/ContextPanel';
 
 function App() {
-  const { activeSessionId, pendingPermission } = useAppStore();
+  const { activeSessionId, pendingPermission, settings } = useAppStore();
   const { listSessions, isElectron } = useIPC();
   const initialized = useRef(false);
 
@@ -16,11 +16,20 @@ function App() {
     // Only run once on mount
     if (initialized.current) return;
     initialized.current = true;
-    
+
     if (isElectron) {
       listSessions();
     }
   }, []); // Empty deps - run once
+
+  // Apply theme to document root
+  useEffect(() => {
+    if (settings.theme === 'light') {
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+    }
+  }, [settings.theme]);
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-background">
@@ -28,7 +37,7 @@ function App() {
       <Sidebar />
       
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-grid">
+      <main className="flex-1 flex flex-col overflow-hidden bg-background">
         {activeSessionId ? <ChatView /> : <WelcomeView />}
       </main>
 

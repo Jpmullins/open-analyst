@@ -75,7 +75,9 @@ export function ChatView() {
             </div>
           ) : (
             messages.map((message) => (
-              <MessageCard key={message.id} message={message} />
+              <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : ''}>
+                <MessageCard message={message} />
+              </div>
             ))
           )}
           
@@ -97,18 +99,18 @@ export function ChatView() {
         </div>
       </div>
 
-      {/* Input */}
+      {/* Input - Right aligned */}
       <div className="border-t border-border bg-surface/80 backdrop-blur-sm">
-        <div className="max-w-3xl mx-auto p-4">
-          <form onSubmit={handleSubmit} className="relative">
-            <div className="flex items-end gap-2 p-3 rounded-2xl border border-border bg-surface">
+        <div className="w-full p-4 flex justify-end">
+          <form onSubmit={handleSubmit} className="relative w-full max-w-3xl">
+            <div className="flex items-end gap-2 p-3 rounded-3xl bg-surface" style={{ border: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <button
                 type="button"
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
               >
                 <Plus className="w-5 h-5" />
               </button>
-              
+
               <textarea
                 ref={textareaRef}
                 value={prompt}
@@ -124,17 +126,17 @@ export function ChatView() {
                 rows={1}
                 className="flex-1 resize-none bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted text-sm py-1.5"
               />
-              
+
               <div className="flex items-center gap-2">
                 {/* Model selector */}
                 <button
                   type="button"
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-muted hover:bg-surface-hover transition-colors"
                 >
-                  <span>Sonnet 4</span>
+                  <span>Opus 4.5</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
-                
+
                 {isRunning ? (
                   <button
                     type="button"
@@ -154,11 +156,11 @@ export function ChatView() {
                 )}
               </div>
             </div>
+
+            <p className="text-xs text-text-muted text-right mt-2">
+              Claude is AI and can make mistakes. Please double-check responses.
+            </p>
           </form>
-          
-          <p className="text-xs text-text-muted text-center mt-2">
-            Claude is AI and can make mistakes. Please double-check responses.
-          </p>
         </div>
       </div>
     </div>

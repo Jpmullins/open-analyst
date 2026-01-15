@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -7,36 +8,35 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Warm cream/beige theme inspired by Claude Cowork
+        // Use CSS variables for theme-aware colors
         background: {
-          DEFAULT: '#f5f3ee',
-          secondary: '#faf9f6',
-          grid: '#e8e6e1',
+          DEFAULT: 'var(--color-background)',
+          secondary: 'var(--color-background-secondary)',
         },
         surface: {
-          DEFAULT: '#ffffff',
-          hover: '#faf9f6',
-          active: '#f0eeea',
-          muted: '#f7f6f3',
+          DEFAULT: 'var(--color-surface)',
+          hover: 'var(--color-surface-hover)',
+          active: 'var(--color-surface-active)',
+          muted: 'var(--color-surface-muted)',
         },
         border: {
-          DEFAULT: '#e5e3de',
-          muted: '#ebe9e4',
+          DEFAULT: 'var(--color-border)',
+          muted: 'var(--color-border-muted)',
         },
         accent: {
-          DEFAULT: '#c45a35',
-          light: '#e8d5c4',
-          hover: '#b54e2a',
-          muted: '#f5ebe3',
+          DEFAULT: 'var(--color-accent)',
+          light: '#fb923c',
+          hover: 'var(--color-accent-hover)',
+          muted: 'var(--color-accent-muted)',
         },
         text: {
-          primary: '#1a1a1a',
-          secondary: '#5c5c5c',
-          muted: '#8c8c8c',
+          primary: 'var(--color-text-primary)',
+          secondary: 'var(--color-text-secondary)',
+          muted: 'var(--color-text-muted)',
         },
-        success: '#2d8a4e',
-        warning: '#c9a227',
-        error: '#c43535',
+        success: '#22c55e',
+        warning: '#eab308',
+        error: '#ef4444',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

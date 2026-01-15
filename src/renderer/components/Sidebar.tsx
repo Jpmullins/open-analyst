@@ -7,13 +7,19 @@ import {
   Trash2,
   User,
   Sparkles,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import type { Session } from '../types';
 
 export function Sidebar() {
-  const { sessions, activeSessionId, setActiveSession } = useAppStore();
+  const { sessions, activeSessionId, settings, setActiveSession, updateSettings } = useAppStore();
   const { deleteSession } = useIPC();
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
+
+  const toggleTheme = () => {
+    updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });
+  };
 
   const handleNewSession = () => {
     setActiveSession(null);
@@ -26,19 +32,20 @@ export function Sidebar() {
 
   return (
     <div className="w-64 bg-surface border-r border-border flex flex-col">
-      {/* Header with Tabs */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center gap-1 p-1 bg-surface-muted rounded-xl">
-          <button className="flex-1 px-3 py-1.5 text-sm font-medium text-text-muted rounded-lg hover:bg-surface transition-colors">
-            Chat
-          </button>
-          <button className="flex-1 px-3 py-1.5 text-sm font-medium text-text-muted rounded-lg hover:bg-surface transition-colors">
-            Code
-          </button>
-          <button className="flex-1 px-3 py-1.5 text-sm font-medium text-text-primary bg-surface rounded-lg shadow-soft">
-            Cowork
-          </button>
-        </div>
+      {/* Header with App Title and Dark Mode Toggle */}
+      <div className="px-4 pt-6 pb-4 border-b border-border flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-text-primary">Cowork</h1>
+        <button
+          onClick={toggleTheme}
+          className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-hover transition-colors text-text-secondary"
+          title={settings.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {settings.theme === 'dark' ? (
+            <Sun className="w-4 h-4" />
+          ) : (
+            <Moon className="w-4 h-4" />
+          )}
+        </button>
       </div>
 
       {/* New Task Button */}

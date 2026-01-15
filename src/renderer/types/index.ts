@@ -173,6 +173,7 @@ export type ServerEvent =
   | { type: 'permission.request'; payload: PermissionRequest }
   | { type: 'question.request'; payload: UserQuestionRequest }
   | { type: 'trace.step'; payload: { sessionId: string; step: TraceStep } }
+  | { type: 'trace.update'; payload: { sessionId: string; stepId: string; updates: Partial<TraceStep> } }
   | { type: 'folder.selected'; payload: { path: string } }
   | { type: 'error'; payload: { message: string } };
 

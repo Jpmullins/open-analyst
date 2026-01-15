@@ -59,6 +59,10 @@ export function useIPC() {
           store.addTraceStep(event.payload.sessionId, event.payload.step);
           break;
 
+        case 'trace.update':
+          store.updateTraceStep(event.payload.sessionId, event.payload.stepId, event.payload.updates);
+          break;
+
         case 'permission.request':
           store.setPendingPermission(event.payload);
           break;
