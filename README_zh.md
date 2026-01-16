@@ -96,11 +96,11 @@ npm run dev
 
 | 服务商 | 获取 Key / Coding Plan | Base URL (必填) | 推荐模型 Model |
 |-------|------------------------|-----------------|---------------|
-| **OpenRouter** | [OpenRouter](https://openrouter.ai/) | `https://openrouter.ai/api` | `claude-3-5-sonnet` |
-| **Anthropic** | [Anthropic Console](https://console.anthropic.com/) | 默认 | `claude-3-5-sonnet` |
+| **OpenRouter** | [OpenRouter](https://openrouter.ai/) | `https://openrouter.ai/api` | `claude-4-5-sonnet` |
+| **Anthropic** | [Anthropic Console](https://console.anthropic.com/) | 默认 | `claude-4-5-sonnet` |
 | **智谱 AI** | [GLM Coding Plan](https://bigmodel.cn/glm-coding) (⚡️国产特惠) | `https://open.bigmodel.cn/api/anthropic` | `glm-4.7`, `glm-4.6` |
 | **MiniMax** | [MiniMax Coding Plan](https://platform.minimaxi.com/subscribe/coding-plan) | `https://api.minimaxi.com/anthropic` | `minimax-m2` |
-| **Kimi** | [Kimi Coding Plan](https://www.kimi.com/membership/pricing) | `https://api.kimi.com/coding/` | `moonshot-v1-8k` |
+| **Kimi** | [Kimi Coding Plan](https://www.kimi.com/membership/pricing) | `https://api.kimi.com/coding/` | `kimi-k2` |
 
 ### 2. 配置应用
 1. 打开应用，点击左下角 ⚙️ **设置**。
