@@ -5,7 +5,7 @@ import Store from 'electron-store';
  */
 export interface AppConfig {
   // API Provider
-  provider: 'openrouter' | 'anthropic' | 'custom';
+  provider: 'openrouter' | 'anthropic' | 'custom' | 'openai';
   
   // API credentials
   apiKey: string;
@@ -13,6 +13,9 @@ export interface AppConfig {
   
   // Model selection
   model: string;
+
+  // OpenAI API mode
+  openaiMode: 'responses' | 'chat';
   
   // Optional: Claude Code CLI path override
   claudeCodePath?: string;
@@ -29,6 +32,7 @@ const defaultConfig: AppConfig = {
   apiKey: '',
   baseUrl: 'https://openrouter.ai/api',
   model: 'anthropic/claude-sonnet-4.5',
+  openaiMode: 'responses',
   claudeCodePath: '',
   defaultWorkdir: '',
   isConfigured: false,
@@ -57,6 +61,16 @@ export const PROVIDER_PRESETS = {
     ],
     keyPlaceholder: 'sk-ant-...',
     keyHint: '从 console.anthropic.com 获取',
+  },
+  openai: {
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    models: [
+      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4o', name: 'GPT-4o' },
+    ],
+    keyPlaceholder: 'sk-...',
+    keyHint: '从 platform.openai.com 获取',
   },
   custom: {
     name: '更多模型',
@@ -92,6 +106,7 @@ class ConfigStore {
       apiKey: this.store.get('apiKey'),
       baseUrl: this.store.get('baseUrl'),
       model: this.store.get('model'),
+      openaiMode: this.store.get('openaiMode'),
       claudeCodePath: this.store.get('claudeCodePath'),
       defaultWorkdir: this.store.get('defaultWorkdir'),
       isConfigured: this.store.get('isConfigured'),
@@ -134,8 +149,9 @@ class ConfigStore {
    * Apply config to environment variables
    * This should be called before creating sessions
    * 
-   * Environment variable mapping by provider:
-   * - Anthropic direct: ANTHROPIC_API_KEY = apiKey (standard SDK var)
+   * 环境变量映射：
+   * - OpenAI 直连: OPENAI_API_KEY = apiKey, OPENAI_BASE_URL 可选
+   * - Anthropic 直连: ANTHROPIC_API_KEY = apiKey
    * - OpenRouter/Custom: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
    */
   applyToEnv(): void {
@@ -145,28 +161,49 @@ class ConfigStore {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
     delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.CLAUDE_MODEL;
+    delete process.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_MODEL;
+    delete process.env.OPENAI_API_MODE;
     
-    if (config.provider === 'anthropic') {
-      // Anthropic direct API: use ANTHROPIC_API_KEY (standard SDK behavior)
+    if (config.provider === 'openai') {
       if (config.apiKey) {
-        process.env.ANTHROPIC_API_KEY = config.apiKey;
-      }
-      // No base URL needed, SDK uses default https://api.anthropic.com
-    } else {
-      // OpenRouter / Custom: use ANTHROPIC_AUTH_TOKEN for proxy authentication
-      if (config.apiKey) {
-        process.env.ANTHROPIC_AUTH_TOKEN = config.apiKey;
+        process.env.OPENAI_API_KEY = config.apiKey;
       }
       if (config.baseUrl) {
-        process.env.ANTHROPIC_BASE_URL = config.baseUrl;
+        process.env.OPENAI_BASE_URL = config.baseUrl;
       }
-      // ANTHROPIC_API_KEY must be empty to prevent SDK from using it
-      process.env.ANTHROPIC_API_KEY = '';
-    }
-    
-    if (config.model) {
-      process.env.CLAUDE_MODEL = config.model;
-      process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = config.model;
+      if (config.model) {
+        process.env.OPENAI_MODEL = config.model;
+      }
+      if (config.openaiMode) {
+        process.env.OPENAI_API_MODE = config.openaiMode;
+      }
+    } else {
+      if (config.provider === 'anthropic') {
+        // Anthropic direct API: use ANTHROPIC_API_KEY (standard SDK behavior)
+        if (config.apiKey) {
+          process.env.ANTHROPIC_API_KEY = config.apiKey;
+        }
+        // No base URL needed, SDK uses default https://api.anthropic.com
+      } else {
+        // OpenRouter / Custom: use ANTHROPIC_AUTH_TOKEN for proxy authentication
+        if (config.apiKey) {
+          process.env.ANTHROPIC_AUTH_TOKEN = config.apiKey;
+        }
+        if (config.baseUrl) {
+          process.env.ANTHROPIC_BASE_URL = config.baseUrl;
+        }
+        // ANTHROPIC_API_KEY must be empty to prevent SDK from using it
+        process.env.ANTHROPIC_API_KEY = '';
+      }
+
+      if (config.model) {
+        process.env.CLAUDE_MODEL = config.model;
+        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = config.model;
+      }
     }
     
     // Only set CLAUDE_CODE_PATH if the configured path actually exists
@@ -190,6 +227,10 @@ class ConfigStore {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? '✓ Set' : '(empty/unset)',
       ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ? '✓ Set' : '(empty/unset)',
       ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || '(default)',
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY ? '✓ Set' : '(empty/unset)',
+      OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || '(default)',
+      OPENAI_MODEL: process.env.OPENAI_MODEL || '(not set)',
+      OPENAI_API_MODE: process.env.OPENAI_API_MODE || '(default)',
     });
   }
 
@@ -210,4 +251,3 @@ class ConfigStore {
 
 // Singleton instance
 export const configStore = new ConfigStore();
-

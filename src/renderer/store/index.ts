@@ -62,7 +62,19 @@ interface AppState {
 
 const defaultSettings: Settings = {
   theme: 'light',
-  defaultTools: ['read', 'glob', 'grep'],
+  defaultTools: [
+    'askuserquestion',
+    'todowrite',
+    'todoread',
+    'webfetch',
+    'websearch',
+    'read',
+    'write',
+    'edit',
+    'list_directory',
+    'glob',
+    'grep',
+  ],
   permissionRules: [
     { tool: 'read', action: 'allow' },
     { tool: 'glob', action: 'allow' },
@@ -186,4 +198,3 @@ export const useAppStore = create<AppState>((set) => ({
   setIsConfigured: (configured) => set({ isConfigured: configured }),
   setShowConfigModal: (show) => set({ showConfigModal: show }),
 }));
-

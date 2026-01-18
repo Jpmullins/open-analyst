@@ -3,12 +3,20 @@ import type { Session, Message, ServerEvent, PermissionResult, ContentBlock, Tex
 import type { DatabaseInstance } from '../db/database';
 import { PathResolver } from '../sandbox/path-resolver';
 import { ClaudeAgentRunner } from '../claude/agent-runner';
+import { OpenAIResponsesRunner } from '../openai/responses-runner';
+import { configStore } from '../config/config-store';
+
+interface AgentRunner {
+  run(session: Session, prompt: string, existingMessages: Message[]): Promise<void>;
+  cancel(sessionId: string): void;
+  handleQuestionResponse(questionId: string, answer: string): void;
+}
 
 export class SessionManager {
   private db: DatabaseInstance;
   private sendToRenderer: (event: ServerEvent) => void;
   private pathResolver: PathResolver;
-  private agentRunner: ClaudeAgentRunner;
+  private agentRunner: AgentRunner;
   private activeSessions: Map<string, AbortController> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
 
@@ -17,14 +25,27 @@ export class SessionManager {
     this.sendToRenderer = sendToRenderer;
     this.pathResolver = new PathResolver();
     
-    // Initialize Claude Agent Runner with message save callback
-    this.agentRunner = new ClaudeAgentRunner(
-      { 
+    const provider = configStore.get('provider');
+    if (provider === 'openai') {
+      this.agentRunner = new OpenAIResponsesRunner({
         sendToRenderer: this.sendToRenderer,
         saveMessage: (message: Message) => this.saveMessage(message),
-      },
-      this.pathResolver
-    );
+        pathResolver: this.pathResolver,
+        requestPermission: (sessionId, toolUseId, toolName, input) =>
+          this.requestPermission(sessionId, toolUseId, toolName, input),
+      });
+      console.log('[SessionManager] Using OpenAI Responses runner');
+    } else {
+      // Initialize Claude Agent Runner with message save callback
+      this.agentRunner = new ClaudeAgentRunner(
+        { 
+          sendToRenderer: this.sendToRenderer,
+          saveMessage: (message: Message) => this.saveMessage(message),
+        },
+        this.pathResolver
+      );
+      console.log('[SessionManager] Using Claude Agent runner');
+    }
     
     console.log('[SessionManager] Initialized with persistent database');
   }
@@ -61,7 +82,19 @@ export class SessionManager {
       status: 'idle',
       cwd: effectiveCwd,
       mountedPaths: effectiveCwd ? [{ virtual: `/mnt/workspace`, real: effectiveCwd }] : [],
-      allowedTools: allowedTools || ['read', 'glob', 'grep'],
+      allowedTools: allowedTools || [
+        'askuserquestion',
+        'todowrite',
+        'todoread',
+        'webfetch',
+        'websearch',
+        'read',
+        'write',
+        'edit',
+        'list_directory',
+        'glob',
+        'grep',
+      ],
       memoryEnabled: false,
       createdAt: now,
       updatedAt: now,

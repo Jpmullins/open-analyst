@@ -114,6 +114,10 @@ app.whenReady().then(async () => {
   console.log('  ANTHROPIC_BASE_URL:', process.env.ANTHROPIC_BASE_URL || '(not set)');
   console.log('  CLAUDE_MODEL:', process.env.CLAUDE_MODEL || '(not set)');
   console.log('  CLAUDE_CODE_PATH:', process.env.CLAUDE_CODE_PATH || '(not set)');
+  console.log('  OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? '✓ Set' : '✗ Not set');
+  console.log('  OPENAI_BASE_URL:', process.env.OPENAI_BASE_URL || '(not set)');
+  console.log('  OPENAI_MODEL:', process.env.OPENAI_MODEL || '(not set)');
+  console.log('  OPENAI_API_MODE:', process.env.OPENAI_API_MODE || '(default)');
   console.log('===========================');
   
   // Initialize database

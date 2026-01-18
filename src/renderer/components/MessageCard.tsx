@@ -173,6 +173,15 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       'Grep': 'Searching content',
       'WebFetch': 'Fetching URL',
       'WebSearch': 'Searching web',
+      'TodoRead': 'Reading todo list',
+      'TodoWrite': 'Updating todo list',
+      'read_file': 'Reading file',
+      'write_file': 'Writing file',
+      'edit_file': 'Editing file',
+      'list_directory': 'Listing directory',
+      'glob': 'Searching files',
+      'grep': 'Searching content',
+      'execute_command': 'Running command',
     };
     return titles[name] || `Using ${name}`;
   };

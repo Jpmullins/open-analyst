@@ -20,9 +20,25 @@ export function PermissionDialog({ permission }: PermissionDialogProps) {
     bash: 'Execute shell commands',
     webFetch: 'Fetch data from the web',
     webSearch: 'Search the web',
+    TodoRead: 'Read the current todo list',
+    TodoWrite: 'Update the current todo list',
+    read_file: 'Read files in the workspace',
+    write_file: 'Write files in the workspace',
+    edit_file: 'Edit files in the workspace',
+    list_directory: 'List directory contents in the workspace',
+    execute_command: 'Execute shell commands in the workspace',
+    glob: 'Search files by pattern',
+    grep: 'Search file contents',
   };
 
-  const isHighRisk = ['bash', 'write', 'edit'].includes(permission.toolName);
+  const isHighRisk = [
+    'bash',
+    'write',
+    'edit',
+    'execute_command',
+    'write_file',
+    'edit_file',
+  ].includes(permission.toolName);
 
   return (
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">

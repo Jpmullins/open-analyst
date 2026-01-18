@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Key, Server, Cpu, CheckCircle, AlertCircle, Loader2, Edit3 } from 'lucide-react';
 import type { AppConfig, ProviderPresets } from '../types';
 
@@ -14,35 +14,41 @@ interface ConfigModalProps {
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
 export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun }: ConfigModalProps) {
-  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom'>('openrouter');
+  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom' | 'openai'>('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
+  const [openaiMode, setOpenaiMode] = useState<'responses' | 'chat'>('responses');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
   const [presets, setPresets] = useState<ProviderPresets | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const skipPresetApplyRef = useRef(false);
 
   // Load presets and initial config
   useEffect(() => {
     if (isOpen && isElectron) {
+      setIsInitialLoad(true);
       loadPresets();
     }
   }, [isOpen]);
 
   // Apply initial config
   useEffect(() => {
-    if (initialConfig) {
+    if (initialConfig && presets) {
+      skipPresetApplyRef.current = true;
       setProvider(initialConfig.provider);
       setApiKey(initialConfig.apiKey || '');
       setBaseUrl(initialConfig.baseUrl || '');
-      
+      setOpenaiMode(initialConfig.openaiMode || 'responses');
+
       // Check if model is in preset list or custom
       const preset = presets?.[initialConfig.provider];
       const isPresetModel = preset?.models.some(m => m.id === initialConfig.model);
-      
+
       if (isPresetModel) {
         setModel(initialConfig.model || '');
         setUseCustomModel(false);
@@ -51,12 +57,19 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         setUseCustomModel(true);
         setCustomModel(initialConfig.model);
       }
+
+      // Mark initial load as complete
+      setIsInitialLoad(false);
     }
   }, [initialConfig, presets]);
 
-  // Update baseUrl and model when provider changes
+  // Update baseUrl and model when provider changes (but not on initial load)
   useEffect(() => {
-    if (presets) {
+    if (presets && !isInitialLoad) {
+      if (skipPresetApplyRef.current) {
+        skipPresetApplyRef.current = false;
+        return;
+      }
       const preset = presets[provider];
       if (preset) {
         setBaseUrl(preset.baseUrl);
@@ -65,7 +78,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         setModel(preset.models[0]?.id || '');
       }
     }
-  }, [provider, presets]);
+  }, [provider, presets, isInitialLoad]);
 
   async function loadPresets() {
     try {
@@ -99,6 +112,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
         model: finalModel,
+        openaiMode,
       });
       setSuccess(true);
       setTimeout(() => {
@@ -151,7 +165,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               API 提供商
             </label>
             <div className="grid grid-cols-3 gap-2">
-              {(['openrouter', 'anthropic', 'custom'] as const).map((p) => (
+              {(['openrouter', 'anthropic', 'openai', 'custom'] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => setProvider(p)}
@@ -185,8 +199,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
             )}
           </div>
 
-          {/* Base URL - Only editable for custom provider */}
-          {provider === 'custom' && (
+          {/* Base URL - Editable for custom and openai providers */}
+          {(provider === 'custom' || provider === 'openai') && (
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
                 <Server className="w-4 h-4" />
@@ -196,10 +210,46 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://open.bigmodel.cn/api/anthropic"
+                placeholder={
+                  provider === 'openai'
+                    ? 'https://api.openai.com/v1'
+                    : 'https://open.bigmodel.cn/api/anthropic'
+                }
                 className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
               />
-              <p className="text-xs text-text-muted">输入兼容 Anthropic API 的服务地址</p>
+              <p className="text-xs text-text-muted">
+                {provider === 'openai'
+                  ? '输入兼容 OpenAI API 的服务地址'
+                  : '输入兼容 Anthropic API 的服务地址'}
+              </p>
+            </div>
+          )}
+
+          {provider === 'openai' && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                <Server className="w-4 h-4" />
+                API 模式
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { id: 'responses', label: 'Responses' },
+                  { id: 'chat', label: 'Chat Completions' },
+                ] as const).map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setOpenaiMode(mode.id)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      openaiMode === mode.id
+                        ? 'bg-accent text-white'
+                        : 'bg-surface-hover text-text-secondary hover:bg-surface-active'
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-text-muted">第三方接口通常只支持 Chat Completions</p>
             </div>
           )}
 
@@ -228,7 +278,13 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 type="text"
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
-                placeholder={provider === 'openrouter' ? 'openai/gpt-4o 或其他模型ID' : 'claude-sonnet-4'}
+                placeholder={
+                  provider === 'openrouter'
+                    ? 'openai/gpt-4o 或其他模型ID'
+                    : provider === 'openai'
+                      ? 'gpt-4o'
+                      : 'claude-sonnet-4'
+                }
                 className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
               />
             ) : (
@@ -292,5 +348,3 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
     </div>
   );
 }
-
-

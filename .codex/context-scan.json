@@ -1,0 +1,68 @@
+{
+  "task": "补齐 OpenAI 工具与 Claude 工具对齐（WebFetch/WebSearch/Task/Skill）并修复工具 schema strict required 错误",
+  "locations": [
+    {
+      "path": "src/main/openai/responses-runner.ts",
+      "description": "OpenAI 工具 schema、执行闭环、AskUserQuestion/Todo 工具实现。"
+    },
+    {
+      "path": "src/main/tools/tool-executor.ts",
+      "description": "工具执行入口，需要扩展 WebFetch/WebSearch 等工具。"
+    },
+    {
+      "path": "src/main/claude/agent-runner.ts",
+      "description": "Claude 侧工具列表与提示词，作为对齐参考。"
+    },
+    {
+      "path": "src/main/session/session-manager.ts",
+      "description": "默认 allowedTools 列表，决定会话是否允许工具。"
+    },
+    {
+      "path": "src/renderer/components/MessageCard.tsx",
+      "description": "工具展示标题映射（已包含 WebFetch/WebSearch）。"
+    },
+    {
+      "path": "src/renderer/components/PermissionDialog.tsx",
+      "description": "工具权限描述与高风险标记。"
+    },
+    {
+      "path": "src/renderer/store/index.ts",
+      "description": "前端默认工具列表与权限策略。"
+    },
+    {
+      "path": "src/main/skills/skills-manager.ts",
+      "description": "技能管理基础设施（Skill 工具潜在依赖）。"
+    }
+  ],
+  "currentImplementation": [
+    {
+      "path": "src/main/openai/responses-runner.ts",
+      "summary": "OpenAI 已支持 read/write/edit/execute_command/glob/grep/list_directory + AskUserQuestion + TodoRead/TodoWrite，但 WebFetch/WebSearch/Task/Skill 尚未实现。"
+    },
+    {
+      "path": "src/main/tools/tool-executor.ts",
+      "summary": "仅支持文件/命令/搜索类工具，缺少 WebFetch/WebSearch 实现。"
+    }
+  ],
+  "similarExamples": [
+    {
+      "path": "src/main/claude/agent-runner.ts",
+      "summary": "Claude 允许工具列表包含 WebFetch/WebSearch/Task/Skill，可作为 OpenAI 对齐参考。"
+    }
+  ],
+  "techStack": [
+    "Electron (TypeScript)",
+    "OpenAI Responses API (openai SDK)",
+    "Node.js fetch",
+    "Local ToolExecutor + permission dialog"
+  ],
+  "tests": {
+    "searchCommand": "rg --files -g '*test*' -g '*spec*' -g '*__tests__*'",
+    "results": "仅发现 vitest.config.ts，未发现测试用例文件。"
+  },
+  "observations": [
+    "当前 provider 对 JSON Schema 要求严格：每个 properties 必须完整 required 列表。",
+    "OpenAI 工具缺口主要是 WebFetch/WebSearch/Task/Skill。",
+    "需要确认 WebSearch 的数据源与是否引入新依赖或复用现有能力。"
+  ]
+}

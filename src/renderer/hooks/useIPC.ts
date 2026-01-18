@@ -154,7 +154,19 @@ export function useIPC() {
             updatedAt: Date.now(),
             cwd: cwd || '',
             mountedPaths: [],
-            allowedTools: ['read', 'glob', 'grep'],
+            allowedTools: [
+              'askuserquestion',
+              'todowrite',
+              'todoread',
+              'webfetch',
+              'websearch',
+              'read',
+              'write',
+              'edit',
+              'list_directory',
+              'glob',
+              'grep',
+            ],
             memoryEnabled: false,
           };
           

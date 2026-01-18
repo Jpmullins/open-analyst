@@ -255,12 +255,23 @@ function getToolIcon(toolName: string) {
       return <Eye className="w-4 h-4 text-blue-500" />;
     case 'write_file':
       return <Edit className="w-4 h-4 text-green-500" />;
+    case 'edit_file':
+      return <Edit className="w-4 h-4 text-orange-500" />;
     case 'list_directory':
       return <FolderOpen className="w-4 h-4 text-yellow-500" />;
     case 'execute_command':
       return <Terminal className="w-4 h-4 text-purple-500" />;
+    case 'glob':
+      return <Search className="w-4 h-4 text-orange-500" />;
+    case 'grep':
+      return <Search className="w-4 h-4 text-orange-500" />;
     case 'search_files':
       return <Search className="w-4 h-4 text-orange-500" />;
+    case 'WebFetch':
+    case 'webFetch':
+    case 'WebSearch':
+    case 'webSearch':
+      return <Globe className="w-4 h-4 text-blue-500" />;
     default:
       return <File className="w-4 h-4 text-text-muted" />;
   }

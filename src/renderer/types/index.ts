@@ -209,10 +209,11 @@ export interface ExecutionContext {
 
 // App Config types
 export interface AppConfig {
-  provider: 'openrouter' | 'anthropic' | 'custom';
+  provider: 'openrouter' | 'anthropic' | 'custom' | 'openai';
   apiKey: string;
   baseUrl?: string;
   model: string;
+  openaiMode?: 'responses' | 'chat';
   claudeCodePath?: string;
   defaultWorkdir?: string;
   isConfigured: boolean;
@@ -230,5 +231,5 @@ export interface ProviderPresets {
   openrouter: ProviderPreset;
   anthropic: ProviderPreset;
   custom: ProviderPreset;
+  openai: ProviderPreset;
 }
-

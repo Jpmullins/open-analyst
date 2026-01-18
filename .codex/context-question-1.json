@@ -1,0 +1,22 @@
+{
+  "question": "WebSearch 的数据源与实现策略是什么？是否存在现成集成？",
+  "why": "WebSearch 是 Claude 工具集合的一部分，OpenAI 侧缺失实现且缺少配置线索，需决定实现路径避免盲目假设。",
+  "evidence": [
+    {
+      "source": "readme.md",
+      "detail": "仅提到 WebSearch 需要网络连通（TUN），未说明具体供应商或 API Key。"
+    },
+    {
+      "source": "src/main/tools/tool-executor.ts",
+      "detail": "未发现 WebFetch/WebSearch 的实现或依赖。"
+    },
+    {
+      "source": "package.json",
+      "detail": "无第三方 WebSearch 依赖，提示需要选用无 Key 或新增依赖。"
+    }
+  ],
+  "decision": "采用无需 API Key 的 DuckDuckGo Instant Answer 作为默认 WebSearch 数据源（仅返回摘要/相关条目），避免新增依赖与配置负担。",
+  "openRisks": [
+    "Instant Answer 结果有限，可能无法满足复杂检索需求。"
+  ]
+}

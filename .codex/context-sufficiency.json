@@ -1,0 +1,7 @@
+{
+  "interfaceContractsClear": true,
+  "techChoiceUnderstood": true,
+  "risksIdentified": true,
+  "verificationKnown": true,
+  "notes": "已确定 WebSearch 默认采用 DuckDuckGo Instant Answer；Task/Skill 将在下一步单独规划。"
+}

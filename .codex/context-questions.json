@@ -1,0 +1,15 @@
+{
+  "known": [
+    "OpenAI 工具 schema 需要严格 required 列表，否则 provider 抛出 400。",
+    "OpenAI 侧缺少 WebFetch/WebSearch/Task/Skill 工具实现。",
+    "ToolExecutor 目前只支持文件/命令/搜索类工具。"
+  ],
+  "unknown": [
+    "Task/Skill 工具是否允许先做最小可用实现（返回说明/占位），还是必须具备完整功能？",
+    "WebFetch/WebSearch 是否需要新增权限描述或风险提示？"
+  ],
+  "priority": [
+    "high: Task/Skill 是否允许最小实现或需完整能力。"
+  ],
+  "notes": "sequential-thinking tool unavailable; used shrimp-task-manager process_thought as fallback."
+}
