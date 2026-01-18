@@ -421,6 +421,9 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
     case 'session.getMessages':
       return sessionManager.getMessages(event.payload.sessionId);
 
+    case 'session.getTraceSteps':
+      return sessionManager.getTraceSteps(event.payload.sessionId);
+
     case 'permission.response':
       return sessionManager.handlePermissionResponse(
         event.payload.toolUseId,

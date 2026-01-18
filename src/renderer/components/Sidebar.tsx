@@ -19,16 +19,18 @@ export function Sidebar() {
     activeSessionId,
     settings,
     messagesBySession,
+    traceStepsBySession,
     activeTurnsBySession,
     pendingTurnsBySession,
     setActiveSession,
     setMessages,
+    setTraceSteps,
     updateSettings,
     isConfigured,
     sidebarCollapsed,
     toggleSidebar,
   } = useAppStore();
-  const { deleteSession, getSessionMessages, isElectron } = useIPC();
+  const { deleteSession, getSessionMessages, getSessionTraceSteps, isElectron } = useIPC();
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [loadingSession, setLoadingSession] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -58,7 +60,27 @@ export function Sidebar() {
         }
       }
     }
-  }, [activeSessionId, messagesBySession, setActiveSession, setMessages, getSessionMessages, isElectron]);
+
+    const existingSteps = traceStepsBySession[sessionId];
+    if ((!existingSteps || existingSteps.length === 0) && isElectron) {
+      try {
+        const steps = await getSessionTraceSteps(sessionId);
+        setTraceSteps(sessionId, steps || []);
+      } catch (error) {
+        console.error('[Sidebar] Failed to load trace steps:', error);
+      }
+    }
+  }, [
+    activeSessionId,
+    messagesBySession,
+    traceStepsBySession,
+    setActiveSession,
+    setMessages,
+    setTraceSteps,
+    getSessionMessages,
+    getSessionTraceSteps,
+    isElectron,
+  ]);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' });

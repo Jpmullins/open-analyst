@@ -28,6 +28,13 @@ export interface DatabaseInstance {
     delete: (id: string) => void;
     deleteBySessionId: (sessionId: string) => void;
   };
+
+  traceSteps: {
+    create: (step: TraceStepRow) => void;
+    update: (id: string, updates: Partial<TraceStepRow>) => void;
+    getBySessionId: (sessionId: string) => TraceStepRow[];
+    deleteBySessionId: (sessionId: string) => void;
+  };
   
   // For compatibility with old interface
   prepare: (sql: string) => Database.Statement;
@@ -56,6 +63,21 @@ export interface MessageRow {
   content: string; // JSON string
   timestamp: number;
   token_usage: string | null; // JSON string
+}
+
+export interface TraceStepRow {
+  id: string;
+  session_id: string;
+  type: string;
+  status: string;
+  title: string;
+  content: string | null;
+  tool_name: string | null;
+  tool_input: string | null; // JSON string
+  tool_output: string | null;
+  is_error: number | null;
+  timestamp: number;
+  duration: number | null;
 }
 
 let db: DatabaseInstance | null = null;
@@ -111,6 +133,25 @@ function initializeSchema(database: Database.Database): void {
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     )
   `);
+
+  // Create trace steps table
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS trace_steps (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT,
+      tool_name TEXT,
+      tool_input TEXT,
+      tool_output TEXT,
+      is_error INTEGER,
+      timestamp INTEGER NOT NULL,
+      duration INTEGER,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
   
   // Create index for faster message queries
   database.exec(`
@@ -121,6 +162,16 @@ function initializeSchema(database: Database.Database): void {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp 
     ON messages(session_id, timestamp)
+  `);
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_trace_steps_session_id
+    ON trace_steps(session_id)
+  `);
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_trace_steps_timestamp
+    ON trace_steps(session_id, timestamp)
   `);
   
   // Create memory_entries table (for future use)
@@ -208,6 +259,21 @@ export function initDatabase(): DatabaseInstance {
   const deleteMessagesBySessionStmt = rawDb.prepare(`
     DELETE FROM messages WHERE session_id = ?
   `);
+
+  const insertTraceStep = rawDb.prepare(`
+    INSERT OR REPLACE INTO trace_steps (
+      id, session_id, type, status, title, content, tool_name, tool_input, tool_output, is_error, timestamp, duration
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const getTraceStepsBySessionStmt = rawDb.prepare(`
+    SELECT * FROM trace_steps WHERE session_id = ? ORDER BY timestamp ASC
+  `);
+
+  const deleteTraceStepsBySessionStmt = rawDb.prepare(`
+    DELETE FROM trace_steps WHERE session_id = ?
+  `);
   
   db = {
     raw: rawDb,
@@ -287,6 +353,51 @@ export function initDatabase(): DatabaseInstance {
       
       deleteBySessionId: (sessionId: string) => {
         deleteMessagesBySessionStmt.run(sessionId);
+      },
+    },
+
+    traceSteps: {
+      create: (step: TraceStepRow) => {
+        insertTraceStep.run(
+          step.id,
+          step.session_id,
+          step.type,
+          step.status,
+          step.title,
+          step.content,
+          step.tool_name,
+          step.tool_input,
+          step.tool_output,
+          step.is_error,
+          step.timestamp,
+          step.duration
+        );
+      },
+
+      update: (id: string, updates: Partial<TraceStepRow>) => {
+        const setClauses: string[] = [];
+        const values: unknown[] = [];
+
+        for (const [key, value] of Object.entries(updates)) {
+          if (value !== undefined) {
+            setClauses.push(`${key} = ?`);
+            values.push(value);
+          }
+        }
+
+        if (setClauses.length === 0) return;
+
+        values.push(id);
+        const sql = `UPDATE trace_steps SET ${setClauses.join(', ')} WHERE id = ?`;
+        rawDb.prepare(sql).run(...values);
+      },
+
+      getBySessionId: (sessionId: string): TraceStepRow[] => {
+        return getTraceStepsBySessionStmt.all(sessionId) as TraceStepRow[];
+      },
+
+      deleteBySessionId: (sessionId: string) => {
+        deleteTraceStepsBySessionStmt.run(sessionId);
       },
     },
     

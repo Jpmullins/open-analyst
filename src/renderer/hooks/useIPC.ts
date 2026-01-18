@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../store';
-import type { ClientEvent, ServerEvent, PermissionResult, Session, Message } from '../types';
+import type { ClientEvent, ServerEvent, PermissionResult, Session, Message, TraceStep } from '../types';
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -41,7 +41,7 @@ export function useIPC() {
             store.setLoading(false);
             store.clearActiveTurn(event.payload.sessionId);
             store.clearPendingTurns(event.payload.sessionId);
-            store.cancelQueuedMessages(event.payload.sessionId);
+            store.clearQueuedMessages(event.payload.sessionId);
           }
           break;
 
@@ -54,16 +54,20 @@ export function useIPC() {
           store.setPartialMessage(event.payload.sessionId, event.payload.delta);
           break;
 
-        case 'trace.step':
+        case 'trace.step': {
           if (
             event.payload.step.type === 'thinking' &&
-            event.payload.step.status === 'running' &&
-            event.payload.step.title === 'Processing request...'
+            event.payload.step.status === 'running'
           ) {
-            store.activateNextTurn(event.payload.sessionId, event.payload.step.id);
+            const currentState = useAppStore.getState();
+            const pending = currentState.pendingTurnsBySession[event.payload.sessionId] || [];
+            if (pending.length > 0) {
+              store.activateNextTurn(event.payload.sessionId, event.payload.step.id);
+            }
           }
           store.addTraceStep(event.payload.sessionId, event.payload.step);
           break;
+        }
 
         case 'trace.update':
           if (
@@ -130,6 +134,7 @@ export function useIPC() {
     clearActiveTurn,
     activateNextTurn,
     clearPendingTurns,
+    clearQueuedMessages,
     cancelQueuedMessages,
   } = useAppStore();
 
@@ -259,16 +264,18 @@ export function useIPC() {
       console.log('[useIPC] Continuing session:', sessionId);
       
       // Immediately add user message to UI (for both modes)
-      const isSessionRunning = useAppStore
-        .getState()
-        .sessions.find((session) => session.id === sessionId)?.status === 'running';
+      const store = useAppStore.getState();
+      const isSessionRunning = store.sessions.find((session) => session.id === sessionId)?.status === 'running';
+      const hasActiveTurn = Boolean(store.activeTurnsBySession[sessionId]);
+      const hasPending = (store.pendingTurnsBySession[sessionId]?.length ?? 0) > 0;
+      const shouldQueue = isSessionRunning || hasActiveTurn || hasPending;
       const userMessage: Message = {
         id: `msg-user-${Date.now()}`,
         sessionId,
         role: 'user',
         content: [{ type: 'text', text: prompt }],
         timestamp: Date.now(),
-        localStatus: isSessionRunning ? 'queued' : undefined,
+        localStatus: shouldQueue ? 'queued' : undefined,
       };
       addMessage(sessionId, userMessage);
       
@@ -292,6 +299,7 @@ export function useIPC() {
           
           updateSession(sessionId, { status: 'idle' });
           clearActiveTurn(sessionId, mockStepId);
+          clearPendingTurns(sessionId);
           setLoading(false);
         } catch (e) {
           throw e;
@@ -357,6 +365,17 @@ export function useIPC() {
     [invoke]
   );
 
+  const getSessionTraceSteps = useCallback(
+    async (sessionId: string): Promise<TraceStep[]> => {
+      if (!isElectron) {
+        console.log('[useIPC] Browser mode - no persistent trace steps');
+        return [];
+      }
+      return invoke<TraceStep[]>({ type: 'session.getTraceSteps', payload: { sessionId } });
+    },
+    [invoke]
+  );
+
   const respondToPermission = useCallback(
     (toolUseId: string, result: PermissionResult) => {
       send({
@@ -404,6 +423,7 @@ export function useIPC() {
     deleteSession,
     listSessions,
     getSessionMessages,
+    getSessionTraceSteps,
     respondToPermission,
     respondToQuestion,
     selectFolder,

@@ -48,10 +48,12 @@ interface AppState {
   activateNextTurn: (sessionId: string, stepId: string) => void;
   clearActiveTurn: (sessionId: string, stepId?: string) => void;
   clearPendingTurns: (sessionId: string) => void;
+  clearQueuedMessages: (sessionId: string) => void;
   cancelQueuedMessages: (sessionId: string) => void;
   
   addTraceStep: (sessionId: string, step: TraceStep) => void;
   updateTraceStep: (sessionId: string, stepId: string, updates: Partial<TraceStep>) => void;
+  setTraceSteps: (sessionId: string, steps: TraceStep[]) => void;
   
   setLoading: (loading: boolean) => void;
   toggleSidebar: () => void;
@@ -287,6 +289,26 @@ export const useAppStore = create<AppState>((set) => ({
       },
     })),
 
+  clearQueuedMessages: (sessionId) =>
+    set((state) => {
+      const messages = state.messagesBySession[sessionId] || [];
+      let hasQueued = false;
+      const updatedMessages = messages.map((message) => {
+        if (message.localStatus === 'queued') {
+          hasQueued = true;
+          return { ...message, localStatus: undefined };
+        }
+        return message;
+      });
+      if (!hasQueued) return {};
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: updatedMessages,
+        },
+      };
+    }),
+
   cancelQueuedMessages: (sessionId) =>
     set((state) => {
       const messages = state.messagesBySession[sessionId] || [];
@@ -323,6 +345,14 @@ export const useAppStore = create<AppState>((set) => ({
         [sessionId]: (state.traceStepsBySession[sessionId] || []).map((step) =>
           step.id === stepId ? { ...step, ...updates } : step
         ),
+      },
+    })),
+
+  setTraceSteps: (sessionId, steps) =>
+    set((state) => ({
+      traceStepsBySession: {
+        ...state.traceStepsBySession,
+        [sessionId]: steps,
       },
     })),
   

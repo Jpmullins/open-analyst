@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Key, Plug, Settings, ChevronRight, Check, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, ChevronDown } from 'lucide-react';
 import type { AppConfig, ProviderPresets } from '../types';
 
@@ -145,9 +145,10 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
 // ==================== API Settings Tab (Full version from ConfigModal) ====================
 
 function APISettingsTab() {
-  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom'>('openrouter');
+  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom' | 'openai'>('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [customProtocol, setCustomProtocol] = useState<'anthropic' | 'openai'>('anthropic');
   const [model, setModel] = useState('');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
@@ -155,6 +156,9 @@ function APISettingsTab() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const previousProviderRef = useRef(provider);
+  const isLoadingConfigRef = useRef(false);
+  const manualProviderChangeRef = useRef(false);
 
   useEffect(() => {
     if (isElectron) {
@@ -163,18 +167,30 @@ function APISettingsTab() {
   }, []);
 
   useEffect(() => {
-    if (presets) {
-      const preset = presets[provider];
-      if (preset) {
-        setBaseUrl(preset.baseUrl);
-        if (!useCustomModel) {
-          setModel(preset.models[0]?.id || '');
-        }
-      }
+    if (!presets) return;
+    if (isLoadingConfigRef.current || !manualProviderChangeRef.current) {
+      previousProviderRef.current = provider;
+      return;
     }
+
+    const preset = presets[provider];
+    if (preset) {
+      if (provider === 'custom') {
+        if (previousProviderRef.current !== 'custom') {
+          setBaseUrl(preset.baseUrl);
+        }
+      } else {
+        setBaseUrl(preset.baseUrl);
+      }
+      setUseCustomModel(false);
+      setModel(preset.models[0]?.id || '');
+    }
+    manualProviderChangeRef.current = false;
+    previousProviderRef.current = provider;
   }, [provider, presets]);
 
   async function loadConfig() {
+    isLoadingConfigRef.current = true;
     try {
       const [cfg, prs] = await Promise.all([
         window.electronAPI.config.get(),
@@ -185,9 +201,10 @@ function APISettingsTab() {
       if (cfg) {
         setProvider(cfg.provider || 'openrouter');
         setApiKey(cfg.apiKey || '');
-        setBaseUrl(cfg.baseUrl || '');
-        
         const preset = prs?.[cfg.provider];
+        setBaseUrl(cfg.baseUrl || preset?.baseUrl || '');
+        setCustomProtocol(cfg.customProtocol || 'anthropic');
+        
         const isPresetModel = preset?.models.some((m: any) => m.id === cfg.model);
         
         if (isPresetModel) {
@@ -200,6 +217,8 @@ function APISettingsTab() {
       }
     } catch (err) {
       console.error('Failed to load config:', err);
+    } finally {
+      isLoadingConfigRef.current = false;
     }
   }
 
@@ -219,11 +238,22 @@ function APISettingsTab() {
     setIsSaving(true);
 
     try {
+      const presetBaseUrl = presets?.[provider]?.baseUrl;
+      const resolvedBaseUrl = provider === 'custom'
+        ? baseUrl.trim()
+        : (presetBaseUrl || baseUrl).trim();
+      const resolvedOpenaiMode =
+        provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
+          ? 'responses'
+          : undefined;
+
       await window.electronAPI.config.save({
         provider,
         apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim() || undefined,
+        baseUrl: resolvedBaseUrl || undefined,
+        customProtocol,
         model: finalModel,
+        openaiMode: resolvedOpenaiMode,
       });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
@@ -245,10 +275,14 @@ function APISettingsTab() {
           API Provider
         </label>
         <div className="grid grid-cols-3 gap-2">
-          {(['openrouter', 'anthropic', 'custom'] as const).map((p) => (
+          {(['openrouter', 'anthropic', 'openai', 'custom'] as const).map((p) => (
             <button
               key={p}
-              onClick={() => setProvider(p)}
+              onClick={() => {
+                if (p === provider) return;
+                manualProviderChangeRef.current = true;
+                setProvider(p);
+              }}
               className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 provider === p
                   ? 'bg-accent text-white'
@@ -279,6 +313,35 @@ function APISettingsTab() {
         )}
       </div>
 
+      {/* Custom Protocol */}
+      {provider === 'custom' && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <Server className="w-4 h-4" />
+            Protocol
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: 'anthropic', label: 'Anthropic' },
+              { id: 'openai', label: 'OpenAI' },
+            ] as const).map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => setCustomProtocol(mode.id)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  customProtocol === mode.id
+                    ? 'bg-accent text-white'
+                    : 'bg-surface-hover text-text-secondary hover:bg-surface-active'
+                }`}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-text-muted">Select the compatible protocol for the service</p>
+        </div>
+      )}
+
       {/* Base URL - Only for custom provider */}
       {provider === 'custom' && (
         <div className="space-y-2">
@@ -290,10 +353,18 @@ function APISettingsTab() {
             type="text"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.example.com/v1"
+            placeholder={
+              customProtocol === 'openai'
+                ? 'https://api.openai.com/v1'
+                : (currentPreset?.baseUrl || 'https://api.anthropic.com')
+            }
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
           />
-          <p className="text-xs text-text-muted">Enter Anthropic API compatible service URL</p>
+          <p className="text-xs text-text-muted">
+            {customProtocol === 'openai'
+              ? 'Enter OpenAI-compatible service URL'
+              : 'Enter Anthropic-compatible service URL'}
+          </p>
         </div>
       )}
 
@@ -322,7 +393,13 @@ function APISettingsTab() {
             type="text"
             value={customModel}
             onChange={(e) => setCustomModel(e.target.value)}
-            placeholder={provider === 'openrouter' ? 'openai/gpt-4o or other model ID' : 'claude-sonnet-4'}
+            placeholder={
+              provider === 'openrouter'
+                ? 'openai/gpt-4o or other model ID'
+                : provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
+                  ? 'gpt-4o'
+                  : 'claude-sonnet-4'
+            }
             className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
           />
         ) : (

@@ -45,20 +45,6 @@ export function ContextPanel() {
   const pendingCount = activeSessionId ? pendingTurnsBySession[activeSessionId]?.length ?? 0 : 0;
   const isRunning = Boolean(activeTurn || pendingCount > 0);
 
-  if (contextPanelCollapsed) {
-    return (
-      <div className="w-10 bg-surface border-l border-border flex items-start justify-center py-3">
-        <button
-          onClick={toggleContextPanel}
-          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
-          title="Expand panel"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-      </div>
-    );
-  }
-
   // Load MCP servers on mount
   useEffect(() => {
     const loadMCPServers = async () => {
@@ -74,6 +60,20 @@ export function ContextPanel() {
     const interval = setInterval(loadMCPServers, 5000);
     return () => clearInterval(interval);
   }, [getMCPServers]);
+
+  if (contextPanelCollapsed) {
+    return (
+      <div className="w-10 bg-surface border-l border-border flex items-start justify-center py-3">
+        <button
+          onClick={toggleContextPanel}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
+          title="Expand panel"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-80 bg-surface border-l border-border flex flex-col overflow-hidden">

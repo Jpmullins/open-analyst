@@ -821,42 +821,6 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
     </div>
   );
 }
-
-
-  return (
-    <div className="rounded-xl border border-border overflow-hidden bg-surface">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={`w-full px-4 py-3 flex items-center gap-3 transition-colors ${
-          block.isError ? 'bg-error/10 hover:bg-error/20' : 'bg-success/10 hover:bg-success/20'
-        }`}
-      >
-        {block.isError ? (
-          <AlertCircle className="w-5 h-5 text-error" />
-        ) : (
-          <CheckCircle2 className="w-5 h-5 text-success" />
-        )}
-        <span className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}>
-          {summary}
-        </span>
-        {expanded ? (
-          <ChevronDown className="w-4 h-4 text-text-muted" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-text-muted" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="p-4 bg-surface">
-          <pre className="code-block text-xs whitespace-pre-wrap font-mono">
-            {block.content}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CodeBlock({ language, children }: { language: string; children: string }) {
   const [copied, setCopied] = useState(false);
 

@@ -27,6 +27,8 @@ export function ChatView() {
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevMessageCountRef = useRef(0);
+  const prevPartialLengthRef = useRef(0);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
@@ -35,7 +37,7 @@ export function ChatView() {
   const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
   const hasActiveTurn = Boolean(activeTurn);
   const pendingCount = pendingTurns.length;
-  const isRunning = hasActiveTurn || pendingCount > 0;
+  const canStop = hasActiveTurn || pendingCount > 0;
 
   const displayedMessages = useMemo(() => {
     if (!activeSessionId) return messages;
@@ -65,8 +67,21 @@ export function ChatView() {
   }, [activeSessionId, activeTurn?.userMessageId, messages, partialMessage]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [displayedMessages]);
+    const messageCount = messages.length;
+    const partialLength = partialMessage.length;
+    const hasNewMessage = messageCount !== prevMessageCountRef.current;
+    const isStreamingTick = partialLength !== prevPartialLengthRef.current && !hasNewMessage;
+    const behavior: ScrollBehavior = hasNewMessage ? 'smooth' : 'auto';
+
+    if (!isStreamingTick) {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+
+    prevMessageCountRef.current = messageCount;
+    prevPartialLengthRef.current = partialLength;
+  }, [messages.length, partialMessage]);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -128,12 +143,13 @@ export function ChatView() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="h-14 border-b border-border flex items-center justify-between px-6 bg-surface/80 backdrop-blur-sm">
-        <h2 className="font-medium text-text-primary text-center truncate max-w-lg flex-1">
+      <div className="h-14 border-b border-border grid grid-cols-[1fr_auto_1fr] items-center px-6 bg-surface/80 backdrop-blur-sm">
+        <div />
+        <h2 className="font-medium text-text-primary text-center truncate max-w-lg">
           {activeSession.title}
         </h2>
         {activeConnectors.length > 0 && (
-          <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20">
+          <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 justify-self-end">
             <Plug className="w-3.5 h-3.5 text-purple-500" />
             <span className="text-xs text-purple-500 font-medium">
               {activeConnectors.length} connector{activeConnectors.length !== 1 ? 's' : ''}
@@ -161,20 +177,12 @@ export function ChatView() {
           )}
 
           {/* Status indicator */}
-          {isRunning && (
+          {hasActiveTurn && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
-              {hasActiveTurn ? (
-                <>
-                  <Loader2 className="w-4 h-4 text-accent animate-spin" />
-                  <span className="text-sm text-text-secondary">
-                    Processing...
-                  </span>
-                </>
-              ) : (
-                <span className="text-sm text-text-secondary">
-                  Queued{pendingCount > 0 ? ` (${pendingCount})` : ''}...
-                </span>
-              )}
+              <Loader2 className="w-4 h-4 text-accent animate-spin" />
+              <span className="text-sm text-text-secondary">
+                Processing...
+              </span>
             </div>
           )}
           
@@ -205,7 +213,7 @@ export function ChatView() {
                     handleSubmit();
                   }
                 }}
-                placeholder={isRunning ? 'Reply (queued)...' : 'Reply...'}
+                placeholder="Reply..."
                 disabled={isSubmitting}
                 rows={1}
                 className="flex-1 resize-none bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted text-sm py-1.5"
@@ -217,7 +225,7 @@ export function ChatView() {
                   {appConfig?.model || 'No model'}
                 </span>
 
-                {isRunning && (
+                {canStop && (
                   <button
                     type="button"
                     onClick={handleStop}

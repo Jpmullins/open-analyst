@@ -162,6 +162,7 @@ export type ClientEvent =
   | { type: 'session.delete'; payload: { sessionId: string } }
   | { type: 'session.list'; payload: Record<string, never> }
   | { type: 'session.getMessages'; payload: { sessionId: string } }
+  | { type: 'session.getTraceSteps'; payload: { sessionId: string } }
   | { type: 'permission.response'; payload: { toolUseId: string; result: PermissionResult } }
   | { type: 'question.response'; payload: UserQuestionResponse }
   | { type: 'settings.update'; payload: Record<string, unknown> }

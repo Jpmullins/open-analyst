@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Session, Message, ServerEvent, PermissionResult, ContentBlock, TextContent } from '../../renderer/types';
-import type { DatabaseInstance } from '../db/database';
+import type { Session, Message, ServerEvent, PermissionResult, ContentBlock, TextContent, TraceStep } from '../../renderer/types';
+import type { DatabaseInstance, TraceStepRow } from '../db/database';
 import { PathResolver } from '../sandbox/path-resolver';
 import { ClaudeAgentRunner } from '../claude/agent-runner';
 import { OpenAIResponsesRunner } from '../openai/responses-runner';
@@ -26,7 +26,15 @@ export class SessionManager {
 
   constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
     this.db = db;
-    this.sendToRenderer = sendToRenderer;
+    this.sendToRenderer = (event) => {
+      if (event.type === 'trace.step') {
+        this.saveTraceStep(event.payload.sessionId, event.payload.step);
+      }
+      if (event.type === 'trace.update') {
+        this.updateTraceStep(event.payload.stepId, event.payload.updates);
+      }
+      sendToRenderer(event);
+    };
     this.pathResolver = new PathResolver();
 
     // Initialize MCP Manager
@@ -349,6 +357,31 @@ export class SessionManager {
     }
   }
 
+  getTraceSteps(sessionId: string): TraceStep[] {
+    const rows = this.db.traceSteps.getBySessionId(sessionId);
+    const parseToolInput = (value: string | null): Record<string, unknown> | undefined => {
+      if (!value) return undefined;
+      try {
+        return JSON.parse(value) as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+    };
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type as TraceStep['type'],
+      status: row.status as TraceStep['status'],
+      title: row.title,
+      content: row.content || undefined,
+      toolName: row.tool_name || undefined,
+      toolInput: parseToolInput(row.tool_input),
+      toolOutput: row.tool_output || undefined,
+      isError: row.is_error === 1 ? true : undefined,
+      timestamp: row.timestamp,
+      duration: row.duration ?? undefined,
+    }));
+  }
+
   // Handle permission response
   handlePermissionResponse(toolUseId: string, result: PermissionResult): void {
     const resolver = this.pendingPermissions.get(toolUseId);
@@ -377,5 +410,40 @@ export class SessionManager {
         payload: { toolUseId, toolName, input, sessionId },
       });
     });
+  }
+
+  private saveTraceStep(sessionId: string, step: TraceStep): void {
+    this.db.traceSteps.create({
+      id: step.id,
+      session_id: sessionId,
+      type: step.type,
+      status: step.status,
+      title: step.title,
+      content: step.content ?? null,
+      tool_name: step.toolName ?? null,
+      tool_input: step.toolInput ? JSON.stringify(step.toolInput) : null,
+      tool_output: step.toolOutput ?? null,
+      is_error: step.isError ? 1 : null,
+      timestamp: step.timestamp,
+      duration: step.duration ?? null,
+    });
+  }
+
+  private updateTraceStep(stepId: string, updates: Partial<TraceStep>): void {
+    const rowUpdates: Partial<TraceStepRow> = {};
+    if (updates.type !== undefined) rowUpdates.type = updates.type;
+    if (updates.status !== undefined) rowUpdates.status = updates.status;
+    if (updates.title !== undefined) rowUpdates.title = updates.title;
+    if (updates.content !== undefined) rowUpdates.content = updates.content;
+    if (updates.toolName !== undefined) rowUpdates.tool_name = updates.toolName;
+    if (updates.toolInput !== undefined) {
+      rowUpdates.tool_input = updates.toolInput ? JSON.stringify(updates.toolInput) : null;
+    }
+    if (updates.toolOutput !== undefined) rowUpdates.tool_output = updates.toolOutput;
+    if (updates.isError !== undefined) rowUpdates.is_error = updates.isError ? 1 : 0;
+    if (updates.timestamp !== undefined) rowUpdates.timestamp = updates.timestamp;
+    if (updates.duration !== undefined) rowUpdates.duration = updates.duration;
+
+    this.db.traceSteps.update(stepId, rowUpdates);
   }
 }
