@@ -27,6 +27,7 @@ export interface Message {
   content: ContentBlock[];
   timestamp: number;
   tokenUsage?: TokenUsage;
+  localStatus?: 'queued' | 'cancelled';
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';

@@ -3,6 +3,8 @@ import { useAppStore } from '../store';
 import {
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   FolderOpen,
   Globe,
@@ -18,16 +20,50 @@ import {
 import type { TraceStep } from '../types';
 
 export function ContextPanel() {
-  const { activeSessionId, sessions, traceStepsBySession } = useAppStore();
+  const {
+    activeSessionId,
+    sessions,
+    traceStepsBySession,
+    activeTurnsBySession,
+    pendingTurnsBySession,
+    contextPanelCollapsed,
+    toggleContextPanel,
+  } = useAppStore();
   const [progressOpen, setProgressOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(true);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const steps = activeSessionId ? traceStepsBySession[activeSessionId] || [] : [];
+  const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
+  const pendingCount = activeSessionId ? pendingTurnsBySession[activeSessionId]?.length ?? 0 : 0;
+  const isRunning = Boolean(activeTurn || pendingCount > 0);
+
+  if (contextPanelCollapsed) {
+    return (
+      <div className="w-10 bg-surface border-l border-border flex items-start justify-center py-3">
+        <button
+          onClick={toggleContextPanel}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
+          title="Expand panel"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-80 bg-surface border-l border-border flex flex-col overflow-hidden">
+      <div className="px-3 py-2 border-b border-border flex items-center justify-end">
+        <button
+          onClick={toggleContextPanel}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
+          title="Collapse panel"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
       {/* Progress Section */}
       <div className="border-b border-border">
         <button
@@ -37,6 +73,9 @@ export function ContextPanel() {
           <span className="text-sm font-medium text-text-primary">Progress</span>
           <div className="flex items-center gap-2">
             {steps.filter(s => s.status === 'running').length > 0 && (
+              <Loader2 className="w-4 h-4 text-accent animate-spin" />
+            )}
+            {steps.filter(s => s.status === 'running').length === 0 && isRunning && (
               <Loader2 className="w-4 h-4 text-accent animate-spin" />
             )}
             {progressOpen ? (
@@ -51,7 +90,7 @@ export function ContextPanel() {
           <div className="px-4 pb-4 max-h-80 overflow-y-auto">
             {steps.length === 0 ? (
               <p className="text-xs text-text-muted">
-                Steps will show as the task unfolds.
+                {pendingCount > 0 ? `Queued messages: ${pendingCount}` : 'Steps will show as the task unfolds.'}
               </p>
             ) : (
               <div className="space-y-2">

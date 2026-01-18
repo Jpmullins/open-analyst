@@ -439,14 +439,16 @@ Then follow the workflow described in that file.
   }
 
   // Handle user's answer to AskUserQuestion
-  handleQuestionResponse(questionId: string, answer: string): void {
+  handleQuestionResponse(questionId: string, answer: string): boolean {
     const pending = this.pendingQuestions.get(questionId);
     if (pending) {
       console.log(`[ClaudeAgentRunner] Question ${questionId} answered:`, answer);
       pending.resolve(answer);
       this.pendingQuestions.delete(questionId);
+      return true;
     } else {
       console.warn(`[ClaudeAgentRunner] No pending question found for ID: ${questionId}`);
+      return false;
     }
   }
 
@@ -1092,10 +1094,15 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
   private delay(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(resolve, ms);
-      signal.addEventListener('abort', () => {
+      const onAbort = () => {
         clearTimeout(timeout);
         reject(new DOMException('Aborted', 'AbortError'));
-      });
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
     });
   }
 }

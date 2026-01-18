@@ -18,6 +18,7 @@ export class SessionManager {
   private pathResolver: PathResolver;
   private agentRunner: AgentRunner;
   private activeSessions: Map<string, AbortController> = new Map();
+  private promptQueues: Map<string, string[]> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
 
   constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
@@ -67,7 +68,7 @@ export class SessionManager {
     this.saveSession(session);
 
     // Start processing the prompt
-    this.processPrompt(session, prompt);
+    this.enqueuePrompt(session, prompt);
 
     return session;
   }
@@ -165,27 +166,14 @@ export class SessionManager {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.processPrompt(session, prompt);
+    this.enqueuePrompt(session, prompt);
   }
 
   // Process a prompt using ClaudeAgentRunner
   private async processPrompt(session: Session, prompt: string): Promise<void> {
     console.log('[SessionManager] Processing prompt for session:', session.id);
 
-    // Prevent duplicate concurrent runs on the same session (guard against double IPC)
-    if (this.activeSessions.has(session.id)) {
-      console.warn('[SessionManager] Session already running, ignoring duplicate start:', session.id);
-      return;
-    }
-
-    // Update session status
-    this.updateSessionStatus(session.id, 'running');
-
     try {
-      // Create abort controller for this session so we can cancel
-      const controller = new AbortController();
-      this.activeSessions.set(session.id, controller);
-
       // Save user message to database for persistence
       const userMessage: Message = {
         id: uuidv4(),
@@ -202,15 +190,52 @@ export class SessionManager {
       
       // Run the agent - this handles everything including sending messages
       await this.agentRunner.run(session, prompt, existingMessages);
-
     } catch (error) {
       console.error('[SessionManager] Error processing prompt:', error);
       this.sendToRenderer({
         type: 'error',
         payload: { message: error instanceof Error ? error.message : 'Unknown error' },
       });
+    }
+  }
+
+  private enqueuePrompt(session: Session, prompt: string): void {
+    const queue = this.promptQueues.get(session.id) || [];
+    queue.push(prompt);
+    this.promptQueues.set(session.id, queue);
+
+    if (!this.activeSessions.has(session.id)) {
+      void this.processQueue(session);
+    } else {
+      console.log('[SessionManager] Session running, queued prompt:', session.id);
+    }
+  }
+
+  private async processQueue(session: Session): Promise<void> {
+    if (this.activeSessions.has(session.id)) return;
+
+    const controller = new AbortController();
+    this.activeSessions.set(session.id, controller);
+    this.updateSessionStatus(session.id, 'running');
+
+    try {
+      while (!controller.signal.aborted) {
+        const queue = this.promptQueues.get(session.id);
+        if (!queue || queue.length === 0) break;
+
+        const prompt = queue.shift();
+        if (!prompt) continue;
+
+        await this.processPrompt(session, prompt);
+
+        if (controller.signal.aborted) break;
+      }
     } finally {
       this.activeSessions.delete(session.id);
+      const queue = this.promptQueues.get(session.id);
+      if (queue && queue.length === 0) {
+        this.promptQueues.delete(session.id);
+      }
       this.updateSessionStatus(session.id, 'idle');
     }
   }
@@ -225,6 +250,7 @@ export class SessionManager {
       controller.abort();
       this.activeSessions.delete(sessionId);
     }
+    this.promptQueues.delete(sessionId);
     this.updateSessionStatus(sessionId, 'idle');
   }
 
@@ -271,10 +297,28 @@ export class SessionManager {
       id: row.id,
       sessionId: row.session_id,
       role: row.role as Message['role'],
-      content: JSON.parse(row.content) as ContentBlock[],
+      content: this.normalizeContent(row.content),
       timestamp: row.timestamp,
       tokenUsage: row.token_usage ? JSON.parse(row.token_usage) : undefined,
     }));
+  }
+
+  private normalizeContent(raw: string): ContentBlock[] {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed as ContentBlock[];
+      }
+      if (parsed && typeof parsed === 'object' && 'type' in (parsed as Record<string, unknown>)) {
+        return [parsed as ContentBlock];
+      }
+      if (typeof parsed === 'string') {
+        return [{ type: 'text', text: parsed } as TextContent];
+      }
+      return [{ type: 'text', text: String(parsed) } as TextContent];
+    } catch {
+      return [{ type: 'text', text: raw } as TextContent];
+    }
   }
 
   // Handle permission response

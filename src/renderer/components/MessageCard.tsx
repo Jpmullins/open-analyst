@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
 import { useIPC } from '../hooks/useIPC';
 import { useAppStore } from '../store';
 import type { Message, ContentBlock, ToolUseContent, ToolResultContent, QuestionItem } from '../types';
@@ -18,6 +21,7 @@ import {
   XCircle,
   Square,
   CheckSquare,
+  Clock,
 } from 'lucide-react';
 
 interface MessageCardProps {
@@ -27,16 +31,38 @@ interface MessageCardProps {
 
 export function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === 'user';
+  const isQueued = message.localStatus === 'queued';
+  const isCancelled = message.localStatus === 'cancelled';
+  const rawContent = message.content as unknown;
+  const contentBlocks = Array.isArray(rawContent)
+    ? (rawContent as ContentBlock[])
+    : [{ type: 'text', text: String(rawContent ?? '') } as ContentBlock];
 
   return (
     <div className="animate-fade-in">
       {isUser ? (
         // User message - compact styling with smaller padding and radius
-        <div className="message-user px-4 py-2.5 max-w-[80%] break-words">
-          {message.content.length === 0 ? (
+        <div
+          className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
+            isQueued ? 'opacity-70 border-dashed' : ''
+          } ${isCancelled ? 'opacity-60' : ''}`}
+        >
+          {isQueued && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <Clock className="w-3 h-3" />
+              <span>排队中</span>
+            </div>
+          )}
+          {isCancelled && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <XCircle className="w-3 h-3" />
+              <span>已取消</span>
+            </div>
+          )}
+          {contentBlocks.length === 0 ? (
             <span className="text-text-muted italic">Empty message</span>
           ) : (
-            message.content.map((block, index) => (
+            contentBlocks.map((block, index) => (
               <ContentBlockView
                 key={index}
                 block={block}
@@ -49,7 +75,7 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
       ) : (
         // Assistant message
         <div className="space-y-3">
-          {message.content.map((block, index) => (
+          {contentBlocks.map((block, index) => (
             <ContentBlockView
               key={index}
               block={block}
@@ -92,7 +118,37 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
       return (
         <div className="prose-chat max-w-none text-text-primary">
           <ReactMarkdown
+            remarkPlugins={[remarkMath, remarkGfm]}
+            rehypePlugins={[rehypeKatex]}
             components={{
+              a({ children, href }) {
+                return (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(event) => {
+                      if (!href) {
+                        return;
+                      }
+                      if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
+                        event.preventDefault();
+                        void window.electronAPI.openExternal(href);
+                      }
+                    }}
+                    className="text-accent hover:text-accent-hover underline underline-offset-2"
+                  >
+                    {children}
+                  </a>
+                );
+              },
+              blockquote({ children }) {
+                return (
+                  <blockquote className="border-l-2 border-accent/40 pl-4 text-text-muted">
+                    {children}
+                  </blockquote>
+                );
+              },
               code({ className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || '');
                 const isInline = !match;
@@ -113,6 +169,40 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
               },
               p({ children }) {
                 return <p>{children}</p>;
+              },
+              table({ children }) {
+                return (
+                  <div className="overflow-x-auto my-3">
+                    <table className="min-w-full border-collapse">
+                      {children}
+                    </table>
+                  </div>
+                );
+              },
+              th({ children }) {
+                return (
+                  <th className="border border-border px-3 py-2 text-left text-sm font-semibold text-text-primary bg-surface-muted">
+                    {children}
+                  </th>
+                );
+              },
+              td({ children }) {
+                return (
+                  <td className="border border-border px-3 py-2 text-sm text-text-primary">
+                    {children}
+                  </td>
+                );
+              },
+              input({ checked, ...props }) {
+                return (
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    readOnly
+                    className="mr-2 accent-accent"
+                    {...props}
+                  />
+                );
               },
               strong({ children }) {
                 return <strong>{children}</strong>;
@@ -150,6 +240,21 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
 }
 
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
+  const { activeSessionId, messagesBySession } = useAppStore();
+  const [expanded, setExpanded] = useState(false);
+  const toolResult = useMemo(() => {
+    const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
+    let latestResult: ToolResultContent | null = null;
+    for (const message of messages) {
+      for (const content of message.content) {
+        if (content.type === 'tool_result' && content.toolUseId === block.id) {
+          latestResult = content;
+        }
+      }
+    }
+    return latestResult;
+  }, [activeSessionId, messagesBySession, block.id]);
+
   // Check if this is AskUserQuestion - render inline question UI
   if (block.name === 'AskUserQuestion') {
     return <AskUserQuestionBlock block={block} />;
@@ -159,8 +264,6 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
   if (block.name === 'TodoWrite') {
     return <TodoWriteBlock block={block} />;
   }
-
-  const [expanded, setExpanded] = useState(false);
 
   // Get a more descriptive title based on tool name
   const getToolTitle = (name: string) => {
@@ -204,13 +307,23 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       </button>
 
       {expanded && (
-        <div className="p-4 space-y-3 bg-surface">
+        <div className="p-4 space-y-4 bg-surface">
           <div>
             <p className="text-xs font-medium text-text-muted mb-2">Request</p>
             <pre className="code-block text-xs">
               {JSON.stringify(block.input, null, 2)}
             </pre>
           </div>
+          {toolResult && (
+            <div>
+              <p className={`text-xs font-medium mb-2 ${toolResult.isError ? 'text-error' : 'text-text-muted'}`}>
+                Result
+              </p>
+              <pre className="code-block text-xs whitespace-pre-wrap">
+                {toolResult.content}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -486,7 +599,23 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
 }
 
 function ToolResultBlock({ block }: { block: ToolResultContent }) {
-  const [expanded, setExpanded] = useState(true);
+  const { activeSessionId, messagesBySession } = useAppStore();
+  const [expanded, setExpanded] = useState(false);
+  const hasToolUse = useMemo(() => {
+    const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
+    for (const message of messages) {
+      for (const content of message.content) {
+        if (content.type === 'tool_use' && content.id === block.toolUseId) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [activeSessionId, messagesBySession, block.toolUseId]);
+
+  if (hasToolUse) {
+    return null;
+  }
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
