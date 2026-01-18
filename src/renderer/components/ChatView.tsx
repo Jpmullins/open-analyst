@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppStore } from '../store';
 import { useIPC } from '../hooks/useIPC';
 import { MessageCard } from './MessageCard';
+import type { Message } from '../types';
 import {
   Send,
   Square,
@@ -10,7 +11,15 @@ import {
 } from 'lucide-react';
 
 export function ChatView() {
-  const { activeSessionId, sessions, messagesBySession, partialMessage, isLoading, appConfig } = useAppStore();
+  const {
+    activeSessionId,
+    sessions,
+    messagesBySession,
+    partialMessagesBySession,
+    activeTurnsBySession,
+    pendingTurnsBySession,
+    appConfig,
+  } = useAppStore();
   const { continueSession, stopSession } = useIPC();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -19,11 +28,43 @@ export function ChatView() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
-  const isRunning = activeSession?.status === 'running' || isLoading || isSubmitting;
+  const pendingTurns = activeSessionId ? pendingTurnsBySession[activeSessionId] || [] : [];
+  const partialMessage = activeSessionId ? partialMessagesBySession[activeSessionId] || '' : '';
+  const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
+  const hasActiveTurn = Boolean(activeTurn);
+  const pendingCount = pendingTurns.length;
+  const isRunning = hasActiveTurn || pendingCount > 0;
+
+  const displayedMessages = useMemo(() => {
+    if (!activeSessionId) return messages;
+    if (!partialMessage || !activeTurn?.userMessageId) return messages;
+    const anchorIndex = messages.findIndex((message) => message.id === activeTurn.userMessageId);
+    if (anchorIndex === -1) return messages;
+
+    let insertIndex = anchorIndex + 1;
+    while (insertIndex < messages.length) {
+      if (messages[insertIndex].role === 'user') break;
+      insertIndex += 1;
+    }
+
+    const streamingMessage: Message = {
+      id: `partial-${activeSessionId}`,
+      sessionId: activeSessionId,
+      role: 'assistant',
+      content: [{ type: 'text', text: partialMessage }],
+      timestamp: Date.now(),
+    };
+
+    return [
+      ...messages.slice(0, insertIndex),
+      streamingMessage,
+      ...messages.slice(insertIndex),
+    ];
+  }, [activeSessionId, activeTurn?.userMessageId, messages, partialMessage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, partialMessage]);
+  }, [displayedMessages]);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -35,7 +76,7 @@ export function ChatView() {
     // Get value from ref to handle both controlled and uncontrolled cases
     const currentPrompt = textareaRef.current?.value || prompt;
     
-    if (!currentPrompt.trim() || !activeSessionId || isRunning) return;
+    if (!currentPrompt.trim() || !activeSessionId || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
@@ -55,7 +96,13 @@ export function ChatView() {
     }
   };
 
-  if (!activeSession) return null;
+  if (!activeSession) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted">
+        <span>Loading conversation...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -69,39 +116,36 @@ export function ChatView() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto py-6 px-4 space-y-4">
-          {messages.length === 0 ? (
+          {displayedMessages.length === 0 ? (
             <div className="text-center py-12 text-text-muted">
               <p>Start the conversation</p>
             </div>
           ) : (
-            messages.map((message) => (
-              <div key={message.id}>
-                <MessageCard message={message} />
-              </div>
-            ))
-          )}
-          
-          {/* Streaming partial message */}
-          {partialMessage && (
-            <MessageCard
-              message={{
-                id: 'partial',
-                sessionId: activeSessionId!,
-                role: 'assistant',
-                content: [{ type: 'text', text: partialMessage }],
-                timestamp: Date.now(),
-              }}
-              isStreaming
-            />
+            displayedMessages.map((message) => {
+              const isStreaming = typeof message.id === 'string' && message.id.startsWith('partial-');
+              return (
+                <div key={message.id}>
+                  <MessageCard message={message} isStreaming={isStreaming} />
+                </div>
+              );
+            })
           )}
 
           {/* Status indicator */}
           {isRunning && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
-              <Loader2 className="w-4 h-4 text-accent animate-spin" />
-              <span className="text-sm text-text-secondary">
-                Processing...
-              </span>
+              {hasActiveTurn ? (
+                <>
+                  <Loader2 className="w-4 h-4 text-accent animate-spin" />
+                  <span className="text-sm text-text-secondary">
+                    Processing...
+                  </span>
+                </>
+              ) : (
+                <span className="text-sm text-text-secondary">
+                  Queued{pendingCount > 0 ? ` (${pendingCount})` : ''}...
+                </span>
+              )}
             </div>
           )}
           
@@ -132,8 +176,8 @@ export function ChatView() {
                     handleSubmit();
                   }
                 }}
-                placeholder={isRunning ? 'Running...' : 'Reply...'}
-                disabled={isRunning}
+                placeholder={isRunning ? 'Reply (queued)...' : 'Reply...'}
+                disabled={isSubmitting}
                 rows={1}
                 className="flex-1 resize-none bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted text-sm py-1.5"
               />
@@ -144,7 +188,7 @@ export function ChatView() {
                   {appConfig?.model || 'No model'}
                 </span>
 
-                {isRunning ? (
+                {isRunning && (
                   <button
                     type="button"
                     onClick={handleStop}
@@ -152,15 +196,14 @@ export function ChatView() {
                   >
                     <Square className="w-4 h-4" />
                   </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={!prompt.trim() && !textareaRef.current?.value.trim()}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
                 )}
+                <button
+                  type="submit"
+                  disabled={!prompt.trim() && !textareaRef.current?.value.trim()}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
               </div>
             </div>
 

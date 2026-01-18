@@ -7,26 +7,34 @@ import { ClaudeAgentRunner } from '../claude/agent-runner';
 export class SessionManager {
   private db: DatabaseInstance;
   private sendToRenderer: (event: ServerEvent) => void;
-  private pathResolver: PathResolver;
-  private agentRunner: ClaudeAgentRunner;
+  private agentRunners: Map<string, ClaudeAgentRunner> = new Map();
   private activeSessions: Map<string, AbortController> = new Map();
+  private promptQueues: Map<string, string[]> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
 
   constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
     this.db = db;
     this.sendToRenderer = sendToRenderer;
-    this.pathResolver = new PathResolver();
     
-    // Initialize Claude Agent Runner with message save callback
-    this.agentRunner = new ClaudeAgentRunner(
-      { 
+    console.log('[SessionManager] Initialized with persistent database');
+  }
+
+  private getAgentRunner(sessionId: string): ClaudeAgentRunner {
+    const existingRunner = this.agentRunners.get(sessionId);
+    if (existingRunner) {
+      return existingRunner;
+    }
+
+    const pathResolver = new PathResolver();
+    const runner = new ClaudeAgentRunner(
+      {
         sendToRenderer: this.sendToRenderer,
         saveMessage: (message: Message) => this.saveMessage(message),
       },
-      this.pathResolver
+      pathResolver
     );
-    
-    console.log('[SessionManager] Initialized with persistent database');
+    this.agentRunners.set(sessionId, runner);
+    return runner;
   }
 
   // Create and start a new session
@@ -44,7 +52,7 @@ export class SessionManager {
     this.saveSession(session);
 
     // Start processing the prompt
-    this.processPrompt(session, prompt);
+    this.enqueuePrompt(session, prompt);
 
     return session;
   }
@@ -130,27 +138,14 @@ export class SessionManager {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.processPrompt(session, prompt);
+    this.enqueuePrompt(session, prompt);
   }
 
   // Process a prompt using ClaudeAgentRunner
   private async processPrompt(session: Session, prompt: string): Promise<void> {
     console.log('[SessionManager] Processing prompt for session:', session.id);
 
-    // Prevent duplicate concurrent runs on the same session (guard against double IPC)
-    if (this.activeSessions.has(session.id)) {
-      console.warn('[SessionManager] Session already running, ignoring duplicate start:', session.id);
-      return;
-    }
-
-    // Update session status
-    this.updateSessionStatus(session.id, 'running');
-
     try {
-      // Create abort controller for this session so we can cancel
-      const controller = new AbortController();
-      this.activeSessions.set(session.id, controller);
-
       // Save user message to database for persistence
       const userMessage: Message = {
         id: uuidv4(),
@@ -166,16 +161,54 @@ export class SessionManager {
       const existingMessages = this.getMessages(session.id);
       
       // Run the agent - this handles everything including sending messages
-      await this.agentRunner.run(session, prompt, existingMessages);
-
+      const runner = this.getAgentRunner(session.id);
+      await runner.run(session, prompt, existingMessages);
     } catch (error) {
       console.error('[SessionManager] Error processing prompt:', error);
       this.sendToRenderer({
         type: 'error',
         payload: { message: error instanceof Error ? error.message : 'Unknown error' },
       });
+    }
+  }
+
+  private enqueuePrompt(session: Session, prompt: string): void {
+    const queue = this.promptQueues.get(session.id) || [];
+    queue.push(prompt);
+    this.promptQueues.set(session.id, queue);
+
+    if (!this.activeSessions.has(session.id)) {
+      void this.processQueue(session);
+    } else {
+      console.log('[SessionManager] Session running, queued prompt:', session.id);
+    }
+  }
+
+  private async processQueue(session: Session): Promise<void> {
+    if (this.activeSessions.has(session.id)) return;
+
+    const controller = new AbortController();
+    this.activeSessions.set(session.id, controller);
+    this.updateSessionStatus(session.id, 'running');
+
+    try {
+      while (!controller.signal.aborted) {
+        const queue = this.promptQueues.get(session.id);
+        if (!queue || queue.length === 0) break;
+
+        const prompt = queue.shift();
+        if (!prompt) continue;
+
+        await this.processPrompt(session, prompt);
+
+        if (controller.signal.aborted) break;
+      }
     } finally {
       this.activeSessions.delete(session.id);
+      const queue = this.promptQueues.get(session.id);
+      if (queue && queue.length === 0) {
+        this.promptQueues.delete(session.id);
+      }
       this.updateSessionStatus(session.id, 'idle');
     }
   }
@@ -183,13 +216,17 @@ export class SessionManager {
   // Stop a running session
   stopSession(sessionId: string): void {
     console.log('[SessionManager] Stopping session:', sessionId);
-    this.agentRunner.cancel(sessionId);
+    const runner = this.agentRunners.get(sessionId);
+    if (runner) {
+      runner.cancel(sessionId);
+    }
     // Also abort any pending controller we tracked
     const controller = this.activeSessions.get(sessionId);
     if (controller) {
       controller.abort();
       this.activeSessions.delete(sessionId);
     }
+    this.promptQueues.delete(sessionId);
     this.updateSessionStatus(sessionId, 'idle');
   }
 
@@ -200,6 +237,7 @@ export class SessionManager {
 
     // Delete from database (messages will be deleted automatically via CASCADE)
     this.db.sessions.delete(sessionId);
+    this.agentRunners.delete(sessionId);
     
     console.log('[SessionManager] Session deleted:', sessionId);
   }
@@ -236,10 +274,28 @@ export class SessionManager {
       id: row.id,
       sessionId: row.session_id,
       role: row.role as Message['role'],
-      content: JSON.parse(row.content) as ContentBlock[],
+      content: this.normalizeContent(row.content),
       timestamp: row.timestamp,
       tokenUsage: row.token_usage ? JSON.parse(row.token_usage) : undefined,
     }));
+  }
+
+  private normalizeContent(raw: string): ContentBlock[] {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed as ContentBlock[];
+      }
+      if (parsed && typeof parsed === 'object' && 'type' in (parsed as Record<string, unknown>)) {
+        return [parsed as ContentBlock];
+      }
+      if (typeof parsed === 'string') {
+        return [{ type: 'text', text: parsed } as TextContent];
+      }
+      return [{ type: 'text', text: String(parsed) } as TextContent];
+    } catch {
+      return [{ type: 'text', text: raw } as TextContent];
+    }
   }
 
   // Handle permission response
@@ -253,7 +309,12 @@ export class SessionManager {
 
   // Handle user's response to AskUserQuestion
   handleQuestionResponse(questionId: string, answer: string): void {
-    this.agentRunner.handleQuestionResponse(questionId, answer);
+    for (const runner of this.agentRunners.values()) {
+      if (runner.handleQuestionResponse(questionId, answer)) {
+        return;
+      }
+    }
+    console.warn(`[SessionManager] No runner handled question ${questionId}`);
   }
 
   // Request permission for a tool

@@ -17,6 +17,8 @@ export function Sidebar() {
     activeSessionId,
     settings,
     messagesBySession,
+    activeTurnsBySession,
+    pendingTurnsBySession,
     setActiveSession,
     setMessages,
     updateSettings,
@@ -185,7 +187,7 @@ export function Sidebar() {
                 <div className="flex items-center gap-3">
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
                     loadingSession === session.id ? 'bg-accent animate-pulse' :
-                    session.status === 'running' ? 'bg-accent' :
+                    (activeTurnsBySession[session.id] || (pendingTurnsBySession[session.id]?.length ?? 0) > 0) ? 'bg-accent' :
                     session.status === 'completed' ? 'bg-success' :
                     session.status === 'error' ? 'bg-error' : 'bg-border'
                   }`} />

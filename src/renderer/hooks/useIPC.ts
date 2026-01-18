@@ -5,9 +5,6 @@ import type { ClientEvent, ServerEvent, PermissionResult, Session, Message } fro
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
-// Global flags to prevent duplicate operations
-let isProcessing = false;
-
 export function useIPC() {
   // Use refs to store stable references to store actions
   // This prevents useEffect from re-running when actions change
@@ -42,7 +39,9 @@ export function useIPC() {
           });
           if (event.payload.status !== 'running') {
             store.setLoading(false);
-            isProcessing = false;
+            store.clearActiveTurn(event.payload.sessionId);
+            store.clearPendingTurns(event.payload.sessionId);
+            store.cancelQueuedMessages(event.payload.sessionId);
           }
           break;
 
@@ -52,14 +51,27 @@ export function useIPC() {
           break;
 
         case 'stream.partial':
-          store.setPartialMessage(event.payload.delta);
+          store.setPartialMessage(event.payload.sessionId, event.payload.delta);
           break;
 
         case 'trace.step':
+          if (
+            event.payload.step.type === 'thinking' &&
+            event.payload.step.status === 'running' &&
+            event.payload.step.title === 'Processing request...'
+          ) {
+            store.activateNextTurn(event.payload.sessionId, event.payload.step.id);
+          }
           store.addTraceStep(event.payload.sessionId, event.payload.step);
           break;
 
         case 'trace.update':
+          if (
+            event.payload.updates.status &&
+            (event.payload.updates.status === 'completed' || event.payload.updates.status === 'error')
+          ) {
+            store.clearActiveTurn(event.payload.sessionId, event.payload.stepId);
+          }
           store.updateTraceStep(event.payload.sessionId, event.payload.stepId, event.payload.updates);
           break;
 
@@ -84,7 +96,6 @@ export function useIPC() {
         case 'error':
           console.error('[useIPC] Server error:', event.payload.message);
           store.setLoading(false);
-          isProcessing = false;
           break;
 
         default:
@@ -107,6 +118,10 @@ export function useIPC() {
     setLoading,
     setPendingPermission,
     setPendingQuestion,
+    clearActiveTurn,
+    activateNextTurn,
+    clearPendingTurns,
+    cancelQueuedMessages,
   } = useAppStore();
 
   // Send event to main process
@@ -132,13 +147,6 @@ export function useIPC() {
   // Start a new session
   const startSession = useCallback(
     async (title: string, prompt: string, cwd?: string) => {
-      // Strict guard against duplicate calls
-      if (isProcessing) {
-        console.log('[useIPC] Already processing, ignoring startSession');
-        return null;
-      }
-      
-      isProcessing = true;
       setLoading(true);
       console.log('[useIPC] Starting session:', title);
       
@@ -169,6 +177,8 @@ export function useIPC() {
             timestamp: Date.now(),
           };
           addMessage(sessionId, userMessage);
+          const mockStepId = `mock-step-${Date.now()}`;
+          activateNextTurn(sessionId, mockStepId);
           
           await new Promise(resolve => setTimeout(resolve, 500));
           
@@ -182,12 +192,11 @@ export function useIPC() {
           addMessage(sessionId, assistantMessage);
           
           updateSession(sessionId, { status: 'idle' });
+          clearActiveTurn(sessionId, mockStepId);
           setLoading(false);
-          isProcessing = false;
           
           return session;
         } catch (e) {
-          isProcessing = false;
           throw e;
         }
       }
@@ -215,33 +224,30 @@ export function useIPC() {
         // isProcessing will be reset when we receive session.status event
         return session;
       } catch (e) {
-        isProcessing = false;
         setLoading(false);
         throw e;
       }
     },
-    [invoke, addSession, addMessage, updateSession, setLoading]
+    [invoke, addSession, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn]
   );
 
   // Continue an existing session
   const continueSession = useCallback(
     async (sessionId: string, prompt: string) => {
-      if (isProcessing) {
-        console.log('[useIPC] Already processing, ignoring continueSession');
-        return;
-      }
-      
-      isProcessing = true;
       setLoading(true);
       console.log('[useIPC] Continuing session:', sessionId);
       
       // Immediately add user message to UI (for both modes)
+      const isSessionRunning = useAppStore
+        .getState()
+        .sessions.find((session) => session.id === sessionId)?.status === 'running';
       const userMessage: Message = {
         id: `msg-user-${Date.now()}`,
         sessionId,
         role: 'user',
         content: [{ type: 'text', text: prompt }],
         timestamp: Date.now(),
+        localStatus: isSessionRunning ? 'queued' : undefined,
       };
       addMessage(sessionId, userMessage);
       
@@ -249,6 +255,8 @@ export function useIPC() {
       if (!isElectron) {
         try {
           updateSession(sessionId, { status: 'running' });
+          const mockStepId = `mock-step-${Date.now()}`;
+          activateNextTurn(sessionId, mockStepId);
           
           await new Promise(resolve => setTimeout(resolve, 500));
           
@@ -262,10 +270,9 @@ export function useIPC() {
           addMessage(sessionId, assistantMessage);
           
           updateSession(sessionId, { status: 'idle' });
+          clearActiveTurn(sessionId, mockStepId);
           setLoading(false);
-          isProcessing = false;
         } catch (e) {
-          isProcessing = false;
           throw e;
         }
         return;
@@ -278,12 +285,14 @@ export function useIPC() {
       });
       // isProcessing will be reset when we receive session.status event
     },
-    [send, addMessage, updateSession, setLoading]
+    [send, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn]
   );
 
   const stopSession = useCallback(
     (sessionId: string) => {
-      isProcessing = false;
+      cancelQueuedMessages(sessionId);
+      clearPendingTurns(sessionId);
+      clearActiveTurn(sessionId);
       if (!isElectron) {
         updateSession(sessionId, { status: 'idle' });
         setLoading(false);
@@ -292,7 +301,7 @@ export function useIPC() {
       send({ type: 'session.stop', payload: { sessionId } });
       setLoading(false);
     },
-    [send, updateSession, setLoading]
+    [send, updateSession, setLoading, cancelQueuedMessages, clearPendingTurns, clearActiveTurn]
   );
 
   const deleteSession = useCallback(

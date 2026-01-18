@@ -21,6 +21,7 @@ import {
   XCircle,
   Square,
   CheckSquare,
+  Clock,
 } from 'lucide-react';
 
 interface MessageCardProps {
@@ -30,16 +31,38 @@ interface MessageCardProps {
 
 export function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === 'user';
+  const isQueued = message.localStatus === 'queued';
+  const isCancelled = message.localStatus === 'cancelled';
+  const rawContent = message.content as unknown;
+  const contentBlocks = Array.isArray(rawContent)
+    ? (rawContent as ContentBlock[])
+    : [{ type: 'text', text: String(rawContent ?? '') } as ContentBlock];
 
   return (
     <div className="animate-fade-in">
       {isUser ? (
         // User message - compact styling with smaller padding and radius
-        <div className="message-user px-4 py-2.5 max-w-[80%] break-words">
-          {message.content.length === 0 ? (
+        <div
+          className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
+            isQueued ? 'opacity-70 border-dashed' : ''
+          } ${isCancelled ? 'opacity-60' : ''}`}
+        >
+          {isQueued && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <Clock className="w-3 h-3" />
+              <span>排队中</span>
+            </div>
+          )}
+          {isCancelled && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <XCircle className="w-3 h-3" />
+              <span>已取消</span>
+            </div>
+          )}
+          {contentBlocks.length === 0 ? (
             <span className="text-text-muted italic">Empty message</span>
           ) : (
-            message.content.map((block, index) => (
+            contentBlocks.map((block, index) => (
               <ContentBlockView
                 key={index}
                 block={block}
@@ -52,7 +75,7 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
       ) : (
         // Assistant message
         <div className="space-y-3">
-          {message.content.map((block, index) => (
+          {contentBlocks.map((block, index) => (
             <ContentBlockView
               key={index}
               block={block}
@@ -217,16 +240,6 @@ function ContentBlockView({ block, isUser, isStreaming }: ContentBlockViewProps)
 }
 
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
-  // Check if this is AskUserQuestion - render inline question UI
-  if (block.name === 'AskUserQuestion') {
-    return <AskUserQuestionBlock block={block} />;
-  }
-
-  // Check if this is TodoWrite - render todo list UI
-  if (block.name === 'TodoWrite') {
-    return <TodoWriteBlock block={block} />;
-  }
-
   const { activeSessionId, messagesBySession } = useAppStore();
   const [expanded, setExpanded] = useState(false);
   const toolResult = useMemo(() => {
@@ -241,6 +254,16 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
     }
     return latestResult;
   }, [activeSessionId, messagesBySession, block.id]);
+
+  // Check if this is AskUserQuestion - render inline question UI
+  if (block.name === 'AskUserQuestion') {
+    return <AskUserQuestionBlock block={block} />;
+  }
+
+  // Check if this is TodoWrite - render todo list UI
+  if (block.name === 'TodoWrite') {
+    return <TodoWriteBlock block={block} />;
+  }
 
   // Get a more descriptive title based on tool name
   const getToolTitle = (name: string) => {

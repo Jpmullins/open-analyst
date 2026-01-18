@@ -20,13 +20,24 @@ import {
 import type { TraceStep } from '../types';
 
 export function ContextPanel() {
-  const { activeSessionId, sessions, traceStepsBySession, contextPanelCollapsed, toggleContextPanel } = useAppStore();
+  const {
+    activeSessionId,
+    sessions,
+    traceStepsBySession,
+    activeTurnsBySession,
+    pendingTurnsBySession,
+    contextPanelCollapsed,
+    toggleContextPanel,
+  } = useAppStore();
   const [progressOpen, setProgressOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(true);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const steps = activeSessionId ? traceStepsBySession[activeSessionId] || [] : [];
+  const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
+  const pendingCount = activeSessionId ? pendingTurnsBySession[activeSessionId]?.length ?? 0 : 0;
+  const isRunning = Boolean(activeTurn || pendingCount > 0);
 
   if (contextPanelCollapsed) {
     return (
@@ -64,6 +75,9 @@ export function ContextPanel() {
             {steps.filter(s => s.status === 'running').length > 0 && (
               <Loader2 className="w-4 h-4 text-accent animate-spin" />
             )}
+            {steps.filter(s => s.status === 'running').length === 0 && isRunning && (
+              <Loader2 className="w-4 h-4 text-accent animate-spin" />
+            )}
             {progressOpen ? (
               <ChevronUp className="w-4 h-4 text-text-muted" />
             ) : (
@@ -76,7 +90,7 @@ export function ContextPanel() {
           <div className="px-4 pb-4 max-h-80 overflow-y-auto">
             {steps.length === 0 ? (
               <p className="text-xs text-text-muted">
-                Steps will show as the task unfolds.
+                {pendingCount > 0 ? `Queued messages: ${pendingCount}` : 'Steps will show as the task unfolds.'}
               </p>
             ) : (
               <div className="space-y-2">
