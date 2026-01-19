@@ -6,6 +6,8 @@ import { SessionManager } from './session/session-manager';
 import { configStore, PROVIDER_PRESETS, type AppConfig } from './config/config-store';
 import { mcpConfigStore } from './mcp/mcp-config-store';
 import { credentialsStore, type UserCredential } from './credentials/credentials-store';
+import { getSandboxAdapter, shutdownSandbox } from './sandbox/sandbox-adapter';
+import { WSLBridge } from './sandbox/wsl-bridge';
 import type { MCPServerConfig } from './mcp/mcp-manager';
 import type { ClientEvent, ServerEvent } from '../renderer/types';
 import { log, logWarn, logError } from './utils/logger';
@@ -140,7 +142,15 @@ app.whenReady().then(async () => {
 });
 
 // Handle app quit
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
+  // Shutdown sandbox before quitting
+  try {
+    await shutdownSandbox();
+    log('[App] Sandbox shutdown complete');
+  } catch (error) {
+    logError('[App] Error shutting down sandbox:', error);
+  }
+
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -373,6 +383,66 @@ ipcMain.on('window.maximize', () => {
 
 ipcMain.on('window.close', () => {
   mainWindow?.close();
+});
+
+// Sandbox IPC handlers
+ipcMain.handle('sandbox.getStatus', async () => {
+  try {
+    const adapter = getSandboxAdapter();
+    const isWindows = process.platform === 'win32';
+    
+    if (isWindows) {
+      const wslStatus = await WSLBridge.checkWSLStatus();
+      return {
+        platform: 'win32',
+        mode: adapter.initialized ? adapter.mode : 'none',
+        initialized: adapter.initialized,
+        wsl: wslStatus,
+      };
+    } else {
+      return {
+        platform: process.platform,
+        mode: adapter.initialized ? adapter.mode : 'native',
+        initialized: adapter.initialized,
+        wsl: null,
+      };
+    }
+  } catch (error) {
+    logError('[Sandbox] Error getting status:', error);
+    return {
+      platform: process.platform,
+      mode: 'none',
+      initialized: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+});
+
+ipcMain.handle('sandbox.checkWSL', async () => {
+  try {
+    return await WSLBridge.checkWSLStatus();
+  } catch (error) {
+    logError('[Sandbox] Error checking WSL:', error);
+    return { available: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+});
+
+ipcMain.handle('sandbox.installNodeInWSL', async (_event, distro: string) => {
+  try {
+    return await WSLBridge.installNodeInWSL(distro);
+  } catch (error) {
+    logError('[Sandbox] Error installing Node.js:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('sandbox.installClaudeCodeInWSL', async (_event, distro: string) => {
+  try {
+    return await WSLBridge.installClaudeCodeInWSL(distro);
+  } catch (error) {
+    logError('[Sandbox] Error installing claude-code:', error);
+    return false;
+  }
 });
 
 async function handleClientEvent(event: ClientEvent): Promise<unknown> {

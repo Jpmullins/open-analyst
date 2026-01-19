@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Session, Message, ServerEvent, PermissionResult, ContentBlock, TextContent, TraceStep } from '../../renderer/types';
 import type { DatabaseInstance, TraceStepRow } from '../db/database';
 import { PathResolver } from '../sandbox/path-resolver';
+import { SandboxAdapter, getSandboxAdapter, initializeSandbox } from '../sandbox/sandbox-adapter';
 import { ClaudeAgentRunner } from '../claude/agent-runner';
 import { OpenAIResponsesRunner } from '../openai/responses-runner';
 import { configStore } from '../config/config-store';
@@ -19,11 +20,13 @@ export class SessionManager {
   private db: DatabaseInstance;
   private sendToRenderer: (event: ServerEvent) => void;
   private pathResolver: PathResolver;
+  private sandboxAdapter: SandboxAdapter;
   private agentRunner: AgentRunner;
   private mcpManager: MCPManager;
   private activeSessions: Map<string, AbortController> = new Map();
   private promptQueues: Map<string, Array<{ prompt: string; content?: ContentBlock[] }>> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
+  private sandboxInitPromises: Map<string, Promise<void>> = new Map();
 
   constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
     this.db = db;
@@ -37,6 +40,7 @@ export class SessionManager {
       sendToRenderer(event);
     };
     this.pathResolver = new PathResolver();
+    this.sandboxAdapter = getSandboxAdapter();
 
     // Initialize MCP Manager
     this.mcpManager = new MCPManager();
@@ -88,6 +92,13 @@ export class SessionManager {
    */
   getMCPManager(): MCPManager {
     return this.mcpManager;
+  }
+
+  /**
+   * Get sandbox adapter instance
+   */
+  getSandboxAdapter(): SandboxAdapter {
+    return this.sandboxAdapter;
   }
 
   // Create and start a new session
@@ -207,10 +218,54 @@ export class SessionManager {
     this.enqueuePrompt(session, prompt, content);
   }
 
+  /**
+   * Ensure sandbox is initialized for the session's workspace
+   */
+  private async ensureSandboxInitialized(session: Session): Promise<void> {
+    if (!session.cwd) {
+      log('[SessionManager] No workspace directory, skipping sandbox init');
+      return;
+    }
+
+    // Check if already initialized with this workspace
+    if (this.sandboxAdapter.initialized) {
+      return;
+    }
+
+    // Check if initialization is already in progress
+    const existingPromise = this.sandboxInitPromises.get(session.cwd);
+    if (existingPromise) {
+      await existingPromise;
+      return;
+    }
+
+    // Initialize sandbox with workspace
+    const initPromise = initializeSandbox({
+      workspacePath: session.cwd,
+      mainWindow: null, // Will show dialogs globally
+    });
+
+    this.sandboxInitPromises.set(session.cwd, initPromise);
+
+    try {
+      await initPromise;
+      log('[SessionManager] Sandbox initialized for workspace:', session.cwd);
+      log('[SessionManager] Sandbox mode:', this.sandboxAdapter.mode);
+    } catch (error) {
+      logError('[SessionManager] Failed to initialize sandbox:', error);
+      // Continue anyway - sandbox adapter will fallback to native
+    } finally {
+      this.sandboxInitPromises.delete(session.cwd);
+    }
+  }
+
   // Process a prompt using ClaudeAgentRunner
   private async processPrompt(session: Session, prompt: string, content?: ContentBlock[]): Promise<void> {
     log('[SessionManager] Processing prompt for session:', session.id);
     log('[SessionManager] Received content:', content ? JSON.stringify(content.map((c: any) => ({ type: c.type, hasData: !!c.source?.data }))) : 'none');
+
+    // Ensure sandbox is initialized for this workspace
+    await this.ensureSandboxInitialized(session);
 
     try {
       // Use provided content blocks or fall back to simple text

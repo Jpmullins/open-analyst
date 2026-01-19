@@ -15,6 +15,13 @@ files:
   - node_modules/@img/**/*
   - .claude/skills/**/*
 
+# WSL Agent resources (for Windows sandbox)
+extraResources:
+  - from: dist-wsl-agent
+    to: wsl-agent
+    filter:
+      - "**/*"
+
 # Unpack claude-code so it can be executed as a CLI
 # Also unpack skills so they can be read/written at runtime
 # Sharp native modules must also be unpacked for image processing

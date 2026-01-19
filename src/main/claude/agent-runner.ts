@@ -9,6 +9,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import { spawn, execSync, type ChildProcess } from 'child_process';
+import { getSandboxAdapter } from '../sandbox/sandbox-adapter';
+import { pathConverter } from '../sandbox/wsl-bridge';
+import { SandboxSync } from '../sandbox/sandbox-sync';
+import { PathGuard } from '../sandbox/path-guard';
 
 // Cache for shell environment (loaded once at startup)
 let cachedShellEnv: NodeJS.ProcessEnv | null = null;
@@ -601,6 +605,10 @@ Then follow the workflow described in that file.
     const controller = new AbortController();
     this.activeControllers.set(session.id, controller);
 
+    // Sandbox isolation state (defined outside try for finally access)
+    let sandboxPath: string | null = null;
+    let useSandboxIsolation = false;
+
     try {
       this.pathResolver.registerSession(session.id, session.mountedPaths);
       logTiming('pathResolver.registerSession');
@@ -621,6 +629,28 @@ Then follow the workflow described in that file.
 
       const workingDir = session.cwd ||  undefined;
       log('[ClaudeAgentRunner] Working directory:', workingDir || '(none)');
+
+      // Initialize sandbox sync if WSL mode is active
+      const sandbox = getSandboxAdapter();
+
+      if (sandbox.isWSL && sandbox.wslStatus?.distro && workingDir) {
+        log('[ClaudeAgentRunner] WSL mode active, initializing sandbox sync...');
+        const syncResult = await SandboxSync.initSync(
+          workingDir,
+          session.id,
+          sandbox.wslStatus.distro
+        );
+        
+        if (syncResult.success) {
+          sandboxPath = syncResult.sandboxPath;
+          useSandboxIsolation = true;
+          log(`[ClaudeAgentRunner] Sandbox initialized: ${sandboxPath}`);
+          log(`[ClaudeAgentRunner]   Files: ${syncResult.fileCount}, Size: ${syncResult.totalSize} bytes`);
+        } else {
+          logError('[ClaudeAgentRunner] Sandbox sync failed:', syncResult.error);
+          log('[ClaudeAgentRunner] Falling back to /mnt/ access (less secure)');
+        }
+      }
 
       // Check if current user message includes images
       // Images need to be passed via AsyncIterable<SDKUserMessage>, not string prompt
@@ -820,7 +850,7 @@ Then follow the workflow described in that file.
       
       const queryOptions: any = {
         pathToClaudeCodeExecutable: claudeCodePath,
-        cwd: workingDir,  // User's actual working directory
+        cwd: workingDir,  // Windows path for claude-code process
         model: currentModel,
         maxTurns: 50,
         abortController: controller,
@@ -898,7 +928,117 @@ Then follow the workflow described in that file.
         
         // Enable Skill tool along with other commonly used tools
         // MCP tools are automatically available through mcpServers configuration
-        allowedTools: ['Skill', 'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite', 'AskUserQuestion', 'Task'],
+        // Bash is also here - we use PreToolUse hook to intercept and wrap for WSL
+        allowedTools: ['Skill', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite', 'AskUserQuestion', 'Task', 'Bash'],
+        
+        // WSL Sandbox: Use PreToolUse hook to intercept Bash commands and wrap for WSL execution
+        hooks: {
+          PreToolUse: [{
+            // Match all tools - we filter by tool_name inside the hook
+            hooks: [async (hookInput: any, _toolUseID: string | undefined, _options: { signal: AbortSignal }) => {
+              const toolName = hookInput.tool_name;
+              const toolInput = hookInput.tool_input as Record<string, unknown>;
+              
+              // Only intercept Bash tool
+              if (toolName !== 'Bash') {
+                return { continue: true };
+              }
+              
+              const sandboxAdapter = getSandboxAdapter();
+              const isWSLMode = sandboxAdapter.isWSL && sandboxAdapter.wslStatus?.distro;
+              
+              if (!isWSLMode) {
+                log('[Sandbox/WSL] WSL not active, Bash runs natively');
+                return { continue: true };
+              }
+              
+              const distro = sandboxAdapter.wslStatus!.distro!;
+              const originalCommand = String(toolInput.command || '');
+              
+              // Determine the working directory for WSL
+              let wslCwd: string;
+              
+              if (useSandboxIsolation && sandboxPath) {
+                // SECURE MODE: Use isolated sandbox path
+                wslCwd = sandboxPath;
+                
+                // Convert Windows paths in the command to sandbox paths
+                let sandboxCommand = originalCommand;
+                if (workingDir) {
+                  sandboxCommand = PathGuard.convertPathInCommand(
+                    originalCommand,
+                    session.id,
+                    workingDir
+                  );
+                }
+                
+                // Validate command with PathGuard
+                const validation = PathGuard.validateCommand(sandboxCommand, session.id);
+                if (!validation.allowed) {
+                  log(`[Sandbox/WSL] Command blocked: ${validation.reason}`);
+                  // Return error to prevent execution
+                  return {
+                    continue: false,
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse',
+                      permissionDecision: 'deny',
+                      reason: validation.reason,
+                    },
+                  };
+                }
+                
+                // Use the sanitized command (which includes cd to sandbox)
+                const escapedCommand = validation.sanitizedCommand!.replace(/'/g, "'\\''");
+                const wrappedCommand = `wsl -d ${distro} -- bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; ${escapedCommand}'`;
+                
+                log(`[Sandbox/WSL] SECURE: Bash in sandbox: ${originalCommand.substring(0, 60)}...`);
+                log(`[Sandbox/WSL] Sandbox path: ${sandboxPath}`);
+                
+                return {
+                  continue: true,
+                  hookSpecificOutput: {
+                    hookEventName: 'PreToolUse',
+                    permissionDecision: 'allow',
+                    updatedInput: {
+                      ...toolInput,
+                      command: wrappedCommand,
+                      _wslWrapped: true,
+                      _sandboxIsolated: true,
+                    },
+                  },
+                };
+              } else {
+                // FALLBACK MODE: Use /mnt/ paths (less secure, but functional)
+                wslCwd = workingDir ? pathConverter.toWSL(workingDir) : '/mnt/c';
+                
+                // Convert Windows paths in the command to WSL /mnt/ paths
+                let wslCommand = originalCommand.replace(/([A-Za-z]):[\\\/]([^\s;|&"'<>]*)/g, (_match, drive, rest) => {
+                  return `/mnt/${drive.toLowerCase()}/${rest.replace(/\\/g, '/')}`;
+                });
+                
+                // Escape single quotes for bash -c
+                const escapedCommand = wslCommand.replace(/'/g, "'\\''");
+                const wrappedCommand = `wsl -d ${distro} -- bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; cd "${wslCwd}" && ${escapedCommand}'`;
+                
+                log(`[Sandbox/WSL] FALLBACK: Bash via /mnt/: ${originalCommand.substring(0, 60)}...`);
+                
+                return {
+                  continue: true,
+                  hookSpecificOutput: {
+                    hookEventName: 'PreToolUse',
+                    permissionDecision: 'allow',
+                    updatedInput: {
+                      ...toolInput,
+                      command: wrappedCommand,
+                      _wslWrapped: true,
+                      _sandboxIsolated: false,
+                    },
+                  },
+                };
+              }
+            }],
+          }],
+        },
         
         // System prompt: use Claude Code default + custom instructions
         systemPrompt: {
@@ -906,6 +1046,17 @@ Then follow the workflow described in that file.
           preset: 'claude_code',
           append: `
 You are a Claude agent, built on Anthropic's Claude Agent SDK.==
+
+${useSandboxIsolation && sandboxPath 
+  ? `<workspace_info>
+Your current workspace is located at: ${sandboxPath}
+This is an isolated sandbox environment. All file operations are confined to this directory.
+Do NOT assume, ask about, or mention any Windows paths or the user's real file system location.
+Treat ${sandboxPath} as the root of the user's project.
+</workspace_info>`
+  : workingDir 
+    ? `<workspace_info>Your current workspace is: ${workingDir}</workspace_info>`
+    : ''}
 
 ${availableSkillsPrompt}
 
@@ -1150,6 +1301,11 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             }
           }
           
+          // NOTE: Bash tool is intercepted by PreToolUse hook above for WSL wrapping
+          // Glob/Grep/Read/Write/Edit use the shared filesystem (/mnt/)
+          // They execute on Windows but access the same files as WSL
+          // Path validation is done above
+          
           log(`[Sandbox] ALLOWED: Tool ${toolName}`);
           return { behavior: 'allow', updatedInput: input };
         },
@@ -1371,6 +1527,20 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
     } finally {
       this.activeControllers.delete(session.id);
       this.pathResolver.unregisterSession(session.id);
+      
+      // Final sync: copy changes from sandbox back to Windows
+      if (useSandboxIsolation && sandboxPath) {
+        log('[ClaudeAgentRunner] Running final sync from sandbox to Windows...');
+        const syncResult = await SandboxSync.finalSync(session.id);
+        if (syncResult.success) {
+          log('[ClaudeAgentRunner] Final sync completed successfully');
+        } else {
+          logError('[ClaudeAgentRunner] Final sync failed:', syncResult.error);
+        }
+        
+        // Cleanup sandbox directory
+        await SandboxSync.cleanup(session.id);
+      }
     }
   }
 

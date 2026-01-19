@@ -98,6 +98,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, updates: any): Promise<any> => ipcRenderer.invoke('credentials.update', id, updates),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('credentials.delete', id),
   },
+
+  // Sandbox methods
+  sandbox: {
+    getStatus: (): Promise<{
+      platform: string;
+      mode: string;
+      initialized: boolean;
+      wsl?: { available: boolean; distro?: string; nodeAvailable?: boolean; claudeCodeAvailable?: boolean };
+      error?: string;
+    }> => ipcRenderer.invoke('sandbox.getStatus'),
+    checkWSL: (): Promise<{
+      available: boolean;
+      distro?: string;
+      nodeAvailable?: boolean;
+      claudeCodeAvailable?: boolean;
+    }> => ipcRenderer.invoke('sandbox.checkWSL'),
+    installNodeInWSL: (distro: string): Promise<boolean> => 
+      ipcRenderer.invoke('sandbox.installNodeInWSL', distro),
+    installClaudeCodeInWSL: (distro: string): Promise<boolean> => 
+      ipcRenderer.invoke('sandbox.installClaudeCodeInWSL', distro),
+  },
 });
 
 // Type declaration for the renderer process
@@ -138,6 +159,23 @@ declare global {
         save: (credential: any) => Promise<any>;
         update: (id: string, updates: any) => Promise<any>;
         delete: (id: string) => Promise<boolean>;
+      };
+      sandbox: {
+        getStatus: () => Promise<{
+          platform: string;
+          mode: string;
+          initialized: boolean;
+          wsl?: { available: boolean; distro?: string; nodeAvailable?: boolean; claudeCodeAvailable?: boolean };
+          error?: string;
+        }>;
+        checkWSL: () => Promise<{
+          available: boolean;
+          distro?: string;
+          nodeAvailable?: boolean;
+          claudeCodeAvailable?: boolean;
+        }>;
+        installNodeInWSL: (distro: string) => Promise<boolean>;
+        installClaudeCodeInWSL: (distro: string) => Promise<boolean>;
       };
     };
   }
