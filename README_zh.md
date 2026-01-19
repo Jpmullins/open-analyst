@@ -82,6 +82,7 @@ https://github.com/user-attachments/assets/f57b9106-4b2c-4747-aecd-a07f78af5dfc
 git clone https://github.com/OpenCoworkAI/open-cowork.git
 cd open-cowork
 npm install
+npm run rebuild
 npm run dev
 ```
 

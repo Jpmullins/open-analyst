@@ -82,6 +82,7 @@ For developers who want to contribute or modify the codebase:
 git clone https://github.com/OpenCoworkAI/open-cowork.git
 cd open-cowork
 npm install
+npm run rebuild
 npm run dev
 ```
 
