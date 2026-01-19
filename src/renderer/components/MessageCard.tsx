@@ -141,7 +141,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                         void window.electronAPI.openExternal(href);
                       }
                     }}
-                    className="text-accent hover:text-accent-hover underline underline-offset-2"
+                    className="text-accent hover:text-accent-hover"
                   >
                     {children}
                   </a>

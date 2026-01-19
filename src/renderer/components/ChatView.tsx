@@ -25,6 +25,8 @@ export function ChatView() {
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
+  const [showConnectorLabel, setShowConnectorLabel] = useState(true);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevMessageCountRef = useRef(0);
@@ -106,6 +108,21 @@ export function ChatView() {
     }
   }, [isElectron]);
 
+  useEffect(() => {
+    const titleEl = titleRef.current;
+    if (!titleEl) return;
+    const updateLabelVisibility = () => {
+      const isTruncated = titleEl.scrollWidth > titleEl.clientWidth;
+      setShowConnectorLabel(!isTruncated);
+    };
+    updateLabelVisibility();
+    const observer = new ResizeObserver(() => {
+      updateLabelVisibility();
+    });
+    observer.observe(titleEl);
+    return () => observer.disconnect();
+  }, [activeSession?.title]);
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     
@@ -145,14 +162,19 @@ export function ChatView() {
       {/* Header */}
       <div className="h-14 border-b border-border grid grid-cols-[1fr_auto_1fr] items-center px-6 bg-surface/80 backdrop-blur-sm">
         <div />
-        <h2 className="font-medium text-text-primary text-center truncate max-w-lg">
+        <h2 ref={titleRef} className="font-medium text-text-primary text-center truncate max-w-lg">
           {activeSession.title}
         </h2>
         {activeConnectors.length > 0 && (
           <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 justify-self-end">
             <Plug className="w-3.5 h-3.5 text-purple-500" />
             <span className="text-xs text-purple-500 font-medium">
-              {activeConnectors.length} connector{activeConnectors.length !== 1 ? 's' : ''}
+              {activeConnectors.length}
+              {showConnectorLabel && (
+                <span>
+                  {' '}connector{activeConnectors.length !== 1 ? 's' : ''}
+                </span>
+              )}
             </span>
           </div>
         )}
