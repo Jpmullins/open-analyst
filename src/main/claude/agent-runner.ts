@@ -622,8 +622,28 @@ Then follow the workflow described in that file.
       const workingDir = session.cwd ||  undefined;
       log('[ClaudeAgentRunner] Working directory:', workingDir || '(none)');
 
-      // Build conversation context by prepending history to prompt
-      // Build a chat-style history so Claude can continue previous turns
+      // Check if current user message includes images
+      // Images need to be passed via AsyncIterable<SDKUserMessage>, not string prompt
+      const lastUserMessage = existingMessages.length > 0
+        ? existingMessages[existingMessages.length - 1]
+        : null;
+
+      log('[ClaudeAgentRunner] Total messages:', existingMessages.length);
+      log('[ClaudeAgentRunner] Last message:', lastUserMessage ? {
+        role: lastUserMessage.role,
+        contentTypes: lastUserMessage.content.map((c: any) => c.type),
+        contentCount: lastUserMessage.content.length,
+      } : 'none');
+
+      const hasImages = lastUserMessage?.content.some((c: any) => c.type === 'image') || false;
+
+      if (hasImages) {
+        log('[ClaudeAgentRunner] User message contains images, will use AsyncIterable format');
+      } else {
+        log('[ClaudeAgentRunner] No images detected in last message');
+      }
+
+      // Build conversation context for text-only history
       let contextualPrompt = prompt;
       const historyItems = existingMessages
         .filter(msg => msg.role === 'user' || msg.role === 'assistant')
@@ -635,7 +655,7 @@ Then follow the workflow described in that file.
           return `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${textContent}`;
         });
 
-      if (historyItems.length > 0) {
+      if (historyItems.length > 0 && !hasImages) {
         contextualPrompt = `${historyItems.join('\n')}\nHuman: ${prompt}\nAssistant:`;
         log('[ClaudeAgentRunner] Including', historyItems.length, 'history messages in context');
       }
@@ -1141,12 +1161,53 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
       }
       log('[ClaudeAgentRunner] Sandbox via canUseTool, workspace:', workingDir);
       logTiming('before query() call - SDK initialization starts');
-      
+
       let firstMessageReceived = false;
-      for await (const message of query({
-        prompt: contextualPrompt,
-        options: queryOptions,
-      })) {
+
+      // Create query input based on whether we have images
+      const queryInput = hasImages
+        ? {
+            // For images: use AsyncIterable format with full message content
+            prompt: (async function* () {
+              // Convert last user message to SDK format with images
+              if (lastUserMessage && lastUserMessage.role === 'user') {
+                // Convert ContentBlock[] to Anthropic SDK's ContentBlockParam[]
+                const sdkContent = lastUserMessage.content.map((block: any) => {
+                  if (block.type === 'text') {
+                    return { type: 'text' as const, text: block.text };
+                  } else if (block.type === 'image') {
+                    return {
+                      type: 'image' as const,
+                      source: {
+                        type: 'base64' as const,
+                        media_type: block.source.media_type,
+                        data: block.source.data,
+                      },
+                    };
+                  }
+                  return block; // fallback for other types
+                });
+
+                yield {
+                  type: 'user' as const,
+                  message: {
+                    role: 'user' as const,
+                    content: sdkContent, // Include all content blocks (text + images)
+                  },
+                  parent_tool_use_id: null,
+                  session_id: session.id,
+                } as any; // Use 'as any' to bypass type checking since SDK types are complex
+              }
+            })(),
+            options: queryOptions,
+          }
+        : {
+            // For text-only: use simple string prompt
+            prompt: contextualPrompt,
+            options: queryOptions,
+          };
+
+      for await (const message of query(queryInput)) {
         if (!firstMessageReceived) {
           logTiming('FIRST MESSAGE RECEIVED from SDK');
           firstMessageReceived = true;

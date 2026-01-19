@@ -22,7 +22,7 @@ export class SessionManager {
   private agentRunner: AgentRunner;
   private mcpManager: MCPManager;
   private activeSessions: Map<string, AbortController> = new Map();
-  private promptQueues: Map<string, string[]> = new Map();
+  private promptQueues: Map<string, Array<{ prompt: string; content?: ContentBlock[] }>> = new Map();
   private pendingPermissions: Map<string, (result: PermissionResult) => void> = new Map();
 
   constructor(db: DatabaseInstance, sendToRenderer: (event: ServerEvent) => void) {
@@ -95,17 +95,18 @@ export class SessionManager {
     title: string,
     prompt: string,
     cwd?: string,
-    allowedTools?: string[]
+    allowedTools?: string[],
+    content?: ContentBlock[]
   ): Promise<Session> {
     log('[SessionManager] Starting new session:', title);
-    
+
     const session = this.createSession(title, cwd, allowedTools);
-    
+
     // Save to database
     this.saveSession(session);
 
-    // Start processing the prompt
-    this.enqueuePrompt(session, prompt);
+    // Start processing the prompt with content blocks
+    this.enqueuePrompt(session, prompt, content);
 
     return session;
   }
@@ -195,36 +196,44 @@ export class SessionManager {
   }
 
   // Continue an existing session
-  async continueSession(sessionId: string, prompt: string): Promise<void> {
+  async continueSession(sessionId: string, prompt: string, content?: ContentBlock[]): Promise<void> {
     log('[SessionManager] Continuing session:', sessionId);
-    
+
     const session = this.loadSession(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.enqueuePrompt(session, prompt);
+    this.enqueuePrompt(session, prompt, content);
   }
 
   // Process a prompt using ClaudeAgentRunner
-  private async processPrompt(session: Session, prompt: string): Promise<void> {
+  private async processPrompt(session: Session, prompt: string, content?: ContentBlock[]): Promise<void> {
     log('[SessionManager] Processing prompt for session:', session.id);
+    log('[SessionManager] Received content:', content ? JSON.stringify(content.map((c: any) => ({ type: c.type, hasData: !!c.source?.data }))) : 'none');
 
     try {
+      // Use provided content blocks or fall back to simple text
+      const messageContent: ContentBlock[] = content && content.length > 0
+        ? content
+        : [{ type: 'text', text: prompt } as TextContent];
+
+      log('[SessionManager] Final message content types:', messageContent.map((c: any) => c.type));
+
       // Save user message to database for persistence
       const userMessage: Message = {
         id: uuidv4(),
         sessionId: session.id,
         role: 'user',
-        content: [{ type: 'text', text: prompt } as TextContent],
+        content: messageContent, // Save full content including images
         timestamp: Date.now(),
       };
       this.saveMessage(userMessage);
-      log('[SessionManager] User message saved:', userMessage.id);
+      log('[SessionManager] User message saved:', userMessage.id, 'with', messageContent.length, 'content blocks');
 
       // Get existing messages for context (including the one we just saved)
       const existingMessages = this.getMessages(session.id);
-      
+
       // Run the agent - this handles everything including sending messages
       await this.agentRunner.run(session, prompt, existingMessages);
     } catch (error) {
@@ -236,9 +245,9 @@ export class SessionManager {
     }
   }
 
-  private enqueuePrompt(session: Session, prompt: string): void {
+  private enqueuePrompt(session: Session, prompt: string, content?: ContentBlock[]): void {
     const queue = this.promptQueues.get(session.id) || [];
-    queue.push(prompt);
+    queue.push({ prompt, content });
     this.promptQueues.set(session.id, queue);
 
     if (!this.activeSessions.has(session.id)) {
@@ -260,10 +269,10 @@ export class SessionManager {
         const queue = this.promptQueues.get(session.id);
         if (!queue || queue.length === 0) break;
 
-        const prompt = queue.shift();
-        if (!prompt) continue;
+        const item = queue.shift();
+        if (!item) continue;
 
-        await this.processPrompt(session, prompt);
+        await this.processPrompt(session, item.prompt, item.content);
 
         if (controller.signal.aborted) break;
       }

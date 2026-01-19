@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useIPC } from '../hooks/useIPC';
+import type { ContentBlock } from '../types';
 import {
   FileText,
   BarChart3,
@@ -8,6 +9,7 @@ import {
   Plus,
   Mail,
   Chrome,
+  X,
 } from 'lucide-react';
 
 export function WelcomeView() {
@@ -15,6 +17,8 @@ export function WelcomeView() {
   const [cwd, setCwd] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pastedImages, setPastedImages] = useState<Array<{ url: string; base64: string; mediaType: string }>>([]);
+  const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { startSession, selectFolder } = useIPC();
 
@@ -25,13 +29,209 @@ export function WelcomeView() {
     }
   };
 
+  // Handle paste event for images
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+
+    e.preventDefault();
+
+    const newImages: Array<{ url: string; base64: string; mediaType: string }> = [];
+
+    for (const item of imageItems) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+
+      try {
+        // Resize if needed to stay under API limit
+        const resizedBlob = await resizeImageIfNeeded(blob);
+        const base64 = await blobToBase64(resizedBlob);
+        const url = URL.createObjectURL(resizedBlob);
+        newImages.push({
+          url,
+          base64,
+          mediaType: resizedBlob.type as any,
+        });
+      } catch (err) {
+        console.error('Failed to process pasted image:', err);
+      }
+    }
+
+    setPastedImages(prev => [...prev, ...newImages]);
+  };
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix (e.g., "data:image/png;base64,")
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Resize and compress image if needed to stay under 5MB base64 limit
+  const resizeImageIfNeeded = async (blob: Blob): Promise<Blob> => {
+    // Claude API limit is 5MB for base64 encoded images
+    // Base64 encoding increases size by ~33%, so we target 3.75MB for the blob
+    const MAX_BLOB_SIZE = 3.75 * 1024 * 1024; // 3.75MB
+
+    if (blob.size <= MAX_BLOB_SIZE) {
+      return blob; // No need to resize
+    }
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+
+        // Calculate scaling factor to reduce file size
+        // We use a more aggressive approach: scale down until size is acceptable
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+
+        // Start with a scale factor based on size ratio
+        let scale = Math.sqrt(MAX_BLOB_SIZE / blob.size);
+        let quality = 0.9;
+
+        const attemptCompress = (currentScale: number, currentQuality: number): Promise<Blob> => {
+          canvas.width = Math.floor(img.width * currentScale);
+          canvas.height = Math.floor(img.height * currentScale);
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          return new Promise((resolveBlob) => {
+            canvas.toBlob(
+              (compressedBlob) => {
+                if (!compressedBlob) {
+                  reject(new Error('Failed to compress image'));
+                  return;
+                }
+
+                // If still too large, try again with lower quality or scale
+                if (compressedBlob.size > MAX_BLOB_SIZE && (currentQuality > 0.5 || currentScale > 0.3)) {
+                  const newQuality = Math.max(0.5, currentQuality - 0.1);
+                  const newScale = currentQuality <= 0.5 ? currentScale * 0.9 : currentScale;
+                  attemptCompress(newScale, newQuality).then(resolveBlob);
+                } else {
+                  resolveBlob(compressedBlob);
+                }
+              },
+              blob.type || 'image/jpeg',
+              currentQuality
+            );
+          });
+        };
+
+        attemptCompress(scale, quality).then(resolve).catch(reject);
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load image'));
+      };
+
+      img.src = url;
+    });
+  };
+
+  const removeImage = (index: number) => {
+    setPastedImages(prev => {
+      const updated = [...prev];
+      URL.revokeObjectURL(updated[index].url);
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
+  // Handle drag and drop for images
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+
+    if (imageFiles.length === 0) return;
+
+    const newImages: Array<{ url: string; base64: string; mediaType: string }> = [];
+
+    for (const file of imageFiles) {
+      try {
+        // Resize if needed to stay under API limit
+        const resizedBlob = await resizeImageIfNeeded(file);
+        const base64 = await blobToBase64(resizedBlob);
+        const url = URL.createObjectURL(resizedBlob);
+        newImages.push({
+          url,
+          base64,
+          mediaType: resizedBlob.type,
+        });
+      } catch (err) {
+        console.error('Failed to process dropped image:', err);
+      }
+    }
+
+    setPastedImages(prev => [...prev, ...newImages]);
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
 
     // Get value from ref to handle both controlled and uncontrolled cases
     const currentPrompt = textareaRef.current?.value || prompt;
 
-    if (!currentPrompt.trim() || isSubmitting) return;
+    if ((!currentPrompt.trim() && pastedImages.length === 0) || isSubmitting) return;
+
+    // Build content blocks
+    const contentBlocks: ContentBlock[] = [];
+
+    // Add images first
+    pastedImages.forEach(img => {
+      contentBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mediaType as any,
+          data: img.base64,
+        },
+      });
+    });
+
+    // Add text if present
+    if (currentPrompt.trim()) {
+      contentBlocks.push({
+        type: 'text',
+        text: currentPrompt.trim(),
+      });
+    }
 
     // Security: Require a working directory to be selected
     if (!cwd) {
@@ -45,11 +245,13 @@ export function WelcomeView() {
       setIsSubmitting(true);
       try {
         const sessionTitle = currentPrompt.slice(0, 50) + (currentPrompt.length > 50 ? '...' : '');
-        await startSession(sessionTitle, currentPrompt, folder);
+        await startSession(sessionTitle, contentBlocks, folder);
         setPrompt('');
         if (textareaRef.current) {
           textareaRef.current.value = '';
         }
+        pastedImages.forEach(img => URL.revokeObjectURL(img.url));
+        setPastedImages([]);
       } finally {
         setIsSubmitting(false);
       }
@@ -59,11 +261,13 @@ export function WelcomeView() {
     setIsSubmitting(true);
     try {
       const sessionTitle = currentPrompt.slice(0, 50) + (currentPrompt.length > 50 ? '...' : '');
-      await startSession(sessionTitle, currentPrompt, cwd);
+      await startSession(sessionTitle, contentBlocks, cwd);
       setPrompt('');
       if (textareaRef.current) {
         textareaRef.current.value = '';
       }
+      pastedImages.forEach(img => URL.revokeObjectURL(img.url));
+      setPastedImages([]);
     } finally {
       setIsSubmitting(false);
     }
@@ -140,7 +344,37 @@ export function WelcomeView() {
         </div>
 
         {/* Main Input Card - Right aligned */}
-        <form onSubmit={handleSubmit} className="card p-4 space-y-4">
+        <form
+          onSubmit={handleSubmit}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`card p-4 space-y-4 transition-colors ${
+            isDragging ? 'ring-2 ring-accent bg-accent/5' : ''
+          }`}
+        >
+          {/* Image previews */}
+          {pastedImages.length > 0 && (
+            <div className="grid grid-cols-5 gap-2 pb-2 border-b border-border w-full">
+              {pastedImages.map((img, index) => (
+                <div key={index} className="relative group">
+                  <img
+                    src={img.url}
+                    alt={`Pasted ${index + 1}`}
+                    className="w-full aspect-square object-cover rounded-lg border border-border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(index)}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-error text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Text Input - Auto-resizing */}
           <textarea
             ref={textareaRef}
@@ -149,6 +383,7 @@ export function WelcomeView() {
               setPrompt(e.target.value);
               adjustTextareaHeight();
             }}
+            onPaste={handlePaste}
             placeholder="How can I help you today?"
             rows={1}
             style={{ minHeight: '72px', maxHeight: '200px' }}

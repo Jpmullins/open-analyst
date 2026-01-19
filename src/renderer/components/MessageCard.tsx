@@ -105,11 +105,11 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
     case 'text': {
       const textBlock = block as { type: 'text'; text: string };
       const text = textBlock.text || '';
-      
+
       if (!text) {
         return <span className="text-text-muted italic">(empty text)</span>;
       }
-      
+
       // Simple text display for user messages, Markdown for assistant
       if (isUser) {
         return (
@@ -119,7 +119,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
           </p>
         );
       }
-      
+
       return (
         <div className="prose-chat max-w-none text-text-primary">
           <ReactMarkdown
@@ -222,6 +222,23 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
           {isStreaming && (
             <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" />
           )}
+        </div>
+      );
+    }
+
+    case 'image': {
+      const imageBlock = block as { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+      const { source } = imageBlock;
+      const imageSrc = `data:${source.media_type};base64,${source.data}`;
+
+      return (
+        <div className={`${isUser ? 'inline-block' : ''}`}>
+          <img
+            src={imageSrc}
+            alt="Pasted content"
+            className="w-full max-w-full rounded-lg border border-border"
+            style={{ maxHeight: '600px', objectFit: 'contain' }}
+          />
         </div>
       );
     }

@@ -34,6 +34,7 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type ContentBlock =
   | TextContent
+  | ImageContent
   | ToolUseContent
   | ToolResultContent
   | ThinkingContent;
@@ -41,6 +42,15 @@ export type ContentBlock =
 export interface TextContent {
   type: 'text';
   text: string;
+}
+
+export interface ImageContent {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    data: string;
+  };
 }
 
 export interface ToolUseContent {

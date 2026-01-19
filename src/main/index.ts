@@ -399,13 +399,15 @@ async function handleClientEvent(event: ClientEvent): Promise<unknown> {
         event.payload.title,
         event.payload.prompt,
         event.payload.cwd,
-        event.payload.allowedTools
+        event.payload.allowedTools,
+        event.payload.content
       );
 
     case 'session.continue':
       return sessionManager.continueSession(
         event.payload.sessionId,
-        event.payload.prompt
+        event.payload.prompt,
+        event.payload.content
       );
 
     case 'session.stop':

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../store';
-import type { ClientEvent, ServerEvent, PermissionResult, Session, Message, TraceStep } from '../types';
+import type { ClientEvent, ServerEvent, PermissionResult, Session, Message, TraceStep, ContentBlock } from '../types';
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -159,10 +159,19 @@ export function useIPC() {
 
   // Start a new session
   const startSession = useCallback(
-    async (title: string, prompt: string, cwd?: string) => {
+    async (title: string, promptOrContent: string | ContentBlock[], cwd?: string) => {
       setLoading(true);
       console.log('[useIPC] Starting session:', title);
-      
+
+      // Normalize input to ContentBlock array
+      const content: ContentBlock[] = typeof promptOrContent === 'string'
+        ? [{ type: 'text', text: promptOrContent }]
+        : promptOrContent;
+
+      // Extract text for legacy backend and session title (if needed)
+      const textContent = content.find(block => block.type === 'text');
+      const prompt = textContent && 'text' in textContent ? textContent.text : '';
+
       // Browser mode mock
       if (!isElectron) {
         try {
@@ -190,23 +199,23 @@ export function useIPC() {
             ],
             memoryEnabled: false,
           };
-          
+
           addSession(session);
           useAppStore.getState().setActiveSession(sessionId);
-          
+
           const userMessage: Message = {
             id: `msg-user-${Date.now()}`,
             sessionId,
             role: 'user',
-            content: [{ type: 'text', text: prompt }],
+            content,
             timestamp: Date.now(),
           };
           addMessage(sessionId, userMessage);
           const mockStepId = `mock-step-${Date.now()}`;
           activateNextTurn(sessionId, mockStepId);
-          
+
           await new Promise(resolve => setTimeout(resolve, 500));
-          
+
           const assistantMessage: Message = {
             id: `msg-assistant-${Date.now()}`,
             sessionId,
@@ -215,37 +224,42 @@ export function useIPC() {
             timestamp: Date.now(),
           };
           addMessage(sessionId, assistantMessage);
-          
+
           updateSession(sessionId, { status: 'idle' });
           clearActiveTurn(sessionId, mockStepId);
           setLoading(false);
-          
+
           return session;
         } catch (e) {
           throw e;
         }
       }
-      
+
       // Electron mode
       try {
         const session = await invoke<Session>({
           type: 'session.start',
-          payload: { title, prompt, cwd },
+          payload: {
+            title,
+            prompt,
+            cwd,
+            content, // Send full content blocks including images
+          },
         });
         if (session) {
           addSession(session);
           useAppStore.getState().setActiveSession(session.id);
-          
+
           // Immediately add user message to UI
           const userMessage: Message = {
             id: `msg-user-${Date.now()}`,
             sessionId: session.id,
             role: 'user',
-            content: [{ type: 'text', text: prompt }],
+            content,
             timestamp: Date.now(),
           };
           addMessage(session.id, userMessage);
-          
+
           // Immediately activate turn to show processing indicator while waiting for API
           const mockStepId = `pending-step-${Date.now()}`;
           activateNextTurn(session.id, mockStepId);
@@ -262,10 +276,19 @@ export function useIPC() {
 
   // Continue an existing session
   const continueSession = useCallback(
-    async (sessionId: string, prompt: string) => {
+    async (sessionId: string, promptOrContent: string | ContentBlock[]) => {
       setLoading(true);
       console.log('[useIPC] Continuing session:', sessionId);
-      
+
+      // Normalize input to ContentBlock array
+      const content: ContentBlock[] = typeof promptOrContent === 'string'
+        ? [{ type: 'text', text: promptOrContent }]
+        : promptOrContent;
+
+      // Extract text for legacy backend (if needed)
+      const textContent = content.find(block => block.type === 'text');
+      const prompt = textContent && 'text' in textContent ? textContent.text : '';
+
       // Immediately add user message to UI (for both modes)
       const store = useAppStore.getState();
       const isSessionRunning = store.sessions.find((session) => session.id === sessionId)?.status === 'running';
@@ -276,7 +299,7 @@ export function useIPC() {
         id: `msg-user-${Date.now()}`,
         sessionId,
         role: 'user',
-        content: [{ type: 'text', text: prompt }],
+        content,
         timestamp: Date.now(),
         localStatus: shouldQueue ? 'queued' : undefined,
       };
@@ -316,10 +339,14 @@ export function useIPC() {
         const mockStepId = `pending-step-${Date.now()}`;
         activateNextTurn(sessionId, mockStepId);
       }
-      
+
       send({
         type: 'session.continue',
-        payload: { sessionId, prompt },
+        payload: {
+          sessionId,
+          prompt,
+          content, // Send full content blocks including images
+        },
       });
       // Loading will be reset when we receive session.status event
     },
