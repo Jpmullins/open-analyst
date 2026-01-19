@@ -13,10 +13,7 @@
 import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn, exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { spawn } from 'child_process';
 
 // Types
 interface JSONRPCRequest {
@@ -386,6 +383,7 @@ class SandboxAgent {
    */
   shutdown(): { success: boolean } {
     this.isShuttingDown = true;
+    log('Shutting down, isShuttingDown:', this.isShuttingDown);
     // Exit after sending response
     setImmediate(() => process.exit(0));
     return { success: true };

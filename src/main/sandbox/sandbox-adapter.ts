@@ -52,7 +52,8 @@ export class SandboxAdapter implements SandboxExecutor {
     initialized: false,
     workspacePath: '',
   };
-  private config: SandboxAdapterConfig | null = null;
+  // @ts-expect-error Reserved for future use
+  private _config: SandboxAdapterConfig | null = null;
   private initPromise: Promise<void> | null = null;
 
   /**
@@ -97,7 +98,7 @@ export class SandboxAdapter implements SandboxExecutor {
   }
 
   private async _initialize(config: SandboxAdapterConfig): Promise<void> {
-    this.config = config;
+    this._config = config;
     this.state.workspacePath = config.workspacePath;
 
     const platform = process.platform;
@@ -271,7 +272,8 @@ export class SandboxAdapter implements SandboxExecutor {
     return result.response === 0;
   }
 
-  private async showClaudeCodeInstallPrompt(
+  // @ts-expect-error Reserved for future use
+  private async _showClaudeCodeInstallPrompt(
     config: SandboxAdapterConfig,
     distro: string
   ): Promise<boolean> {

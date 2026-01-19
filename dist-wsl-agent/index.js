@@ -48,8 +48,6 @@ const readline = __importStar(require("readline"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
-const util_1 = require("util");
-const execAsync = (0, util_1.promisify)(child_process_1.exec);
 // Logging to stderr (stdout is for JSON-RPC)
 function log(...args) {
     console.error('[WSL-Agent]', ...args);
@@ -334,6 +332,7 @@ class SandboxAgent {
      */
     shutdown() {
         this.isShuttingDown = true;
+        log('Shutting down, isShuttingDown:', this.isShuttingDown);
         // Exit after sending response
         setImmediate(() => process.exit(0));
         return { success: true };

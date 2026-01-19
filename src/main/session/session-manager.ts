@@ -244,7 +244,7 @@ export class SessionManager {
     const initPromise = initializeSandbox({
       workspacePath: session.cwd,
       mainWindow: null, // Will show dialogs globally
-    });
+    }).then(() => { /* void */ });
 
     this.sandboxInitPromises.set(session.cwd, initPromise);
 

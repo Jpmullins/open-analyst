@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { log, logWarn, logError } from '../utils/logger';
+import { log } from '../utils/logger';
 import type {
   SandboxConfig,
   SandboxExecutor,

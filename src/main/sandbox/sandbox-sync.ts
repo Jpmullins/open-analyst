@@ -65,8 +65,6 @@ const SYNC_EXCLUDES = [
 const sessions = new Map<string, SyncSession>();
 
 export class SandboxSync {
-  // Use ~/.claude/sandbox for isolation (user's home, same location as claude-code config)
-  private static readonly SANDBOX_BASE = '$HOME/.claude/sandbox';
 
   /**
    * Check if a sandbox session already exists for the given session ID

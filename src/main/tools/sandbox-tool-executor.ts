@@ -9,7 +9,7 @@ import * as path from 'path';
 import { glob } from 'glob';
 import { SandboxAdapter, getSandboxAdapter } from '../sandbox/sandbox-adapter';
 import { PathResolver } from '../sandbox/path-resolver';
-import { log, logWarn, logError } from '../utils/logger';
+// Logger imports removed - using sandbox adapter's internal logging
 import type { ToolResult, ExecutionContext, MountedPath } from '../../renderer/types';
 
 /**

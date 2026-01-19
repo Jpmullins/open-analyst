@@ -602,7 +602,7 @@ export class WSLBridge implements SandboxExecutor {
       this.isInitialized = false;
       
       // Reject all pending requests
-      for (const [id, pending] of this.pendingRequests) {
+      for (const [_id, pending] of this.pendingRequests) {
         pending.reject(new Error('WSL agent process exited'));
         clearTimeout(pending.timeout);
       }
@@ -853,8 +853,7 @@ export class WSLBridge implements SandboxExecutor {
 
     const wslCwd = options.cwd ? pathConverter.toWSL(options.cwd) : undefined;
 
-    // Create a streaming request
-    const requestId = uuidv4();
+    // Streaming request support can be added here using uuidv4() for request tracking
     
     // This returns an async iterable that yields claude-code messages
     // Implementation would involve streaming responses from the agent
