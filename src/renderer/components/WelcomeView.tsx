@@ -15,6 +15,7 @@ export function WelcomeView() {
   const [cwd, setCwd] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isComposingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { startSession, selectFolder } = useIPC();
 
@@ -149,6 +150,12 @@ export function WelcomeView() {
               setPrompt(e.target.value);
               adjustTextareaHeight();
             }}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+            }}
             placeholder="How can I help you today?"
             rows={1}
             style={{ minHeight: '72px', maxHeight: '200px' }}
@@ -156,6 +163,9 @@ export function WelcomeView() {
             onKeyDown={(e) => {
               // Enter to send, Shift+Enter for new line
               if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.nativeEvent.isComposing || isComposingRef.current || e.keyCode === 229) {
+                  return;
+                }
                 e.preventDefault();
                 handleSubmit();
               }
