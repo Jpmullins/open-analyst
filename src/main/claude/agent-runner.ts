@@ -677,43 +677,43 @@ Then follow the workflow described in that file.
           session.id,
           sandbox.wslStatus.distro
         );
-        
+
         if (syncResult.success) {
           sandboxPath = syncResult.sandboxPath;
           useSandboxIsolation = true;
           log(`[ClaudeAgentRunner] Sandbox initialized: ${sandboxPath}`);
           log(`[ClaudeAgentRunner]   Files: ${syncResult.fileCount}, Size: ${syncResult.totalSize} bytes`);
-          
+
           // Copy built-in skills to sandbox ~/.claude/skills/
           const builtinSkillsPath = this.getBuiltinSkillsPath();
           if (builtinSkillsPath && fs.existsSync(builtinSkillsPath)) {
             try {
               const distro = sandbox.wslStatus!.distro!;
               const sandboxSkillsPath = `${sandboxPath}/.claude/skills`;
-              
+
               // Create .claude/skills directory in sandbox
               const { execSync } = require('child_process');
-              execSync(`wsl -d ${distro} -e mkdir -p "${sandboxSkillsPath}"`, { 
-                encoding: 'utf-8', 
-                timeout: 10000 
+              execSync(`wsl -d ${distro} -e mkdir -p "${sandboxSkillsPath}"`, {
+                encoding: 'utf-8',
+                timeout: 10000
               });
-              
+
               // Use rsync to recursively copy all skills (much faster and handles subdirectories)
               const wslSourcePath = pathConverter.toWSL(builtinSkillsPath);
               const rsyncCmd = `rsync -av "${wslSourcePath}/" "${sandboxSkillsPath}/"`;
               log(`[ClaudeAgentRunner] Copying skills with rsync: ${rsyncCmd}`);
-              
+
               execSync(`wsl -d ${distro} -e bash -c "${rsyncCmd}"`, {
                 encoding: 'utf-8',
                 timeout: 120000  // 2 min timeout for large skill directories
               });
-              
+
               // List copied skills for verification
               const copiedSkills = execSync(`wsl -d ${distro} -e ls "${sandboxSkillsPath}"`, {
                 encoding: 'utf-8',
                 timeout: 10000
               }).trim().split('\n').filter(Boolean);
-              
+
               log(`[ClaudeAgentRunner] Built-in skills copied to sandbox: ${sandboxSkillsPath}`);
               log(`[ClaudeAgentRunner]   Skills: ${copiedSkills.join(', ')}`);
             } catch (error) {
@@ -723,6 +723,62 @@ Then follow the workflow described in that file.
         } else {
           logError('[ClaudeAgentRunner] Sandbox sync failed:', syncResult.error);
           log('[ClaudeAgentRunner] Falling back to /mnt/ access (less secure)');
+        }
+      }
+
+      // Initialize sandbox sync if Lima mode is active
+      if (sandbox.isLima && sandbox.limaStatus?.instanceRunning && workingDir) {
+        log('[ClaudeAgentRunner] Lima mode active, initializing sandbox sync...');
+        const { LimaSync } = await import('../sandbox/lima-sync');
+        const syncResult = await LimaSync.initSync(
+          workingDir,
+          session.id
+        );
+
+        if (syncResult.success) {
+          sandboxPath = syncResult.sandboxPath;
+          useSandboxIsolation = true;
+          log(`[ClaudeAgentRunner] Sandbox initialized: ${sandboxPath}`);
+          log(`[ClaudeAgentRunner]   Files: ${syncResult.fileCount}, Size: ${syncResult.totalSize} bytes`);
+
+          // Copy built-in skills to sandbox ~/.claude/skills/
+          const builtinSkillsPath = this.getBuiltinSkillsPath();
+          if (builtinSkillsPath && fs.existsSync(builtinSkillsPath)) {
+            try {
+              const sandboxSkillsPath = `${sandboxPath}/.claude/skills`;
+
+              // Create .claude/skills directory in sandbox
+              const { execSync } = require('child_process');
+              execSync(`limactl shell claude-sandbox -- mkdir -p "${sandboxSkillsPath}"`, {
+                encoding: 'utf-8',
+                timeout: 10000
+              });
+
+              // Use rsync to recursively copy all skills (much faster and handles subdirectories)
+              // Lima mounts /Users directly, so paths are the same
+              const rsyncCmd = `rsync -av "${builtinSkillsPath}/" "${sandboxSkillsPath}/"`;
+              log(`[ClaudeAgentRunner] Copying skills with rsync: ${rsyncCmd}`);
+
+              execSync(`limactl shell claude-sandbox -- bash -c "${rsyncCmd.replace(/"/g, '\\"')}"`, {
+                encoding: 'utf-8',
+                timeout: 120000  // 2 min timeout for large skill directories
+              });
+
+              // List copied skills for verification
+              const copiedSkills = execSync(`limactl shell claude-sandbox -- ls "${sandboxSkillsPath}"`, {
+                encoding: 'utf-8',
+                timeout: 10000
+              }).trim().split('\n').filter(Boolean);
+
+              log(`[ClaudeAgentRunner] Built-in skills copied to sandbox: ${sandboxSkillsPath}`);
+              log(`[ClaudeAgentRunner]   Skills: ${copiedSkills.join(', ')}`);
+            } catch (error) {
+              logError('[ClaudeAgentRunner] Failed to copy skills to sandbox:', error);
+            }
+          }
+        } else {
+          logError('[ClaudeAgentRunner] Sandbox sync failed:', syncResult.error);
+          log('[ClaudeAgentRunner] Falling back to direct access (less secure)');
         }
       }
 
@@ -1272,28 +1328,60 @@ Then follow the workflow described in that file.
               // Handle Lima mode - wrap commands to run in Lima VM
               if (isLimaMode) {
                 const originalCommand = String(toolInput.command || '');
-                const limaCwd = workingDir || '/tmp';
 
-                // Escape single quotes for bash -c
-                const escapedCommand = originalCommand.replace(/'/g, "'\\''");
-                // Run command in Lima VM with nvm sourced for Node.js access
-                const wrappedCommand = `limactl shell claude-sandbox -- bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; cd "${limaCwd}" && ${escapedCommand}'`;
+                // Determine the working directory for Lima
+                let limaCwd: string;
 
-                log(`[Sandbox/Lima] Bash in Lima VM: ${originalCommand.substring(0, 60)}...`);
-                log(`[Sandbox/Lima] Working directory: ${limaCwd}`);
+                if (useSandboxIsolation && sandboxPath) {
+                  // SECURE MODE: Use isolated sandbox path
+                  limaCwd = sandboxPath;
 
-                return {
-                  continue: true,
-                  hookSpecificOutput: {
-                    hookEventName: 'PreToolUse',
-                    permissionDecision: 'allow',
-                    updatedInput: {
-                      ...toolInput,
-                      command: wrappedCommand,
-                      _limaWrapped: true,
+                  // Escape single quotes for bash -c
+                  const escapedCommand = originalCommand.replace(/'/g, "'\\''");
+                  // Run command in Lima VM with nvm sourced for Node.js access
+                  const wrappedCommand = `limactl shell claude-sandbox -- bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; cd "${limaCwd}" && ${escapedCommand}'`;
+
+                  log(`[Sandbox/Lima] SECURE: Bash in sandbox: ${originalCommand.substring(0, 60)}...`);
+                  log(`[Sandbox/Lima] Sandbox path: ${sandboxPath}`);
+
+                  return {
+                    continue: true,
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse',
+                      permissionDecision: 'allow',
+                      updatedInput: {
+                        ...toolInput,
+                        command: wrappedCommand,
+                        _limaWrapped: true,
+                        _sandboxIsolated: true,
+                      },
                     },
-                  },
-                };
+                  };
+                } else {
+                  // FALLBACK MODE: Use direct paths (less secure, but functional)
+                  limaCwd = workingDir || '/tmp';
+
+                  // Escape single quotes for bash -c
+                  const escapedCommand = originalCommand.replace(/'/g, "'\\''");
+                  // Run command in Lima VM with nvm sourced for Node.js access
+                  const wrappedCommand = `limactl shell claude-sandbox -- bash -c 'source ~/.nvm/nvm.sh 2>/dev/null; cd "${limaCwd}" && ${escapedCommand}'`;
+
+                  log(`[Sandbox/Lima] Bash in Lima VM: ${originalCommand.substring(0, 60)}...`);
+                  log(`[Sandbox/Lima] Working directory: ${limaCwd}`);
+
+                  return {
+                    continue: true,
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse',
+                      permissionDecision: 'allow',
+                      updatedInput: {
+                        ...toolInput,
+                        command: wrappedCommand,
+                        _limaWrapped: true,
+                      },
+                    },
+                  };
+                }
               }
 
               // sandboxAdapter and isWSLMode already defined above
@@ -1912,21 +2000,35 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
     } finally {
       this.activeControllers.delete(session.id);
       this.pathResolver.unregisterSession(session.id);
-      
-      // Sync changes from sandbox back to Windows (but don't cleanup - sandbox persists)
+
+      // Sync changes from sandbox back to host OS (but don't cleanup - sandbox persists)
       // Cleanup happens on session delete or app shutdown
       if (useSandboxIsolation && sandboxPath) {
-        log('[ClaudeAgentRunner] Syncing sandbox changes to Windows (sandbox persists for this conversation)...');
-        const syncResult = await SandboxSync.syncToWindows(session.id);
-        if (syncResult.success) {
-          log('[ClaudeAgentRunner] Sync completed successfully');
-        } else {
-          logError('[ClaudeAgentRunner] Sync failed:', syncResult.error);
+        const sandbox = getSandboxAdapter();
+
+        if (sandbox.isWSL) {
+          log('[ClaudeAgentRunner] Syncing sandbox changes to Windows (sandbox persists for this conversation)...');
+          const syncResult = await SandboxSync.syncToWindows(session.id);
+          if (syncResult.success) {
+            log('[ClaudeAgentRunner] Sync completed successfully');
+          } else {
+            logError('[ClaudeAgentRunner] Sync failed:', syncResult.error);
+          }
+        } else if (sandbox.isLima) {
+          log('[ClaudeAgentRunner] Syncing sandbox changes to macOS (sandbox persists for this conversation)...');
+          const { LimaSync } = await import('../sandbox/lima-sync');
+          const syncResult = await LimaSync.syncToMac(session.id);
+          if (syncResult.success) {
+            log('[ClaudeAgentRunner] Sync completed successfully');
+          } else {
+            logError('[ClaudeAgentRunner] Sync failed:', syncResult.error);
+          }
         }
+
         // Note: Sandbox is NOT cleaned up here - it persists across messages in the same conversation
         // Cleanup occurs when:
         // 1. User deletes the conversation (SessionManager.deleteSession)
-        // 2. App is closed (SandboxSync.cleanupAllSessions)
+        // 2. App is closed (SandboxSync/LimaSync.cleanupAllSessions)
       }
     }
   }

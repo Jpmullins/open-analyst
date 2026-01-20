@@ -162,10 +162,17 @@ async function cleanupSandboxResources(): Promise<void> {
   }
   isCleaningUp = true;
 
-  // Cleanup all sandbox sessions (sync changes back to Windows first)
+  // Cleanup all sandbox sessions (sync changes back to host OS first)
   try {
     log('[App] Cleaning up all sandbox sessions...');
+
+    // Cleanup WSL sessions
     await SandboxSync.cleanupAllSessions();
+
+    // Cleanup Lima sessions
+    const { LimaSync } = await import('./sandbox/lima-sync');
+    await LimaSync.cleanupAllSessions();
+
     log('[App] Sandbox sessions cleanup complete');
   } catch (error) {
     logError('[App] Error cleaning up sandbox sessions:', error);

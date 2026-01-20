@@ -335,6 +335,21 @@ export class SessionManager {
                 logError('[SessionManager] Failed to sync file to sandbox:', syncResult.error);
                 // Continue anyway - file is in Windows .tmp, agent might still work via /mnt/
               }
+            } else {
+              // Check for Lima sandbox
+              const { LimaSync } = await import('../sandbox/lima-sync');
+              const limaSandboxPath = LimaSync.getSandboxPath(session.id);
+              if (limaSandboxPath) {
+                const sandboxRelativePath = `.tmp/${destFilename}`;
+                log('[SessionManager] Syncing attached file to Lima sandbox:', sandboxRelativePath);
+                const syncResult = await LimaSync.syncFileToSandbox(session.id, destPath, sandboxRelativePath);
+                if (syncResult.success) {
+                  log('[SessionManager] File synced to Lima sandbox:', syncResult.sandboxPath);
+                } else {
+                  logError('[SessionManager] Failed to sync file to Lima sandbox:', syncResult.error);
+                  // Continue anyway - file is in macOS .tmp, agent might still work via direct access
+                }
+              }
             }
 
             // Update the content block with the new relative path and actual size
