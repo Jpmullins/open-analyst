@@ -11,6 +11,7 @@ import {
   X,
   Paperclip,
   BookOpen,
+  FileSearch,
 } from 'lucide-react';
 
 export function WelcomeView() {
@@ -373,6 +374,13 @@ export function WelcomeView() {
       prompt: 'Please help me use Chrome to search for and summarize papers related to [Agent] within two days.\nSource websites:\n1. HuggingFace Daily Papers. Please include the vote information and a brief summary. Note that it may not include papers in the weekend, so you may need to check the papers in previous days. But make sure that there is a total of two days.',
       requiresChrome: true 
     },
+    { 
+      id: 'research-notion', 
+      label: 'Research Agent surveys', 
+      icon: FileSearch, 
+      prompt: 'Help me research three representative survey papers related to agents, and add them under a Notion page titled "Agent Survey". For each paper, include the title, authors, publication venue/year, and a brief summary of the main contributions.',
+      requiresNotion: true 
+    },
   ];
 
   return (
@@ -385,7 +393,7 @@ export function WelcomeView() {
               key={tag.id}
               onClick={() => handleTagClick(tag.id, tag.prompt)}
               className={`tag ${selectedTag === tag.id ? 'tag-active' : ''} ${
-                'requiresChrome' in tag && tag.requiresChrome ? 'relative' : ''
+                ('requiresChrome' in tag && tag.requiresChrome) || ('requiresNotion' in tag && tag.requiresNotion) ? 'relative' : ''
               }`}
             >
               <tag.icon className={`w-4 h-4 ${selectedTag === tag.id ? 'text-accent' : 'text-text-muted'}`} />
@@ -394,6 +402,12 @@ export function WelcomeView() {
                 <span className="flex items-center gap-1 ml-1.5 px-2 py-0.5 text-[10px] font-medium rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/20">
                   <Chrome className="w-3 h-3" />
                   <span>Chrome</span>
+                </span>
+              )}
+              {'requiresNotion' in tag && tag.requiresNotion && (
+                <span className="flex items-center gap-1 ml-1.5 px-2 py-0.5 text-[10px] font-medium rounded-full bg-gray-800/10 text-gray-700 border border-gray-800/20">
+                  <span className="text-sm">📝</span>
+                  <span>Notion</span>
                 </span>
               )}
             </button>

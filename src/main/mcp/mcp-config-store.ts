@@ -5,13 +5,26 @@ import type { MCPServerConfig } from './mcp-manager';
  * Preset MCP Server Configurations
  * These are common MCP servers that users can quickly add
  */
-export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'enabled'>> = {
+export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'enabled'> & { requiresEnv?: string[]; envDescription?: Record<string, string> }> = {
   chrome: {
     name: 'Chrome',
     type: 'stdio',
     command: 'npx',
     args: ['-y', 'chrome-devtools-mcp@latest', '--browser-url', 'http://localhost:9222'],
-  }
+  },
+  notion: {
+    name: 'Notion',
+    type: 'stdio',
+    command: 'npx',
+    args: ['-y', '@notionhq/notion-mcp-server'],
+    env: {
+      NOTION_TOKEN: '',
+    },
+    requiresEnv: ['NOTION_TOKEN'],
+    envDescription: {
+      NOTION_TOKEN: 'Notion Internal Integration Token (get from notion.so/profile/integrations)',
+    },
+  },
 };
 
 /**

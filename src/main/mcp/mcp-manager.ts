@@ -74,6 +74,56 @@ export class MCPManager {
   }
 
   /**
+   * Update a single server configuration and reconnect if needed
+   * This is more efficient than reinitializing all servers
+   */
+  async updateServer(config: MCPServerConfig): Promise<void> {
+    log(`[MCPManager] Updating server: ${config.name} (enabled: ${config.enabled})`);
+    
+    // Store the updated config
+    this.serverConfigs.set(config.id, config);
+    
+    // Check if server is currently connected
+    const isConnected = this.clients.has(config.id);
+    
+    if (config.enabled && !isConnected) {
+      // Need to connect
+      try {
+        await this.connectServer(config);
+        await this.refreshTools();
+      } catch (error) {
+        logError(`[MCPManager] Failed to connect to server ${config.name}:`, error);
+        throw error;
+      }
+    } else if (!config.enabled && isConnected) {
+      // Need to disconnect
+      await this.disconnectServer(config.id);
+      await this.refreshTools();
+    } else if (config.enabled && isConnected) {
+      // Config changed, reconnect
+      await this.disconnectServer(config.id);
+      try {
+        await this.connectServer(config);
+        await this.refreshTools();
+      } catch (error) {
+        logError(`[MCPManager] Failed to reconnect server ${config.name}:`, error);
+        throw error;
+      }
+    }
+    // If disabled and not connected, nothing to do
+  }
+
+  /**
+   * Remove a server from tracking (call after deleting from config store)
+   */
+  async removeServer(serverId: string): Promise<void> {
+    log(`[MCPManager] Removing server: ${serverId}`);
+    await this.disconnectServer(serverId);
+    this.serverConfigs.delete(serverId);
+    await this.refreshTools();
+  }
+
+  /**
    * Connect to a single MCP server
    */
   private async connectServer(config: MCPServerConfig): Promise<void> {

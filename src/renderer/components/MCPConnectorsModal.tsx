@@ -38,6 +38,8 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
   const [showAddForm, setShowAddForm] = useState(false);
   const [presets, setPresets] = useState<Record<string, any>>({});
   const [showPresets, setShowPresets] = useState(true);
+  const [configuringPreset, setConfiguringPreset] = useState<{ key: string; preset: any } | null>(null);
+  const [presetEnvValues, setPresetEnvValues] = useState<Record<string, string>>({});
   
   // Auto-refresh tools periodically
   useEffect(() => {
@@ -90,19 +92,40 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
       return;
     }
 
-    // Create server config from preset
+    // Check if preset requires environment variables
+    if (preset.requiresEnv && preset.requiresEnv.length > 0) {
+      const initialEnv: Record<string, string> = {};
+      preset.requiresEnv.forEach((key: string) => {
+        initialEnv[key] = preset.env?.[key] || '';
+      });
+      setPresetEnvValues(initialEnv);
+      setConfiguringPreset({ key: presetKey, preset });
+      return;
+    }
+
+    // No env required, add directly
+    await addPresetServer(presetKey, preset, {});
+  }
+
+  async function addPresetServer(presetKey: string, preset: any, envOverrides: Record<string, string>) {
     const serverConfig: MCPServerConfig = {
       id: `mcp-${presetKey}-${Date.now()}`,
       name: preset.name,
       type: preset.type,
+      // STDIO fields
       command: preset.command,
       args: preset.args,
-      env: preset.env,
-      enabled: false, // Add disabled by default, user can enable it
+      env: { ...preset.env, ...envOverrides },
+      // SSE fields
+      url: preset.url,
+      headers: preset.headers,
+      enabled: false,
     };
 
     await handleSaveServer(serverConfig);
     setShowPresets(false);
+    setConfiguringPreset(null);
+    setPresetEnvValues({});
   }
 
   async function loadServers() {
@@ -265,8 +288,65 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
             )}
           </div>
 
+          {/* Preset Environment Configuration Modal */}
+          {configuringPreset && (
+            <div className="p-4 rounded-xl border border-accent/30 bg-accent/5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-text-primary">
+                  Configure {configuringPreset.preset.name}
+                </h3>
+                <button
+                  onClick={() => {
+                    setConfiguringPreset(null);
+                    setPresetEnvValues({});
+                  }}
+                  className="text-text-muted hover:text-text-primary"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-text-muted">
+                This connector requires configuration before it can be added.
+              </p>
+              <div className="space-y-3">
+                {configuringPreset.preset.requiresEnv?.map((envKey: string) => (
+                  <div key={envKey}>
+                    <label className="block text-xs font-medium text-text-secondary mb-1">
+                      {configuringPreset.preset.envDescription?.[envKey] || envKey}
+                    </label>
+                    <input
+                      type="password"
+                      value={presetEnvValues[envKey] || ''}
+                      onChange={(e) => setPresetEnvValues(prev => ({ ...prev, [envKey]: e.target.value }))}
+                      placeholder={`Enter ${envKey}`}
+                      className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setConfiguringPreset(null);
+                    setPresetEnvValues({});
+                  }}
+                  className="px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => addPresetServer(configuringPreset.key, configuringPreset.preset, presetEnvValues)}
+                  disabled={isLoading || configuringPreset.preset.requiresEnv?.some((key: string) => !presetEnvValues[key]?.trim())}
+                  className="px-4 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors disabled:opacity-50"
+                >
+                  Add Connector
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Preset Servers */}
-          {!showAddForm && !editingServer && Object.keys(presets).length > 0 && (
+          {!showAddForm && !editingServer && !configuringPreset && Object.keys(presets).length > 0 && (
             <div className="space-y-3">
               <button
                 onClick={() => setShowPresets(!showPresets)}
@@ -286,6 +366,7 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
                       s.type === preset.type &&
                       s.command === preset.command
                     );
+                    const requiresConfig = preset.requiresEnv && preset.requiresEnv.length > 0;
                     return (
                       <div
                         key={key}
@@ -296,7 +377,14 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
                         }`}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm text-text-primary">{preset.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm text-text-primary">{preset.name}</span>
+                            {requiresConfig && !isAdded && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                Requires Token
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-text-muted mt-0.5 truncate">
                             {preset.type === 'stdio' 
                               ? `${preset.command} ${preset.args?.join(' ') || ''}`
@@ -316,7 +404,7 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
                             className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
                           >
                             <Plus className="w-3.5 h-3.5" />
-                            Add
+                            {requiresConfig ? 'Configure' : 'Add'}
                           </button>
                         )}
                       </div>

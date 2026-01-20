@@ -309,27 +309,30 @@ ipcMain.handle('mcp.getServer', (_event, serverId: string) => {
 
 ipcMain.handle('mcp.saveServer', async (_event, config: MCPServerConfig) => {
   mcpConfigStore.saveServer(config);
-  // Re-initialize MCP servers if session manager exists
+  // Update only this specific server, not all servers
   if (sessionManager) {
     const mcpManager = sessionManager.getMCPManager();
-    const servers = mcpConfigStore.getEnabledServers();
     try {
-      await mcpManager.initializeServers(servers);
+      await mcpManager.updateServer(config);
+      log(`[MCP] Server ${config.name} updated successfully`);
     } catch (err) {
-      logError('[MCP] Failed to reinitialize servers:', err);
+      logError('[MCP] Failed to update server:', err);
     }
   }
   return { success: true };
 });
 
-ipcMain.handle('mcp.deleteServer', (_event, serverId: string) => {
+ipcMain.handle('mcp.deleteServer', async (_event, serverId: string) => {
   mcpConfigStore.deleteServer(serverId);
-  // Disconnect from the server if session manager exists
+  // Remove and disconnect only this specific server
   if (sessionManager) {
     const mcpManager = sessionManager.getMCPManager();
-    mcpManager.disconnectServer(serverId).catch(err => {
-      logError('[MCP] Failed to disconnect server:', err);
-    });
+    try {
+      await mcpManager.removeServer(serverId);
+      log(`[MCP] Server ${serverId} removed successfully`);
+    } catch (err) {
+      logError('[MCP] Failed to remove server:', err);
+    }
   }
   return { success: true };
 });
