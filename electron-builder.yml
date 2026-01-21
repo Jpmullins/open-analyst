@@ -6,7 +6,7 @@ directories:
   output: release
   buildResources: resources
 
-npmRebuild: false
+npmRebuild: true
 
 files:
   - dist/**/*
