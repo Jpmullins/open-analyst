@@ -39,13 +39,16 @@ It provides a sandboxed workspace where AI can manage files, read documents, and
 ## ✨ Key Features
 
 - **Zero Coding Required**: Pre-built installers for Windows and macOS, just download and run.
-- **Multi-Model Support**: Supports **Claude**, and includes deep integration for Chinese models (**GLM**, **MiniMax**, **Kimi**).
+- **Multi-Model Support**: Supports **Claude**, **OpenAI-compatible APIs**, and includes deep integration for Chinese models (**GLM**, **MiniMax**, **Kimi**). More models coming soon!
 - **Bring Your Own Key**: Use your OpenRouter or Anthropic API key, pay only for what you use.
 - **File Management**: AI can read, write, and organize files within your workspace.
-- **Skills System**: Built-in workflows for PPTX, DOCX, PDF, XLSX generation and processing.
+- **Skills System**: Built-in workflows for PPTX, DOCX, PDF, XLSX generation and processing. **Supports custom skill creation and deletion.**
+- **Connectors**: Add and customize connectors to extend AI capabilities with external services and APIs.
+- **Rich Input**: Drag & drop files and images directly into the chat input for seamless multimodal interaction.
 - **Real-time Trace**: Watch AI reasoning and tool execution in the trace panel.
 - **Sandboxed Security**: All operations confined to your chosen workspace folder.
 - **VM-Level Isolation**: Optional WSL2 (Windows) and Lima (macOS) sandbox for enhanced security—AI commands run in an isolated Linux VM, completely separated from your host system.
+- **Localization**: Full UI support for English and Chinese languages.
 
 ---
 
@@ -217,8 +220,12 @@ open-cowork/
 
 - [x] **Core**: Stable Windows & macOS Installers
 - [x] **Security**: Full Filesystem Sandboxing
-- [x] **Skills**: PPTX, DOCX, PDF, XLSX Support
+- [x] **Skills**: PPTX, DOCX, PDF, XLSX Support + Custom Skill Management
 - [x] **VM Sandbox**: WSL2 (Windows) and Lima (macOS) isolation support
+- [x] **Connectors**: Custom connector support for external service integration
+- [x] **Rich Input**: File upload and image input in chat
+- [x] **Multi-Model**: OpenAI-compatible API support (iterating)
+- [x] **UI/UX**: Enhanced interface with English/Chinese localization
 - [ ] **Better Memory Handling**: Improved context management for longer sessions and cross-session memory.
 
 ---
