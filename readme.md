@@ -29,60 +29,29 @@
 
 **Open Cowork** is an open-source implementation of **Claude Cowork**, with one-click installers for **Windows** and **macOS**—no coding required.
 
-It provides a sandboxed workspace where AI can manage files, read documents, and generate professional outputs like **PPTX**, **DOCX**, **XLSX**, and more through our built-in Skills system.
+It provides a sandboxed workspace where AI can manage files, generate professional outputs (PPTX, DOCX, XLSX, etc.) through our built-in **Skills** system, and **connect to desktop apps via MCP** (browser, Notion, etc.) for better collaboration.
 
 > [!WARNING]
-> **Disclaimer**: Open Cowork is an AI tool. Please exercise caution with its operations, especially when authorizing file modifications or deletions.
+> **Disclaimer**: Open Cowork is an AI collaboration tool. Please exercise caution with its operations, especially when authorizing file modifications or deletions. We support VM-based sandbox isolation, but some operations may still carry risks.
 
 ---
 
 ## ✨ Key Features
 
-- **Zero Coding Required**: Pre-built installers for Windows and macOS, just download and run.
-- **Multi-Model Support**: Supports **Claude**, **OpenAI-compatible APIs**, and includes deep integration for Chinese models (**GLM**, **MiniMax**, **Kimi**). More models coming soon!
-- **Bring Your Own Key**: Use your OpenRouter or Anthropic API key, pay only for what you use.
-- **File Management**: AI can read, write, and organize files within your workspace.
+- **One-Click Install, Ready to Use**: Pre-built installers for Windows and macOS, no environment setup needed—just download and start using.
+- **Flexible Model Support**: Supports **Claude**, **OpenAI-compatible APIs**, and Chinese models like **GLM**, **MiniMax**, **Kimi**. Use your OpenRouter, Anthropic, or other API keys with flexible configuration. More models coming soon!
+- **Smart File Management**: Read, write, and organize files within your workspace.
 - **Skills System**: Built-in workflows for PPTX, DOCX, PDF, XLSX generation and processing. **Supports custom skill creation and deletion.**
-- **Connectors**: Add and customize connectors to extend AI capabilities with external services and APIs.
-- **Rich Input**: Drag & drop files and images directly into the chat input for seamless multimodal interaction.
-- **Real-time Trace**: Watch AI reasoning and tool execution in the trace panel.
-- **Sandboxed Security**: All operations confined to your chosen workspace folder.
-- **VM-Level Isolation**: Optional WSL2 (Windows) and Lima (macOS) sandbox for enhanced security—AI commands run in an isolated Linux VM, completely separated from your host system.
-- **Localization**: Full UI support for English and Chinese languages.
-
----
-
-## 🔒 Sandbox Support
-
-Open Cowork provides **multi-level sandbox protection** to keep your system safe:
-
-| Level | Platform | Technology | Description |
-|-------|----------|------------|-------------|
-| **Basic** | All | Path Guard | File operations restricted to workspace folder |
-| **Enhanced** | Windows | WSL2 | Commands execute in isolated Linux VM |
-| **Enhanced** | macOS | Lima | Commands execute in isolated Linux VM |
-
-### How It Works
-
-- **Windows (WSL2)**: When WSL2 is detected, all Bash commands are automatically routed to a Linux VM. The workspace is synced bidirectionally.
-- **macOS (Lima)**: When [Lima](https://lima-vm.io/) is installed (`brew install lima`), commands run in an Ubuntu VM with `/Users` mounted.
-- **Fallback**: If no VM is available, commands run natively with path-based restrictions.
-
-### Setup (Optional)
-
-**Windows**: WSL2 is auto-detected if installed. [Install WSL2](https://docs.microsoft.com/en-us/windows/wsl/install)
-
-**macOS**:
-```bash
-brew install lima
-# Open Cowork will automatically create and manage a 'claude-sandbox' VM
-```
-
----
+- **MCP External Service Support**: Integrate browser, Notion, custom apps and more through **MCP Connectors** to extend AI capabilities.
+- **Multimodal Input**: Drag & drop files and images directly into the chat input for seamless multimodal interaction.
+- **Real-time Trace**: Watch AI reasoning and tool execution in the Trace Panel.
+- **Secure Workspace**: All operations confined to your chosen workspace folder.
+- **VM-Level Isolation**: WSL2 (Windows) and Lima (macOS) VM isolation—all commands execute in an isolated VM to protect your host system.
+- **UI Enhancements**: Beautiful and flexible UI design, system language switching, comprehensive MCP/Skills/Tools call display.
 
 ## 🎬 Demo
 
-See Open Cowork in action :
+See Open Cowork in action:
 
 ### 1. Folder Organization & Cleanup 📂
 https://github.com/user-attachments/assets/dbeb0337-2d19-4b5d-a438-5220f2a87ca7
@@ -120,6 +89,31 @@ npm run dev
 
 To build the installer locally: `npm run build`
 
+### Security Configuration: 🔒 Sandbox Support
+
+Open Cowork provides **multi-level sandbox protection** to keep your system safe:
+
+| Level | Platform | Technology | Description |
+|-------|----------|------------|-------------|
+| **Basic** | All | Path Guard | File operations restricted to workspace folder |
+| **Enhanced** | Windows | WSL2 | Commands execute in isolated Linux VM |
+| **Enhanced** | macOS | Lima | Commands execute in isolated Linux VM |
+
+- **Windows (WSL2)**: When WSL2 is detected, all Bash commands are automatically routed to a Linux VM. The workspace is synced bidirectionally.
+- **macOS (Lima)**: When [Lima](https://lima-vm.io/) is installed (`brew install lima`), commands run in an Ubuntu VM with `/Users` mounted.
+- **Fallback**: If no VM is available, commands run natively with path-based restrictions.
+
+**Setup (Optional, Recommended)**
+
+- **Windows**: WSL2 is auto-detected if installed. [Install WSL2](https://docs.microsoft.com/en-us/windows/wsl/install)
+
+- **macOS**:
+Lima is auto-detected if installed. Install command:
+```bash
+brew install lima
+# Open Cowork will automatically create and manage a 'claude-sandbox' VM
+```
+
 ---
 
 ## 🚀 Quick Start Guide
@@ -131,15 +125,15 @@ You need an API key to power the agent. We support **OpenRouter**, **Anthropic**
 |----------|-----------------------|---------------------|-------------------|
 | **OpenRouter** | [OpenRouter](https://openrouter.ai/) | `https://openrouter.ai/api` | `claude-4-5-sonnet` |
 | **Anthropic** | [Anthropic Console](https://console.anthropic.com/) | (Default) | `claude-4-5-sonnet` |
-| **Zhipu AI (GLM)** | [GLM Coding Plan](https://bigmodel.cn/glm-coding) | `https://open.bigmodel.cn/api/anthropic` | `glm-4.7`, `glm-4.6` |
+| **Zhipu AI (GLM)** | [GLM Coding Plan](https://bigmodel.cn/glm-coding) (⚡️Chinese Deal) | `https://open.bigmodel.cn/api/anthropic` | `glm-4.7`, `glm-4.6` |
 | **MiniMax** | [MiniMax Coding Plan](https://platform.minimaxi.com/subscribe/coding-plan) | `https://api.minimaxi.com/anthropic` | `minimax-m2` |
 | **Kimi** | [Kimi Coding Plan](https://www.kimi.com/membership/pricing) | `https://api.kimi.com/coding/` | `kimi-k2` |
 
 ### 2. Configure
-1. Open the app and click the ⚙️ **Settings** icon.
+1. Open the app and click the ⚙️ **Settings** icon in the bottom left.
 2. Paste your **API Key**.
-3. **Crucial**: Set the **Base URL** according to the table above (especially for non-Anthropic models).
-4. Enter the **Model** name.
+3. **Crucial**: Set the **Base URL** according to the table above (especially for Zhipu/MiniMax, etc.).
+4. Enter the **Model** name you want to use.
 
 ### 3. Start Coworking
 1. **Select a Workspace**: Choose a folder where Claude is allowed to work.
@@ -222,11 +216,11 @@ open-cowork/
 - [x] **Security**: Full Filesystem Sandboxing
 - [x] **Skills**: PPTX, DOCX, PDF, XLSX Support + Custom Skill Management
 - [x] **VM Sandbox**: WSL2 (Windows) and Lima (macOS) isolation support
-- [x] **Connectors**: Custom connector support for external service integration
+- [x] **MCP Connectors**: Custom connector support for external service integration
 - [x] **Rich Input**: File upload and image input in chat
 - [x] **Multi-Model**: OpenAI-compatible API support (iterating)
 - [x] **UI/UX**: Enhanced interface with English/Chinese localization
-- [ ] **Better Memory Handling**: Improved context management for longer sessions and cross-session memory.
+- [ ] **Memory Optimization**: Improved context management for longer sessions and cross-session memory.
 
 ---
 
