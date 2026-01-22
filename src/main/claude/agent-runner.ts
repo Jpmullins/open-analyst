@@ -1172,9 +1172,12 @@ Then follow the workflow described in that file.
           // Using Electron causes a visible "exec" icon in macOS menu bar
           if (command === 'node') {
             // Check if system node is available in PATH
+            // On Windows, executable is 'node.exe', on Unix it's 'node'
+            const isWindows = process.platform === 'win32';
+            const nodeExeName = isWindows ? 'node.exe' : 'node';
             const pathDirs = (spawnEnv?.PATH || process.env.PATH || '').split(path.delimiter);
             const systemNodePath = pathDirs
-              .map(p => path.join(p, 'node'))
+              .map(p => path.join(p, nodeExeName))
               .find(p => fs.existsSync(p));
             
             if (systemNodePath) {
