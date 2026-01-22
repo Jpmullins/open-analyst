@@ -338,6 +338,29 @@ export class MCPManager {
 
       log(`[MCPManager] Creating STDIO transport: ${command} ${args.join(' ')}`);
       log(`[MCPManager] Environment variables: ${Object.keys(env).length} vars`);
+      log(`[MCPManager] PATH: ${env.PATH?.substring(0, 200)}...`);
+      log(`[MCPManager] HOME: ${env.HOME}`);
+      log(`[MCPManager] NODE_PATH: ${env.NODE_PATH || '(not set)'}`);
+      
+      // Test if npx can be executed with the current environment
+      try {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        
+        log(`[MCPManager] Testing npx execution: ${command} --version`);
+        const testResult = await execAsync(`${command} --version`, { 
+          timeout: 5000,
+          env: env
+        });
+        log(`[MCPManager] npx test successful: ${testResult.stdout.trim()}`);
+      } catch (testError: any) {
+        logError(`[MCPManager] npx test failed: ${testError.message}`);
+        if (testError.stderr) {
+          logError(`[MCPManager] npx test stderr: ${testError.stderr}`);
+        }
+        logError(`[MCPManager] This indicates npx cannot run with the current environment`);
+      }
 
       // Create STDIO transport - it will spawn the process internally
       transport = new StdioClientTransport({
@@ -348,6 +371,9 @@ export class MCPManager {
       
       log(`[MCPManager] STDIO transport created successfully`);
       
+      // IMPORTANT: Wait a bit for the process to spawn
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Try to capture stderr from the spawned process for debugging
       try {
         const transportAny = transport as any;
@@ -355,12 +381,22 @@ export class MCPManager {
           const process = transportAny._process;
           log(`[MCPManager] MCP server process spawned with PID: ${process.pid}`);
           
+          // Capture stdout for debugging
+          if (process.stdout) {
+            process.stdout.on('data', (data: Buffer) => {
+              const message = data.toString().trim();
+              if (message) {
+                log(`[MCPManager] MCP server stdout: ${message}`);
+              }
+            });
+          }
+          
           // Listen to stderr for error messages
           if (process.stderr) {
             process.stderr.on('data', (data: Buffer) => {
               const message = data.toString().trim();
               if (message) {
-                logWarn(`[MCPManager] MCP server stderr: ${message}`);
+                logError(`[MCPManager] MCP server stderr: ${message}`);
               }
             });
           }
@@ -371,16 +407,21 @@ export class MCPManager {
               logError(`[MCPManager] MCP server process exited with code ${code}`);
             } else if (signal) {
               logError(`[MCPManager] MCP server process killed with signal ${signal}`);
+            } else {
+              log(`[MCPManager] MCP server process exited normally`);
             }
           });
           
           process.on('error', (error: Error) => {
             logError(`[MCPManager] MCP server process error: ${error.message}`);
+            logError(`[MCPManager] Error stack: ${error.stack}`);
           });
+        } else {
+          logWarn(`[MCPManager] Could not access transport._process, it may not be spawned yet`);
         }
-      } catch (e) {
+      } catch (e: any) {
         // Ignore if we can't access internal process
-        log(`[MCPManager] Could not attach to MCP server process for logging`);
+        logWarn(`[MCPManager] Could not attach to MCP server process for logging: ${e.message}`);
       }
     } else if (config.type === 'sse') {
       if (!config.url) {
