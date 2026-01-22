@@ -81,6 +81,7 @@ export class MCPManager {
     if (platform === 'darwin' || platform === 'linux') {
       // macOS/Linux: use SHELL environment variable
       try {
+        log(`[MCPManager] SHELL: ${process.env.SHELL}`);
         const shell = process.env.SHELL || '/bin/zsh';
         const shellName = path.basename(shell);
         
@@ -159,10 +160,60 @@ export class MCPManager {
 
   /**
    * Get enhanced environment with proper PATH for packaged app
+   * This is critical for packaged apps where process.env is very limited
    */
   private async getEnhancedEnv(configEnv: Record<string, string>): Promise<Record<string, string>> {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    const os = await import('os');
+    const path = await import('path');
+    
+    const platform = os.platform();
+    const homeDir = os.homedir();
+    
     // Start with current process env
-    const env = { ...process.env } as Record<string, string>;
+    let env = { ...process.env } as Record<string, string>;
+    
+    // For macOS/Linux, try to get full environment from user's shell
+    // This is essential for packaged apps where process.env is minimal
+    if (platform === 'darwin' || platform === 'linux') {
+      try {
+        const shell = process.env.SHELL || '/bin/zsh';
+        const shellName = path.basename(shell);
+        
+        log(`[MCPManager] Getting full environment from ${shellName}...`);
+        
+        // Use login shell to get full environment including PATH
+        const { stdout } = await execAsync(`${shell} -l -c 'env'`, { 
+          timeout: 5000,
+          env: { HOME: homeDir }
+        });
+        
+        // Parse environment variables
+        const lines = stdout.split('\n');
+        const shellEnv: Record<string, string> = {};
+        
+        for (const line of lines) {
+          const equalIndex = line.indexOf('=');
+          if (equalIndex > 0) {
+            const key = line.substring(0, equalIndex);
+            const value = line.substring(equalIndex + 1);
+            shellEnv[key] = value;
+          }
+        }
+        
+        // Merge shell environment with process environment
+        // Process env takes precedence for system variables
+        env = { ...shellEnv, ...env };
+        
+        log(`[MCPManager] Enhanced environment with ${Object.keys(shellEnv).length} variables from shell`);
+        log(`[MCPManager] PATH from shell: ${shellEnv.PATH?.substring(0, 100)}...`);
+      } catch (error: any) {
+        logWarn(`[MCPManager] Could not get environment from shell: ${error.message}`);
+        logWarn(`[MCPManager] Using limited process.env, MCP servers may fail`);
+      }
+    }
 
     // Merge with config env (config env takes precedence)
     return { ...env, ...configEnv };
@@ -255,6 +306,8 @@ export class MCPManager {
     log(`[MCPManager] Connecting to MCP server: ${config.name} (${config.type})`);
 
     let transport: StdioClientTransport | SSEClientTransport;
+    let commandForLogging = '';
+    let argsForLogging: string[] = [];
 
     if (config.type === 'stdio') {
       if (!config.command) {
@@ -276,10 +329,15 @@ export class MCPManager {
         }
       }
       
+      // Store for error logging
+      commandForLogging = command;
+      argsForLogging = args;
+      
       // Get environment variables
       const env = await this.getEnhancedEnv(config.env || {});
 
       log(`[MCPManager] Creating STDIO transport: ${command} ${args.join(' ')}`);
+      log(`[MCPManager] Environment variables: ${Object.keys(env).length} vars`);
 
       // Create STDIO transport - it will spawn the process internally
       transport = new StdioClientTransport({
@@ -287,6 +345,43 @@ export class MCPManager {
         args,
         env,
       });
+      
+      log(`[MCPManager] STDIO transport created successfully`);
+      
+      // Try to capture stderr from the spawned process for debugging
+      try {
+        const transportAny = transport as any;
+        if (transportAny._process) {
+          const process = transportAny._process;
+          log(`[MCPManager] MCP server process spawned with PID: ${process.pid}`);
+          
+          // Listen to stderr for error messages
+          if (process.stderr) {
+            process.stderr.on('data', (data: Buffer) => {
+              const message = data.toString().trim();
+              if (message) {
+                logWarn(`[MCPManager] MCP server stderr: ${message}`);
+              }
+            });
+          }
+          
+          // Listen to process exit
+          process.on('exit', (code: number, signal: string) => {
+            if (code !== null && code !== 0) {
+              logError(`[MCPManager] MCP server process exited with code ${code}`);
+            } else if (signal) {
+              logError(`[MCPManager] MCP server process killed with signal ${signal}`);
+            }
+          });
+          
+          process.on('error', (error: Error) => {
+            logError(`[MCPManager] MCP server process error: ${error.message}`);
+          });
+        }
+      } catch (e) {
+        // Ignore if we can't access internal process
+        log(`[MCPManager] Could not attach to MCP server process for logging`);
+      }
     } else if (config.type === 'sse') {
       if (!config.url) {
         throw new Error(`SSE server ${config.name} requires a URL`);
@@ -312,8 +407,24 @@ export class MCPManager {
       }
     );
 
-    // Connect (client.connect() will automatically call transport.start())
-    await client.connect(transport);
+    log(`[MCPManager] MCP client created, attempting to connect...`);
+
+    try {
+      // Connect (client.connect() will automatically call transport.start())
+      await client.connect(transport);
+      log(`[MCPManager] Client.connect() completed successfully`);
+    } catch (error: any) {
+      logError(`[MCPManager] Client.connect() failed:`, error);
+      logError(`[MCPManager] Error details - code: ${error.code}, name: ${error.name}, message: ${error.message}`);
+      
+      // Try to get more details from the transport
+      if (config.type === 'stdio' && commandForLogging) {
+        logError(`[MCPManager] STDIO transport may have failed to spawn process or communicate`);
+        logError(`[MCPManager] Command was: ${commandForLogging} ${argsForLogging.join(' ')}`);
+      }
+      
+      throw error;
+    }
 
     // Store client and transport
     this.clients.set(config.id, client);
@@ -332,11 +443,21 @@ export class MCPManager {
    */
   private async isChromeDebugPortReady(): Promise<boolean> {
     try {
+      log(`[MCPManager] Checking Chrome debug port: http://localhost:9222/json/version`);
       const response = await fetch('http://localhost:9222/json/version', {
         signal: AbortSignal.timeout(2000),
       });
-      return response.ok;
-    } catch (error) {
+      
+      if (response.ok) {
+        const data = await response.json();
+        log(`[MCPManager] Chrome debug port response: ${JSON.stringify(data)}`);
+        return true;
+      } else {
+        log(`[MCPManager] Chrome debug port returned status: ${response.status}`);
+        return false;
+      }
+    } catch (error: any) {
+      log(`[MCPManager] Chrome debug port check failed: ${error.message}`);
       return false;
     }
   }
@@ -377,60 +498,79 @@ export class MCPManager {
     log(`[MCPManager] Ensuring Chrome is ready for ${serverName}...`);
     
     // Step 1: Check if debugging port is accessible
+    log(`[MCPManager] Step 1: Checking if Chrome debug port 9222 is accessible...`);
     const portReady = await this.isChromeDebugPortReady();
     
     if (portReady) {
-      log(`[MCPManager] Chrome debug port (9222) is accessible`);
+      log(`[MCPManager] ✓ Chrome debug port (9222) is accessible`);
       
       // Verify tool connection works
+      log(`[MCPManager] Verifying MCP tool connection with list_pages...`);
       try {
-        await client.callTool({
+        const result = await client.callTool({
           name: 'list_pages',
           arguments: {},
         });
-        log(`[MCPManager] ✓ Chrome connected, using existing instance`);
+        log(`[MCPManager] ✓ Chrome connected successfully, using existing instance`);
+        log(`[MCPManager] list_pages result:`, result);
         return;
       } catch (error: any) {
-        logWarn(`[MCPManager] Port accessible but tool call failed:`, error.message);
-        log(`[MCPManager] Starting new Chrome instance...`);
+        logWarn(`[MCPManager] ⚠️ Port accessible but tool call failed`);
+        logWarn(`[MCPManager] Error code: ${error.code}, message: ${error.message}`);
+        log(`[MCPManager] Will try to start new Chrome instance...`);
       }
     } else {
-      log(`[MCPManager] Chrome debug port (9222) not accessible, starting new instance...`);
+      log(`[MCPManager] ✗ Chrome debug port (9222) not accessible`);
+      log(`[MCPManager] Will start new Chrome instance with debugging enabled...`);
     }
     
     // Step 2: Start Chrome with remote debugging
+    log(`[MCPManager] Step 2: Starting Chrome with remote debugging...`);
     try {
       await this.startChromeWithDebugging();
+      log(`[MCPManager] Chrome start command executed`);
       
       // Wait for Chrome debugging port to become ready
+      log(`[MCPManager] Step 3: Waiting for Chrome debug port to become ready...`);
       const portBecameReady = await this.waitForChromeDebugPort(15, 1000);
       
       if (!portBecameReady) {
-        logError(`[MCPManager] ❌ Chrome startup failed or debug port not ready`);
+        logError(`[MCPManager] ❌ Chrome debug port did not become ready after 15 seconds`);
+        logError(`[MCPManager] Possible reasons:`);
+        logError(`[MCPManager]   1. Chrome failed to start`);
+        logError(`[MCPManager]   2. Another process is using port 9222`);
+        logError(`[MCPManager]   3. Firewall blocking the port`);
         return;
       }
       
+      log(`[MCPManager] ✓ Chrome debug port is now ready`);
+      
       // Verify tool connection
-      log(`[MCPManager] Verifying tool connection...`);
+      log(`[MCPManager] Step 4: Verifying MCP tool connection...`);
       for (let i = 0; i < 5; i++) {
         try {
-          await client.callTool({
+          const result = await client.callTool({
             name: 'list_pages',
             arguments: {},
           });
-          log(`[MCPManager] ✓ Chrome started and ready!`);
+          log(`[MCPManager] ✓ Chrome MCP connection verified successfully!`);
+          log(`[MCPManager] list_pages result:`, result);
           return;
         } catch (verifyError: any) {
           if (i < 4) {
-            log(`[MCPManager] Verifying connection... (${i + 1}/5)`);
+            log(`[MCPManager] Connection verification attempt ${i + 1}/5 failed, retrying...`);
+            log(`[MCPManager] Error: ${verifyError.message}`);
             await new Promise(resolve => setTimeout(resolve, 1000));
           } else {
-            logWarn(`[MCPManager] ⚠️ Chrome started but verification failed:`, verifyError.message);
+            logError(`[MCPManager] ❌ Chrome started but MCP connection verification failed after 5 attempts`);
+            logError(`[MCPManager] Last error code: ${verifyError.code}, message: ${verifyError.message}`);
+            logError(`[MCPManager] The chrome-devtools-mcp server may not be working correctly`);
           }
         }
       }
     } catch (startError: any) {
-      logError(`[MCPManager] ❌ Failed to start Chrome:`, startError.message || startError);
+      logError(`[MCPManager] ❌ Failed to start Chrome with debugging`);
+      logError(`[MCPManager] Error: ${startError.message || startError}`);
     }
   }
 
@@ -461,6 +601,9 @@ export class MCPManager {
     const platform = os.platform();
     const userDataDir = this.getChromeUserDataDir();
     let startupCommand: string;
+    
+    log(`[MCPManager] Platform: ${platform}`);
+    log(`[MCPManager] User data dir: ${userDataDir}`);
     
     // Chrome 136+ requires --user-data-dir for remote debugging
     // Without it, --remote-debugging-port may be ignored
@@ -505,19 +648,33 @@ export class MCPManager {
       `.replace(/\s+/g, ' ').trim();
     }
 
-    log(`[MCPManager] Starting Chrome with remote debugging...`);
-    log(`[MCPManager] User data dir: ${userDataDir}`);
-    log(`[MCPManager] Command: ${startupCommand}`);
+    log(`[MCPManager] Chrome startup command: ${startupCommand}`);
 
     try {
       const shellPath = platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh';
-      await execAsync(startupCommand, {
+      log(`[MCPManager] Using shell: ${shellPath}`);
+      
+      const result = await execAsync(startupCommand, {
         shell: shellPath,
         timeout: 10000,
       });
+      
       log(`[MCPManager] Chrome command executed successfully`);
+      if (result.stdout) {
+        log(`[MCPManager] stdout: ${result.stdout}`);
+      }
+      if (result.stderr) {
+        log(`[MCPManager] stderr: ${result.stderr}`);
+      }
     } catch (error: any) {
-      logWarn(`[MCPManager] Chrome startup command completed with warning:`, error.message);
+      logWarn(`[MCPManager] Chrome startup command completed with warning`);
+      logWarn(`[MCPManager] Error message: ${error.message}`);
+      if (error.stdout) {
+        log(`[MCPManager] stdout: ${error.stdout}`);
+      }
+      if (error.stderr) {
+        log(`[MCPManager] stderr: ${error.stderr}`);
+      }
     }
   }
 
