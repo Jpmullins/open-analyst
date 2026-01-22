@@ -65,7 +65,7 @@ export async function testApiConnection(input: ApiTestInput): Promise<ApiTestRes
   const resolvedBaseUrl = resolveBaseUrl(input);
   const customUsesOpenAI = input.provider === 'custom' && input.customProtocol === 'openai';
   const useOpenAI = input.provider === 'openai' || customUsesOpenAI;
-  const useApiKeyHeader = input.provider === 'anthropic' || (input.provider === 'custom' && !customUsesOpenAI);
+  // OpenRouter uses authToken (Authorization: Bearer), others use apiKey (X-Api-Key)
   const useAuthTokenHeader = input.provider === 'openrouter';
   const useLiveRequest = Boolean(input.useLiveRequest);
 
@@ -105,21 +105,47 @@ export async function testApiConnection(input: ApiTestInput): Promise<ApiTestRes
         await client.models.list();
       }
     } else {
-      const client = new Anthropic({
-        apiKey: useApiKeyHeader ? apiKey : undefined,
-        authToken: useAuthTokenHeader ? apiKey : undefined,
-        baseURL: resolvedBaseUrl,
-        timeout: REQUEST_TIMEOUT_MS,
-      });
-      if (useLiveRequest) {
-        const model = input.model || 'claude-sonnet-4-5';
-        await client.messages.create({
-          model,
-          max_tokens: 1,
-          messages: [{ role: 'user', content: 'ping' }],
-        });
-      } else {
-        await client.models.list();
+      // Save and clear environment variables to prevent SDK from reading them
+      // SDK checks env vars if apiKey/authToken not explicitly provided
+      const savedApiKey = process.env.ANTHROPIC_API_KEY;
+      const savedAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+      
+      try {
+        // Build client with explicit credentials
+        const client = useAuthTokenHeader
+          ? new Anthropic({
+              authToken: apiKey,
+              baseURL: resolvedBaseUrl,
+              timeout: REQUEST_TIMEOUT_MS,
+            })
+          : new Anthropic({
+              apiKey: apiKey,
+              baseURL: resolvedBaseUrl,
+              timeout: REQUEST_TIMEOUT_MS,
+            });
+        if (useLiveRequest || useAuthTokenHeader) {
+          // OpenRouter doesn't support models.list(), always use messages.create()
+          // For other providers, use messages.create() only when useLiveRequest is true
+          const model = input.model || 'claude-sonnet-4-5';
+          await client.messages.create({
+            model,
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'ping' }],
+          });
+        } else {
+          // Anthropic direct API supports models.list() for quick connectivity check
+          await client.models.list();
+        }
+      } finally {
+        // Restore environment variables
+        if (savedApiKey !== undefined) {
+          process.env.ANTHROPIC_API_KEY = savedApiKey;
+        }
+        if (savedAuthToken !== undefined) {
+          process.env.ANTHROPIC_AUTH_TOKEN = savedAuthToken;
+        }
       }
     }
 
