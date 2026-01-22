@@ -311,6 +311,28 @@ export class LimaBridge implements SandboxExecutor {
 
     return new Promise((resolve) => {
       let resolved = false;
+      let pollInterval: NodeJS.Timeout | null = null;
+      let pollTimeout: NodeJS.Timeout | null = null;
+      const resolveOnce = (success: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        if (pollInterval) clearInterval(pollInterval);
+        if (pollTimeout) clearTimeout(pollTimeout);
+        resolve(success);
+      };
+
+      const checkRunning = async (): Promise<boolean> => {
+        try {
+          const { stdout } = await execAsync('limactl list', { timeout: 5000 });
+          const lines = stdout.trim().split('\n');
+          return lines.some((line) =>
+            line.includes(LIMA_INSTANCE_NAME) && line.includes('Running')
+          );
+        } catch {
+          return false;
+        }
+      };
+
       const limaProcess = spawn('limactl', ['start', LIMA_INSTANCE_NAME], {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -325,30 +347,46 @@ export class LimaBridge implements SandboxExecutor {
 
       limaProcess.on('close', (code) => {
         if (resolved) return;
-        resolved = true;
         if (code === 0) {
           log('[Lima] Instance started successfully');
-          resolve(true);
+          resolveOnce(true);
         } else {
           logError('[Lima] Failed to start instance, exit code:', code);
-          resolve(false);
+          resolveOnce(false);
         }
       });
 
       limaProcess.on('error', (error) => {
         if (resolved) return;
-        resolved = true;
         logError('[Lima] Failed to start instance:', error);
-        resolve(false);
+        resolveOnce(false);
       });
 
-      // Timeout after 10 minutes (first start may include image download)
-      setTimeout(() => {
+      // Poll for running status in case limactl start hangs but VM is up
+      pollInterval = setInterval(async () => {
         if (resolved) return;
-        resolved = true;
+        const running = await checkRunning();
+        if (running) {
+          log('[Lima] Instance reported running during start');
+          try {
+            limaProcess.kill();
+          } catch {
+            // ignore
+          }
+          resolveOnce(true);
+        }
+      }, 2000);
+
+      // Timeout after 10 minutes (first start may include image download)
+      pollTimeout = setTimeout(() => {
+        if (resolved) return;
         log('[Lima] Start timeout - killing process');
-        limaProcess.kill();
-        resolve(false);
+        try {
+          limaProcess.kill();
+        } catch {
+          // ignore
+        }
+        resolveOnce(false);
       }, 600000);
     });
   }
