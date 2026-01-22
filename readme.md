@@ -241,6 +241,7 @@ open-cowork/
 - [x] **Multi-Model**: OpenAI-compatible API support (iterating)
 - [x] **UI/UX**: Enhanced interface with English/Chinese localization
 - [ ] **Memory Optimization**: Improved context management for longer sessions and cross-session memory.
+- [ ] **New Features**: Stay tuned!
 
 ---
 
