@@ -28,16 +28,19 @@ export function SandboxSetupDialog({ progress, onComplete }: Props) {
   const [isVisible, setIsVisible] = useState(true);
   const [fadeOut, setFadeOut] = useState(false);
 
+  const handleClose = () => {
+    setFadeOut(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      onComplete?.();
+    }, 500);
+  };
+
   useEffect(() => {
     if (progress?.phase === 'ready' || progress?.phase === 'skipped') {
-      // Delay before fade out
+      // Delay before fade out for success states
       const timer = setTimeout(() => {
-        setFadeOut(true);
-        // Then hide after animation
-        setTimeout(() => {
-          setIsVisible(false);
-          onComplete?.();
-        }, 500);
+        handleClose();
       }, 1500);
       return () => clearTimeout(timer);
     }
@@ -128,6 +131,16 @@ export function SandboxSetupDialog({ progress, onComplete }: Props) {
                 Continuing with native execution mode
               </p>
             </div>
+          )}
+
+          {/* Continue Button for Error State */}
+          {isError && (
+            <button
+              onClick={handleClose}
+              className="mt-4 w-full py-2.5 px-4 bg-accent hover:bg-accent/90 text-white rounded-xl font-medium transition-colors"
+            >
+              Continue with Native Mode
+            </button>
           )}
 
           {/* Completion Message */}
