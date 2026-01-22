@@ -6,6 +6,7 @@ import { initDatabase } from './db/database';
 import { SessionManager } from './session/session-manager';
 import { SkillsManager } from './skills/skills-manager';
 import { configStore, PROVIDER_PRESETS, type AppConfig } from './config/config-store';
+import { testApiConnection } from './config/api-tester';
 import { mcpConfigStore } from './mcp/mcp-config-store';
 import { credentialsStore, type UserCredential } from './credentials/credentials-store';
 import { getSandboxAdapter, shutdownSandbox } from './sandbox/sandbox-adapter';
@@ -14,8 +15,18 @@ import { WSLBridge } from './sandbox/wsl-bridge';
 import { LimaBridge } from './sandbox/lima-bridge';
 import { getSandboxBootstrap } from './sandbox/sandbox-bootstrap';
 import type { MCPServerConfig } from './mcp/mcp-manager';
-import type { ClientEvent, ServerEvent } from '../renderer/types';
-import { log, logWarn, logError, getLogFilePath, getLogsDirectory, getAllLogFiles, closeLogFile, setDevLogsEnabled, isDevLogsEnabled } from './utils/logger';
+import type { ClientEvent, ServerEvent, ApiTestInput, ApiTestResult } from '../renderer/types';
+import {
+  log,
+  logWarn,
+  logError,
+  getLogFilePath,
+  getLogsDirectory,
+  getAllLogFiles,
+  closeLogFile,
+  setDevLogsEnabled,
+  isDevLogsEnabled,
+} from './utils/logger';
 
 // Current working directory (persisted between sessions)
 let currentWorkingDir: string | null = null;
@@ -412,6 +423,19 @@ ipcMain.handle('config.save', (_event, newConfig: Partial<AppConfig>) => {
 
 ipcMain.handle('config.isConfigured', () => {
   return configStore.isConfigured();
+});
+
+ipcMain.handle('config.test', async (_event, payload: ApiTestInput): Promise<ApiTestResult> => {
+  try {
+    return await testApiConnection(payload);
+  } catch (error) {
+    logError('[Config] API test failed:', error);
+    return {
+      ok: false,
+      errorType: 'unknown',
+      details: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 // MCP Server IPC handlers

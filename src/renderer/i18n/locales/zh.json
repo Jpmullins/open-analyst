@@ -64,7 +64,22 @@
     "enterOpenAIUrl": "输入 OpenAI 兼容的服务 URL",
     "enterAnthropicUrl": "输入 Anthropic 兼容的服务 URL",
     "enterModelId": "输入模型 ID，例如：moonshotai/kimi-k2-0905, openai/gpt-4o",
-    "saveSettings": "保存设置"
+    "saveSettings": "保存设置",
+    "testConnection": "测试连接",
+    "testingConnection": "测试中...",
+    "liveTest": "真实请求验证",
+    "liveTestHint": "会发送一次最小请求，可能消耗少量额度",
+    "testSuccess": "连接成功（{{ms}}ms）",
+    "testError": {
+      "missing_key": "请填写 API Key",
+      "missing_base_url": "请填写 Base URL",
+      "unauthorized": "API Key 无效或无权限",
+      "not_found": "接口未找到，请检查 Base URL",
+      "rate_limited": "请求过于频繁或额度不足",
+      "server_error": "服务端错误，请稍后再试",
+      "network_error": "网络连接失败，请检查网络或地址",
+      "unknown": "连接失败"
+    }
   },
   "mcp": {
     "noConnectors": "未配置连接器",

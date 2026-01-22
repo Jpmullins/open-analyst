@@ -299,6 +299,31 @@ export interface ProviderPresets {
   openai: ProviderPreset;
 }
 
+export interface ApiTestInput {
+  provider: AppConfig['provider'];
+  apiKey: string;
+  baseUrl?: string;
+  customProtocol?: AppConfig['customProtocol'];
+  model?: string;
+  useLiveRequest?: boolean;
+}
+
+export interface ApiTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  status?: number;
+  errorType?:
+    | 'missing_key'
+    | 'missing_base_url'
+    | 'unauthorized'
+    | 'not_found'
+    | 'rate_limited'
+    | 'server_error'
+    | 'network_error'
+    | 'unknown';
+  details?: string;
+}
+
 // MCP types
 export interface MCPServerInfo {
   id: string;
