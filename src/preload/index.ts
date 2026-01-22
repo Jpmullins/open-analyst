@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ClientEvent, ServerEvent, AppConfig, ProviderPresets, Skill } from '../renderer/types';
+import type { ClientEvent, ServerEvent, AppConfig, ProviderPresets, Skill, ApiTestInput, ApiTestResult } from '../renderer/types';
 
 // Track registered callbacks to prevent duplicate listeners
 let registeredCallback: ((event: ServerEvent) => void) | null = null;
@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     save: (config: Partial<AppConfig>): Promise<{ success: boolean; config: AppConfig }> => 
       ipcRenderer.invoke('config.save', config),
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('config.isConfigured'),
+    test: (config: ApiTestInput): Promise<ApiTestResult> =>
+      ipcRenderer.invoke('config.test', config),
   },
 
   // Window control methods
@@ -173,6 +175,7 @@ declare global {
         getPresets: () => Promise<ProviderPresets>;
         save: (config: Partial<AppConfig>) => Promise<{ success: boolean; config: AppConfig }>;
         isConfigured: () => Promise<boolean>;
+        test: (config: ApiTestInput) => Promise<ApiTestResult>;
       };
       window: {
         minimize: () => void;

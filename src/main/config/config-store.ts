@@ -163,7 +163,8 @@ class ConfigStore {
    * 环境变量映射：
    * - OpenAI 直连: OPENAI_API_KEY = apiKey, OPENAI_BASE_URL 可选
    * - Anthropic 直连: ANTHROPIC_API_KEY = apiKey
-   * - OpenRouter/Custom: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
+   * - Custom Anthropic: ANTHROPIC_API_KEY = apiKey
+   * - OpenRouter: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
    */
   applyToEnv(): void {
     const config = this.getAll();
@@ -195,14 +196,17 @@ class ConfigStore {
       }
       process.env.OPENAI_API_MODE = 'responses';
     } else {
-      if (config.provider === 'anthropic') {
-        // Anthropic direct API: use ANTHROPIC_API_KEY (standard SDK behavior)
+      if (config.provider === 'anthropic' || (config.provider === 'custom' && config.customProtocol !== 'openai')) {
+        // Anthropic direct API or Anthropic-compatible custom: use ANTHROPIC_API_KEY
         if (config.apiKey) {
           process.env.ANTHROPIC_API_KEY = config.apiKey;
         }
-        // No base URL needed, SDK uses default https://api.anthropic.com
+        if (config.baseUrl) {
+          process.env.ANTHROPIC_BASE_URL = config.baseUrl;
+        }
+        delete process.env.ANTHROPIC_AUTH_TOKEN;
       } else {
-        // OpenRouter / Custom: use ANTHROPIC_AUTH_TOKEN for proxy authentication
+        // OpenRouter: use ANTHROPIC_AUTH_TOKEN for proxy authentication
         if (config.apiKey) {
           process.env.ANTHROPIC_AUTH_TOKEN = config.apiKey;
         }

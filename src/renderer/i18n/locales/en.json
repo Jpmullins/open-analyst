@@ -64,7 +64,22 @@
     "enterOpenAIUrl": "Enter OpenAI-compatible service URL",
     "enterAnthropicUrl": "Enter Anthropic-compatible service URL",
     "enterModelId": "Enter model ID, e.g., moonshotai/kimi-k2-0905, openai/gpt-4o",
-    "saveSettings": "Save Settings"
+    "saveSettings": "Save Settings",
+    "testConnection": "Test Connection",
+    "testingConnection": "Testing...",
+    "liveTest": "Live request verification",
+    "liveTestHint": "Sends a minimal request and may consume a small quota",
+    "testSuccess": "Connection successful ({{ms}}ms)",
+    "testError": {
+      "missing_key": "API Key is required",
+      "missing_base_url": "Base URL is required for this provider",
+      "unauthorized": "Invalid API Key or unauthorized",
+      "not_found": "Endpoint not found. Check the Base URL",
+      "rate_limited": "Rate limited or quota exceeded",
+      "server_error": "Service error. Please try again later",
+      "network_error": "Network error. Check your connection",
+      "unknown": "Connection failed"
+    }
   },
   "mcp": {
     "noConnectors": "No connectors configured",
