@@ -1223,19 +1223,57 @@ Then follow the workflow described in that file.
         const allConfigs = mcpConfigStore.getEnabledServers();
         log('[ClaudeAgentRunner] Enabled MCP configs:', allConfigs.map(c => c.name));
         
+        // Get bundled npx path for STDIO servers
+        const getBundledNpxPath = (): string | null => {
+          const platform = process.platform;
+          const arch = process.arch;
+          
+          let resourcesPath: string;
+          if (process.env.NODE_ENV === 'development') {
+            const projectRoot = path.join(__dirname, '..', '..');
+            resourcesPath = path.join(projectRoot, 'resources', 'node', `${platform}-${arch}`);
+          } else {
+            resourcesPath = path.join(process.resourcesPath, 'node');
+          }
+          
+          const binDir = platform === 'win32' ? resourcesPath : path.join(resourcesPath, 'bin');
+          const npxExe = platform === 'win32' ? 'npx.cmd' : 'npx';
+          const npxPath = path.join(binDir, npxExe);
+          
+          if (fs.existsSync(npxPath)) {
+            return npxPath;
+          }
+          return null;
+        };
+        
+        const bundledNpx = getBundledNpxPath();
+        
         for (const config of allConfigs) {
           // Use a simpler key without spaces to avoid issues
           const serverKey = config.name;
           
           if (config.type === 'stdio') {
+            // Use bundled npx if command is 'npx'
+            const command = config.command === 'npx' && bundledNpx ? bundledNpx : config.command;
+            
+            // If using bundled npx, add bundled node bin to PATH
+            let serverEnv = { ...config.env };
+            if (bundledNpx && config.command === 'npx') {
+              const nodeBinDir = path.dirname(bundledNpx);
+              const currentPath = process.env.PATH || '';
+              // Prepend bundled node bin to PATH so npx can find node
+              serverEnv.PATH = `${nodeBinDir}${path.delimiter}${currentPath}`;
+              log(`[ClaudeAgentRunner]   Added bundled node bin to PATH: ${nodeBinDir}`);
+            }
+            
             mcpServers[serverKey] = {
               type: 'stdio',
-              command: config.command,
+              command: command,
               args: config.args || [],
-              env: config.env || {},
+              env: serverEnv,
             };
             log(`[ClaudeAgentRunner] Added STDIO MCP server: ${serverKey}`);
-            log(`[ClaudeAgentRunner]   Command: ${config.command} ${(config.args || []).join(' ')}`);
+            log(`[ClaudeAgentRunner]   Command: ${command} ${(config.args || []).join(' ')}`);
             log(`[ClaudeAgentRunner]   Tools will be named: mcp__${serverKey}__<toolName>`);
           } else if (config.type === 'sse') {
             mcpServers[serverKey] = {
@@ -1651,7 +1689,8 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             prompt: contextualPrompt,
             options: queryOptions,
           };
-
+      
+      log('[ClaudeAgentRunner] Query input:', JSON.stringify(queryInput, null, 2));
       for await (const message of query(queryInput)) {
         if (!firstMessageReceived) {
           logTiming('FIRST MESSAGE RECEIVED from SDK');
