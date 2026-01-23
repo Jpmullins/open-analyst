@@ -198,6 +198,7 @@ export type SandboxSetupPhase =
   | 'installing_node'   // Installing Node.js
   | 'installing_python' // Installing Python
   | 'installing_pip'    // Installing pip
+  | 'installing_deps'   // Installing skill dependencies (markitdown, pypdf, etc.)
   | 'ready'         // Ready to use
   | 'skipped'       // No sandbox needed (native mode)
   | 'error';        // Setup failed

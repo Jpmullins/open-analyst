@@ -19,6 +19,7 @@ export type SandboxSetupPhase =
   | 'installing_node'   // Installing Node.js
   | 'installing_python' // Installing Python
   | 'installing_pip'    // Installing pip
+  | 'installing_deps'   // Installing skill dependencies (markitdown, pypdf, etc.)
   | 'ready'         // Ready to use
   | 'skipped'       // No sandbox needed (native mode)
   | 'error';        // Setup failed
@@ -231,13 +232,21 @@ export class SandboxBootstrap {
         phase: 'installing_python',
         message: 'Installing Python...',
         detail: `Installing Python runtime in ${wslStatus.distro}`,
-        progress: 60,
+        progress: 50,
       });
 
       const pythonInstalled = await WSLBridge.installPythonInWSL(wslStatus.distro!);
       if (pythonInstalled) {
         wslStatus.pythonAvailable = true;
         wslStatus.pipAvailable = true;
+        
+        // Python install also installs skill deps, so report progress
+        this.reportProgress({
+          phase: 'installing_deps',
+          message: 'Installing skill dependencies...',
+          detail: 'Installing markitdown, pypdf, pdfplumber for PDF/PPTX skills',
+          progress: 80,
+        });
       } else {
         log('[SandboxBootstrap] Python installation failed (non-critical)');
       }
@@ -247,12 +256,21 @@ export class SandboxBootstrap {
         phase: 'installing_pip',
         message: 'Installing pip...',
         detail: `Installing Python package manager in ${wslStatus.distro}`,
-        progress: 70,
+        progress: 60,
       });
 
       const pipInstalled = await WSLBridge.installPipInWSL(wslStatus.distro!);
       if (pipInstalled) {
         wslStatus.pipAvailable = true;
+        
+        // After pip install, also install skill dependencies
+        this.reportProgress({
+          phase: 'installing_deps',
+          message: 'Installing skill dependencies...',
+          detail: 'Installing markitdown, pypdf, pdfplumber for PDF/PPTX skills',
+          progress: 80,
+        });
+        await WSLBridge.installSkillDependencies(wslStatus.distro!);
       }
     }
 
@@ -374,13 +392,21 @@ export class SandboxBootstrap {
         phase: 'installing_python',
         message: 'Installing Python...',
         detail: 'Installing Python runtime in Lima VM',
-        progress: 80,
+        progress: 75,
       });
 
       const pythonInstalled = await LimaBridge.installPythonInLima();
       if (pythonInstalled) {
         limaStatus.pythonAvailable = true;
         limaStatus.pipAvailable = true;
+        
+        // Python install also installs skill deps, so report progress
+        this.reportProgress({
+          phase: 'installing_deps',
+          message: 'Installing skill dependencies...',
+          detail: 'Installing markitdown, pypdf, pdfplumber for PDF/PPTX skills',
+          progress: 90,
+        });
       }
     }
 

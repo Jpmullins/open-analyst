@@ -19,6 +19,7 @@ const phaseConfig: Record<SandboxSetupPhase, { icon: string }> = {
   installing_node: { icon: '💚' },
   installing_python: { icon: '🐍' },
   installing_pip: { icon: '📦' },
+  installing_deps: { icon: '📚' },
   ready: { icon: '✅' },
   skipped: { icon: '⚡' },
   error: { icon: '❌' },

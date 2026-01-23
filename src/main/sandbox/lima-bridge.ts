@@ -486,12 +486,58 @@ export class LimaBridge implements SandboxExecutor {
         180000
       );
 
+      // Create python symlink (many tools expect 'python' command)
+      log('[Lima] Creating python symlink...');
+      try {
+        await execLimaShellWithRetry(
+          'sudo ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true',
+          10000
+        );
+        log('[Lima] Created python -> python3 symlink');
+      } catch {
+        log('[Lima] Could not create python symlink (non-critical)');
+      }
+
       const { stdout } = await execLimaShellWithRetry('python3 --version', 10000);
       log('[Lima] Python installed:', stdout.trim());
+      
+      // Install commonly needed packages for skills (PDF, PPTX processing)
+      await LimaBridge.installSkillDependencies();
+      
       return true;
     } catch (error) {
       logError('[Lima] Failed to install Python:', error);
       return false;
+    }
+  }
+
+  /**
+   * Install Python packages commonly needed by skills (PDF, PPTX, etc.)
+   */
+  static async installSkillDependencies(): Promise<void> {
+    log('[Lima] Installing skill dependencies (markitdown, pypdf, etc.)...');
+    
+    // These packages are required by the built-in PDF and PPTX skills
+    const packages = [
+      'markitdown[pptx]',  // PDF/PPTX text extraction
+      'pypdf',             // PDF manipulation
+      'pdfplumber',        // PDF table extraction  
+      'reportlab',         // PDF creation
+      'defusedxml',        // Secure XML parsing for OOXML
+      'python-pptx',       // PPTX manipulation
+    ];
+    
+    try {
+      // Install packages with pip (user install to avoid permission issues)
+      const packagesStr = packages.map(p => `"${p}"`).join(' ');
+      await execLimaShellWithRetry(
+        `python3 -m pip install --user ${packagesStr} 2>&1 | tail -5`,
+        300000  // 5 min timeout for package install
+      );
+      log('[Lima] Skill dependencies installed successfully');
+    } catch (error) {
+      // Non-critical - Claude can install packages on demand
+      log('[Lima] Failed to pre-install skill dependencies (will install on demand):', (error as Error).message);
     }
   }
 

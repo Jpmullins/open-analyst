@@ -206,10 +206,9 @@ export class SandboxSync {
       const excludeArgs = SYNC_EXCLUDES.map(e => `--exclude="${e}"`).join(' ');
 
       // Sync back to Windows (via /mnt/)
-      // NOTE: We use --update instead of --delete to preserve user's local changes
-      // --update: skip files that are newer on the receiver (Windows)
-      // This prevents overwriting files the user modified during agent run
-      const rsyncCmd = `rsync -av --update ${excludeArgs} "${session.sandboxPath}/" "${wslDestPath}/"`;
+      // NOTE: We use --delete to ensure files deleted/moved in sandbox are also deleted locally
+      // This is important for file organization tasks where files are moved to new locations
+      const rsyncCmd = `rsync -av --delete ${excludeArgs} "${session.sandboxPath}/" "${wslDestPath}/"`;
       log(`[SandboxSync] Running: ${rsyncCmd}`);
 
       await this.wslExec(session.distro, rsyncCmd, 300000); // 5 min timeout
