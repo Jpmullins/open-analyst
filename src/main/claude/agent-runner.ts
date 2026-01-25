@@ -1081,17 +1081,36 @@ Then follow the workflow described in that file.
         throw new Error(errorMsg);
       }
 
-      // SANDBOX: Path validation function
+      // SANDBOX: Path validation function with whitelist for skills directories
+      const builtinSkillsPathForValidation = this.getBuiltinSkillsPath();
+      const appClaudeDirForValidation = this.getAppClaudeDir();
+      
       const isPathInsideWorkspace = (targetPath: string): boolean => {
         if (!targetPath) return true;
         
-        // If no working directory is set, deny all file access
+        // Normalize path for comparison
+        const normalizedTarget = path.normalize(targetPath);
+        
+        // WHITELIST: Allow access to skills directories (read-only for AI)
+        // This allows AI to read SKILL.md files from built-in and app-level skills
+        const whitelistedPaths = [
+          builtinSkillsPathForValidation,  // Built-in skills (shipped with app)
+          appClaudeDirForValidation,        // App Claude config dir (includes user skills)
+        ].filter(Boolean) as string[];
+        
+        for (const whitelistedPath of whitelistedPaths) {
+          const normalizedWhitelist = path.normalize(whitelistedPath);
+          if (normalizedTarget.toLowerCase().startsWith(normalizedWhitelist.toLowerCase())) {
+            log(`[Sandbox] WHITELIST: Path "${targetPath}" is in whitelisted skills directory`);
+            return true;
+          }
+        }
+        
+        // If no working directory is set, deny all file access (except whitelisted)
         if (!workingDir) {
           return false;
         }
         
-        // Normalize paths for comparison
-        const normalizedTarget = path.normalize(targetPath);
         const normalizedWorkdir = path.normalize(workingDir);
         
         // Check if absolute path

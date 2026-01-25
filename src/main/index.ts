@@ -242,6 +242,10 @@ function sendToRenderer(event: ServerEvent) {
 
 // Initialize app
 app.whenReady().then(async () => {
+  // TODO: Re-enable sandbox when debugging is complete
+  // Force disable sandbox on startup (temporary fix)
+  configStore.set('sandboxEnabled', false);
+  
   // Apply dev logs setting from config
   const enableDevLogs = configStore.get('enableDevLogs');
   setDevLogsEnabled(enableDevLogs);
