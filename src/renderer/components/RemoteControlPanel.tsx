@@ -799,9 +799,9 @@ export function RemoteControlPanel() {
               <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message:send_as_bot</code>、
               <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message.group_at_msg:readonly</code>、
               <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message.p2p_msg:readonly</code>、
-              <code className="px-1 py-0.5 bg-surface rounded ml-1">contact:user.base:readonly</code>。
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">contact:user.base:readonly</code>
               <a
-                className="ml-2 text-accent hover:underline"
+                className="ml-2 inline-flex items-center gap-1 text-accent hover:underline"
                 href="https://open.feishu.cn/app/cli_a90ad18f0f39dcc6/auth?q=im:resource,im:message,im:message:send_as_bot,im:message.group_at_msg:readonly,im:message.p2p_msg:readonly,contact:user.base:readonly&op_from=openapi&token_type=tenant"
                 target="_blank"
                 rel="noreferrer"
@@ -814,6 +814,7 @@ export function RemoteControlPanel() {
                   }
                 }}
               >
+                <ExternalLink className="w-3 h-3" />
                 一键配置权限
               </a>
             </span>

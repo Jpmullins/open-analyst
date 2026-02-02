@@ -99,6 +99,46 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(windowOptions);
 
+  const allowedOrigins = new Set<string>();
+  if (process.env.VITE_DEV_SERVER_URL) {
+    try {
+      allowedOrigins.add(new URL(process.env.VITE_DEV_SERVER_URL).origin);
+    } catch {
+      // Ignore invalid dev server URL
+    }
+  }
+  const allowedProtocols = new Set<string>(['file:', 'devtools:']);
+
+  const isExternalUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      if (allowedProtocols.has(parsed.protocol)) {
+        return false;
+      }
+      if (allowedOrigins.has(parsed.origin)) {
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) {
+      void shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isExternalUrl(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
