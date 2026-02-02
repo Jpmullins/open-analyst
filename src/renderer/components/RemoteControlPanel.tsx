@@ -792,14 +792,42 @@ export function RemoteControlPanel() {
           </li>
           <li className="flex items-start gap-2">
             <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
-            <span>在飞书平台的"事件配置"中选择"使用长连接接收事件"</span>
+            <span>
+              在权限管理中勾选以下权限：
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">im:resource</code>、
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message</code>、
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message:send_as_bot</code>、
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message.group_at_msg:readonly</code>、
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">im:message.p2p_msg:readonly</code>、
+              <code className="px-1 py-0.5 bg-surface rounded ml-1">contact:user.base:readonly</code>。
+              <a
+                className="ml-2 text-accent hover:underline"
+                href="https://open.feishu.cn/app/cli_a90ad18f0f39dcc6/auth?q=im:resource,im:message,im:message:send_as_bot,im:message.group_at_msg:readonly,im:message.p2p_msg:readonly,contact:user.base:readonly&op_from=openapi&token_type=tenant"
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
+                    event.preventDefault();
+                    void window.electronAPI.openExternal(
+                      'https://open.feishu.cn/app/cli_a90ad18f0f39dcc6/auth?q=im:resource,im:message,im:message:send_as_bot,im:message.group_at_msg:readonly,im:message.p2p_msg:readonly,contact:user.base:readonly&op_from=openapi&token_type=tenant'
+                    );
+                  }
+                }}
+              >
+                一键配置权限
+              </a>
+            </span>
           </li>
           <li className="flex items-start gap-2">
             <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">4</span>
-            <span>订阅 <code className="px-1 py-0.5 bg-surface rounded">im.message.receive_v1</code> 事件</span>
+            <span>在飞书平台的"事件配置"中选择"使用长连接接收事件"</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">5</span>
+            <span>订阅 <code className="px-1 py-0.5 bg-surface rounded">im.message.receive_v1</code> 事件</span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="w-5 h-5 rounded-full bg-accent/10 text-accent text-xs flex items-center justify-center flex-shrink-0 mt-0.5">6</span>
             <span>发布应用后，点击"启动服务"即可</span>
           </li>
         </ol>
