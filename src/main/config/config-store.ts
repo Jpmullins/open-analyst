@@ -25,6 +25,15 @@ export interface AppConfig {
   // Optional: Default working directory
   defaultWorkdir?: string;
   
+  // Developer logs
+  enableDevLogs: boolean;
+  
+  // Sandbox mode (WSL/Lima isolation)
+  sandboxEnabled: boolean;
+  
+  // Enable thinking mode (show thinking steps)
+  enableThinking: boolean;
+  
   // First run flag
   isConfigured: boolean;
 }
@@ -38,6 +47,9 @@ const defaultConfig: AppConfig = {
   openaiMode: 'responses',
   claudeCodePath: '',
   defaultWorkdir: '',
+  enableDevLogs: true,
+  sandboxEnabled: false,
+  enableThinking: false,
   isConfigured: false,
 };
 
@@ -94,12 +106,20 @@ class ConfigStore {
   private store: Store<AppConfig>;
 
   constructor() {
-    this.store = new Store<AppConfig>({
+    const storeOptions: any = {
       name: 'config',
       defaults: defaultConfig,
       // Encrypt the API key for basic security
       encryptionKey: 'open-cowork-config-v1',
-    });
+    };
+    
+    // Add projectName for non-Electron environments (e.g., MCP servers)
+    // This is required by the underlying 'conf' package
+    if (typeof process !== 'undefined' && !process.versions.electron) {
+      storeOptions.projectName = 'open-cowork';
+    }
+    
+    this.store = new Store<AppConfig>(storeOptions);
   }
 
   /**
@@ -115,6 +135,9 @@ class ConfigStore {
       openaiMode: this.store.get('openaiMode'),
       claudeCodePath: this.store.get('claudeCodePath'),
       defaultWorkdir: this.store.get('defaultWorkdir'),
+      enableDevLogs: this.store.get('enableDevLogs'),
+      sandboxEnabled: this.store.get('sandboxEnabled'),
+      enableThinking: this.store.get('enableThinking'),
       isConfigured: this.store.get('isConfigured'),
     };
   }
@@ -158,7 +181,8 @@ class ConfigStore {
    * 环境变量映射：
    * - OpenAI 直连: OPENAI_API_KEY = apiKey, OPENAI_BASE_URL 可选
    * - Anthropic 直连: ANTHROPIC_API_KEY = apiKey
-   * - OpenRouter/Custom: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
+   * - Custom Anthropic: ANTHROPIC_API_KEY = apiKey
+   * - OpenRouter: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
    */
   applyToEnv(): void {
     const config = this.getAll();
@@ -190,14 +214,17 @@ class ConfigStore {
       }
       process.env.OPENAI_API_MODE = 'responses';
     } else {
-      if (config.provider === 'anthropic') {
-        // Anthropic direct API: use ANTHROPIC_API_KEY (standard SDK behavior)
+      if (config.provider === 'anthropic' || (config.provider === 'custom' && config.customProtocol !== 'openai')) {
+        // Anthropic direct API or Anthropic-compatible custom: use ANTHROPIC_API_KEY
         if (config.apiKey) {
           process.env.ANTHROPIC_API_KEY = config.apiKey;
         }
-        // No base URL needed, SDK uses default https://api.anthropic.com
+        if (config.baseUrl) {
+          process.env.ANTHROPIC_BASE_URL = config.baseUrl;
+        }
+        delete process.env.ANTHROPIC_AUTH_TOKEN;
       } else {
-        // OpenRouter / Custom: use ANTHROPIC_AUTH_TOKEN for proxy authentication
+        // OpenRouter: use ANTHROPIC_AUTH_TOKEN for proxy authentication
         if (config.apiKey) {
           process.env.ANTHROPIC_AUTH_TOKEN = config.apiKey;
         }

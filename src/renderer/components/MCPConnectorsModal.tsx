@@ -37,7 +37,9 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
   const [editingServer, setEditingServer] = useState<MCPServerConfig | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [presets, setPresets] = useState<Record<string, any>>({});
-  const [showPresets, setShowPresets] = useState(false);
+  const [showPresets, setShowPresets] = useState(true);
+  const [configuringPreset, setConfiguringPreset] = useState<{ key: string; preset: any } | null>(null);
+  const [presetEnvValues, setPresetEnvValues] = useState<Record<string, string>>({});
   
   // Auto-refresh tools periodically
   useEffect(() => {
@@ -90,19 +92,40 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
       return;
     }
 
-    // Create server config from preset
+    // Check if preset requires environment variables
+    if (preset.requiresEnv && preset.requiresEnv.length > 0) {
+      const initialEnv: Record<string, string> = {};
+      preset.requiresEnv.forEach((key: string) => {
+        initialEnv[key] = preset.env?.[key] || '';
+      });
+      setPresetEnvValues(initialEnv);
+      setConfiguringPreset({ key: presetKey, preset });
+      return;
+    }
+
+    // No env required, add directly
+    await addPresetServer(presetKey, preset, {});
+  }
+
+  async function addPresetServer(presetKey: string, preset: any, envOverrides: Record<string, string>) {
     const serverConfig: MCPServerConfig = {
       id: `mcp-${presetKey}-${Date.now()}`,
       name: preset.name,
       type: preset.type,
+      // STDIO fields
       command: preset.command,
       args: preset.args,
-      env: preset.env,
-      enabled: false, // Add disabled by default, user can enable it
+      env: { ...preset.env, ...envOverrides },
+      // SSE fields
+      url: preset.url,
+      headers: preset.headers,
+      enabled: false,
     };
 
     await handleSaveServer(serverConfig);
     setShowPresets(false);
+    setConfiguringPreset(null);
+    setPresetEnvValues({});
   }
 
   async function loadServers() {
@@ -265,48 +288,126 @@ export function MCPConnectorsModal({ isOpen, onClose }: MCPConnectorsModalProps)
             )}
           </div>
 
-          {/* Preset Servers */}
-          {!showAddForm && !editingServer && Object.keys(presets).length > 0 && (
-            <div className="space-y-3">
+          {/* Preset Environment Configuration Modal */}
+          {configuringPreset && (
+            <div className="p-4 rounded-xl border border-accent/30 bg-accent/5 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-text-primary">Quick Add Presets</h3>
+                <h3 className="text-sm font-medium text-text-primary">
+                  Configure {configuringPreset.preset.name}
+                </h3>
                 <button
-                  onClick={() => setShowPresets(!showPresets)}
-                  className="text-xs text-text-muted hover:text-accent transition-colors"
+                  onClick={() => {
+                    setConfiguringPreset(null);
+                    setPresetEnvValues({});
+                  }}
+                  className="text-text-muted hover:text-text-primary"
                 >
-                  {showPresets ? 'Hide' : 'Show'} Presets
+                  <X className="w-4 h-4" />
                 </button>
               </div>
+              <p className="text-xs text-text-muted">
+                This connector requires configuration before it can be added.
+              </p>
+              <div className="space-y-3">
+                {configuringPreset.preset.requiresEnv?.map((envKey: string) => (
+                  <div key={envKey}>
+                    <label className="block text-xs font-medium text-text-secondary mb-1">
+                      {configuringPreset.preset.envDescription?.[envKey] || envKey}
+                    </label>
+                    <input
+                      type="password"
+                      value={presetEnvValues[envKey] || ''}
+                      onChange={(e) => setPresetEnvValues(prev => ({ ...prev, [envKey]: e.target.value }))}
+                      placeholder={`Enter ${envKey}`}
+                      className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setConfiguringPreset(null);
+                    setPresetEnvValues({});
+                  }}
+                  className="px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => addPresetServer(configuringPreset.key, configuringPreset.preset, presetEnvValues)}
+                  disabled={isLoading || configuringPreset.preset.requiresEnv?.some((key: string) => !presetEnvValues[key]?.trim())}
+                  className="px-4 py-1.5 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors disabled:opacity-50"
+                >
+                  Add Connector
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Preset Servers */}
+          {!showAddForm && !editingServer && !configuringPreset && Object.keys(presets).length > 0 && (
+            <div className="space-y-3">
+              <button
+                onClick={() => setShowPresets(!showPresets)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-surface-muted hover:bg-surface transition-colors"
+              >
+                <h3 className="text-sm font-medium text-text-primary">Quick Add Presets</h3>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <span className="text-xs">{showPresets ? 'Hide' : 'Show'}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showPresets ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
               {showPresets && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2">
                   {Object.entries(presets).map(([key, preset]) => {
                     const isAdded = servers.some(s => 
                       s.name === preset.name && 
                       s.type === preset.type &&
                       s.command === preset.command
                     );
+                    const requiresConfig = preset.requiresEnv && preset.requiresEnv.length > 0;
                     return (
-                      <button
+                      <div
                         key={key}
-                        onClick={() => handleAddPreset(key)}
-                        disabled={isAdded || isLoading}
-                        className={`p-3 rounded-lg border text-left transition-all ${
+                        className={`p-3 rounded-lg border flex items-center gap-3 ${
                           isAdded
-                            ? 'border-border bg-surface-muted opacity-50 cursor-not-allowed'
-                            : 'border-border hover:border-accent hover:bg-accent/5'
+                            ? 'border-border bg-surface-muted opacity-60'
+                            : 'border-border bg-surface'
                         }`}
                       >
-                        <div className="font-medium text-sm text-text-primary">{preset.name}</div>
-                        <div className="text-xs text-text-muted mt-1">
-                          {preset.type === 'stdio' 
-                            ? `${preset.command} ${preset.args?.join(' ') || ''}`
-                            : preset.url || 'Remote server'
-                          }
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm text-text-primary">{preset.name}</span>
+                            {requiresConfig && !isAdded && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                                Requires Token
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-text-muted mt-0.5 truncate">
+                            {preset.type === 'stdio' 
+                              ? `${preset.command} ${preset.args?.join(' ') || ''}`
+                              : preset.url || 'Remote server'
+                            }
+                          </div>
                         </div>
-                        {isAdded && (
-                          <div className="text-xs text-success mt-1">Already added</div>
+                        {isAdded ? (
+                          <div className="flex items-center gap-1 text-success text-xs whitespace-nowrap">
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Added</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleAddPreset(key)}
+                            disabled={isLoading}
+                            className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-colors disabled:opacity-50 whitespace-nowrap flex items-center gap-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {requiresConfig ? 'Configure' : 'Add'}
+                          </button>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -432,20 +533,29 @@ function ServerCard({
               {/* Tools List */}
               {showTools && serverTools.length > 0 && (
                 <div className="mt-3 ml-6 p-3 rounded-lg bg-surface-muted border border-border">
-                  <div className="text-xs font-medium text-text-primary mb-2">Available Tools:</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {serverTools.map((tool, idx) => (
-                      <div
-                        key={idx}
-                        className="px-2 py-1 rounded bg-background border border-border text-xs text-text-secondary"
-                        title={tool.description || tool.name}
-                      >
-                        <div className="font-mono text-accent">{tool.name.replace(/^mcp_[^_]+_/, '')}</div>
-                        {tool.description && (
-                          <div className="text-text-muted mt-0.5 truncate">{tool.description}</div>
-                        )}
-                      </div>
-                    ))}
+                  <div className="text-xs font-medium text-text-primary mb-2">{serverTools.length} 个可用工具:</div>
+                  <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
+                    {serverTools.map((tool, idx) => {
+                      // Extract only the part after the last double underscore
+                      // e.g., "mcp__Software_Development__create_or_modify_code" -> "create_or_modify_code"
+                      const parts = tool.name.split('__');
+                      const displayName = parts.length > 1 ? parts[parts.length - 1] : tool.name;
+                      
+                      return (
+                        <div
+                          key={idx}
+                          className="px-2 py-1.5 rounded bg-background border border-border text-xs text-text-secondary"
+                          title={`${displayName}\n\n${tool.description || ''}`}
+                        >
+                          <div className="font-mono text-accent break-words whitespace-normal">
+                            {displayName}
+                          </div>
+                          {tool.description && (
+                            <div className="text-text-muted mt-0.5 break-words whitespace-normal">{tool.description}</div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -509,6 +619,12 @@ function ServerForm({
   const [args, setArgs] = useState(server?.args?.join(' ') || '');
   const [url, setUrl] = useState(server?.url || '');
   const [enabled, setEnabled] = useState(server?.enabled ?? true);
+  const [env, setEnv] = useState<Array<{ key: string; value: string }>>(
+    server?.env ? Object.entries(server.env).map(([key, value]) => ({ key, value })) : []
+  );
+  const [headers, setHeaders] = useState<Array<{ key: string; value: string }>>(
+    server?.headers ? Object.entries(server.headers).map(([key, value]) => ({ key, value })) : []
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -527,15 +643,63 @@ function ServerForm({
       }
       config.command = command.trim();
       config.args = args.trim() ? args.trim().split(/\s+/) : [];
+      
+      // Add environment variables
+      if (env.length > 0) {
+        config.env = {};
+        env.forEach(({ key, value }) => {
+          if (key.trim() && value.trim()) {
+            config.env![key.trim()] = value.trim();
+          }
+        });
+      }
     } else {
       if (!url.trim()) {
         alert('URL is required for SSE servers');
         return;
       }
       config.url = url.trim();
+      
+      // Add headers
+      if (headers.length > 0) {
+        config.headers = {};
+        headers.forEach(({ key, value }) => {
+          if (key.trim() && value.trim()) {
+            config.headers![key.trim()] = value.trim();
+          }
+        });
+      }
     }
 
     onSave(config);
+  }
+
+  function addEnvVar() {
+    setEnv([...env, { key: '', value: '' }]);
+  }
+
+  function removeEnvVar(index: number) {
+    setEnv(env.filter((_, i) => i !== index));
+  }
+
+  function updateEnvVar(index: number, field: 'key' | 'value', value: string) {
+    const newEnv = [...env];
+    newEnv[index][field] = value;
+    setEnv(newEnv);
+  }
+
+  function addHeader() {
+    setHeaders([...headers, { key: '', value: '' }]);
+  }
+
+  function removeHeader(index: number) {
+    setHeaders(headers.filter((_, i) => i !== index));
+  }
+
+  function updateHeader(index: number, field: 'key' | 'value', value: string) {
+    const newHeaders = [...headers];
+    newHeaders[index][field] = value;
+    setHeaders(newHeaders);
   }
 
   return (
@@ -604,8 +768,53 @@ function ServerForm({
             />
             <p className="text-xs text-text-muted mt-1">Space-separated arguments</p>
           </div>
+          
+          {/* Environment Variables */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-text-primary">环境变量</label>
+              <button
+                type="button"
+                onClick={addEnvVar}
+                className="text-xs text-accent hover:text-accent-hover flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                添加环境变量
+              </button>
+            </div>
+            {env.length > 0 && (
+              <div className="space-y-2">
+                {env.map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={item.key}
+                      onChange={(e) => updateEnvVar(index, 'key', e.target.value)}
+                      placeholder="NOTION_TOKEN"
+                      className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 font-mono text-sm"
+                    />
+                    <input
+                      type="password"
+                      value={item.value}
+                      onChange={(e) => updateEnvVar(index, 'value', e.target.value)}
+                      placeholder="••••••••••••••••"
+                      className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeEnvVar(index)}
+                      className="p-2 rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       ) : (
+        <>
         <div>
           <label className="block text-sm font-medium text-text-primary mb-2">URL</label>
           <input
@@ -617,6 +826,51 @@ function ServerForm({
             required
           />
         </div>
+          
+          {/* Headers */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-text-primary">Headers</label>
+              <button
+                type="button"
+                onClick={addHeader}
+                className="text-xs text-accent hover:text-accent-hover flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                Add Header
+              </button>
+            </div>
+            {headers.length > 0 && (
+              <div className="space-y-2">
+                {headers.map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={item.key}
+                      onChange={(e) => updateHeader(index, 'key', e.target.value)}
+                      placeholder="Authorization"
+                      className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 font-mono text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={item.value}
+                      onChange={(e) => updateHeader(index, 'value', e.target.value)}
+                      placeholder="Bearer token..."
+                      className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeHeader(index)}
+                      className="p-2 rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       <div className="flex items-center gap-2">

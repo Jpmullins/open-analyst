@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Session, Message, TraceStep, PermissionRequest, UserQuestionRequest, Settings, AppConfig } from '../types';
+import type { Session, Message, TraceStep, PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '../types';
+import { applySessionUpdate } from '../utils/session-update';
 
 interface AppState {
   // Sessions
@@ -34,6 +35,16 @@ interface AppState {
   isConfigured: boolean;
   showConfigModal: boolean;
   
+  // Working directory
+  workingDir: string | null;
+  
+  // Sandbox setup
+  sandboxSetupProgress: SandboxSetupProgress | null;
+  isSandboxSetupComplete: boolean;
+  
+  // Sandbox sync (per-session)
+  sandboxSyncStatus: SandboxSyncStatus | null;
+  
   // Actions
   setSessions: (sessions: Session[]) => void;
   addSession: (session: Session) => void;
@@ -46,6 +57,7 @@ interface AppState {
   setPartialMessage: (sessionId: string, partial: string) => void;
   clearPartialMessage: (sessionId: string) => void;
   activateNextTurn: (sessionId: string, stepId: string) => void;
+  updateActiveTurnStep: (sessionId: string, stepId: string) => void;
   clearActiveTurn: (sessionId: string, stepId?: string) => void;
   clearPendingTurns: (sessionId: string) => void;
   clearQueuedMessages: (sessionId: string) => void;
@@ -68,6 +80,16 @@ interface AppState {
   setAppConfig: (config: AppConfig | null) => void;
   setIsConfigured: (configured: boolean) => void;
   setShowConfigModal: (show: boolean) => void;
+  
+  // Working directory actions
+  setWorkingDir: (path: string | null) => void;
+  
+  // Sandbox setup actions
+  setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
+  setSandboxSetupComplete: (complete: boolean) => void;
+  
+  // Sandbox sync actions
+  setSandboxSyncStatus: (status: SandboxSyncStatus | null) => void;
 }
 
 const defaultSettings: Settings = {
@@ -116,6 +138,10 @@ export const useAppStore = create<AppState>((set) => ({
   appConfig: null,
   isConfigured: false,
   showConfigModal: false,
+  workingDir: null,
+  sandboxSetupProgress: null,
+  isSandboxSetupComplete: false,
+  sandboxSyncStatus: null,
   
   // Session actions
   setSessions: (sessions) => set({ sessions }),
@@ -132,9 +158,7 @@ export const useAppStore = create<AppState>((set) => ({
   
   updateSession: (sessionId, updates) =>
     set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === sessionId ? { ...s, ...updates } : s
-      ),
+      sessions: applySessionUpdate(state.sessions, sessionId, updates),
     })),
   
   removeSession: (sessionId) =>
@@ -268,6 +292,18 @@ export const useAppStore = create<AppState>((set) => ({
       };
     }),
 
+  updateActiveTurnStep: (sessionId, stepId) =>
+    set((state) => {
+      const activeTurn = state.activeTurnsBySession[sessionId];
+      if (!activeTurn || activeTurn.stepId === stepId) return {};
+      return {
+        activeTurnsBySession: {
+          ...state.activeTurnsBySession,
+          [sessionId]: { ...activeTurn, stepId },
+        },
+      };
+    }),
+
   clearActiveTurn: (sessionId, stepId) =>
     set((state) => {
       const activeTurn = state.activeTurnsBySession[sessionId];
@@ -377,4 +413,14 @@ export const useAppStore = create<AppState>((set) => ({
   setAppConfig: (config) => set({ appConfig: config }),
   setIsConfigured: (configured) => set({ isConfigured: configured }),
   setShowConfigModal: (show) => set({ showConfigModal: show }),
+  
+  // Working directory actions
+  setWorkingDir: (path) => set({ workingDir: path }),
+  
+  // Sandbox setup actions
+  setSandboxSetupProgress: (progress) => set({ sandboxSetupProgress: progress }),
+  setSandboxSetupComplete: (complete) => set({ isSandboxSetupComplete: complete }),
+  
+  // Sandbox sync actions
+  setSandboxSyncStatus: (status) => set({ sandboxSyncStatus: status }),
 }));

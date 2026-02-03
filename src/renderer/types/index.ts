@@ -34,6 +34,8 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type ContentBlock =
   | TextContent
+  | ImageContent
+  | FileAttachmentContent
   | ToolUseContent
   | ToolResultContent
   | ThinkingContent;
@@ -41,6 +43,23 @@ export type ContentBlock =
 export interface TextContent {
   type: 'text';
   text: string;
+}
+
+export interface ImageContent {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    data: string;
+  };
+}
+
+export interface FileAttachmentContent {
+  type: 'file_attachment';
+  filename: string;
+  relativePath: string; // Path relative to session's .tmp folder
+  size: number;
+  mimeType?: string;
 }
 
 export interface ToolUseContent {
@@ -55,6 +74,10 @@ export interface ToolResultContent {
   toolUseId: string;
   content: string;
   isError?: boolean;
+  images?: Array<{
+    data: string;          // base64 encoded image data
+    mimeType: string;      // e.g., 'image/png'
+  }>;
 }
 
 export interface ThinkingContent {
@@ -156,8 +179,8 @@ export interface PermissionRule {
 
 // IPC Event types
 export type ClientEvent =
-  | { type: 'session.start'; payload: { title: string; prompt: string; cwd?: string; allowedTools?: string[] } }
-  | { type: 'session.continue'; payload: { sessionId: string; prompt: string } }
+  | { type: 'session.start'; payload: { title: string; prompt: string; cwd?: string; allowedTools?: string[]; content?: ContentBlock[] } }
+  | { type: 'session.continue'; payload: { sessionId: string; prompt: string; content?: ContentBlock[] } }
   | { type: 'session.stop'; payload: { sessionId: string } }
   | { type: 'session.delete'; payload: { sessionId: string } }
   | { type: 'session.list'; payload: Record<string, never> }
@@ -166,12 +189,54 @@ export type ClientEvent =
   | { type: 'permission.response'; payload: { toolUseId: string; result: PermissionResult } }
   | { type: 'question.response'; payload: UserQuestionResponse }
   | { type: 'settings.update'; payload: Record<string, unknown> }
-  | { type: 'folder.select'; payload: Record<string, never> };
+  | { type: 'folder.select'; payload: Record<string, never> }
+  | { type: 'workdir.get'; payload: Record<string, never> }
+  | { type: 'workdir.set'; payload: { path: string; sessionId?: string } }
+  | { type: 'workdir.select'; payload: { sessionId?: string } };
+
+// Sandbox setup types (app startup)
+export type SandboxSetupPhase = 
+  | 'checking'      // Checking WSL/Lima availability
+  | 'creating'      // Creating Lima instance (macOS only)
+  | 'starting'      // Starting Lima instance (macOS only)  
+  | 'installing_node'   // Installing Node.js
+  | 'installing_python' // Installing Python
+  | 'installing_pip'    // Installing pip
+  | 'installing_deps'   // Installing skill dependencies (markitdown, pypdf, etc.)
+  | 'ready'         // Ready to use
+  | 'skipped'       // No sandbox needed (native mode)
+  | 'error';        // Setup failed
+
+export interface SandboxSetupProgress {
+  phase: SandboxSetupPhase;
+  message: string;
+  detail?: string;
+  progress?: number; // 0-100
+  error?: string;
+}
+
+// Sandbox sync types (per-session file sync)
+export type SandboxSyncPhase =
+  | 'starting_agent'  // Starting WSL/Lima agent
+  | 'syncing_files'   // Syncing files to sandbox
+  | 'syncing_skills'  // Copying skills
+  | 'ready'           // Sync complete
+  | 'error';          // Sync failed
+
+export interface SandboxSyncStatus {
+  sessionId: string;
+  phase: SandboxSyncPhase;
+  message: string;
+  detail?: string;
+  fileCount?: number;
+  totalSize?: number;
+}
 
 export type ServerEvent =
   | { type: 'stream.message'; payload: { sessionId: string; message: Message } }
   | { type: 'stream.partial'; payload: { sessionId: string; delta: string } }
   | { type: 'session.status'; payload: { sessionId: string; status: SessionStatus; error?: string } }
+  | { type: 'session.update'; payload: { sessionId: string; updates: Partial<Session> } }
   | { type: 'session.list'; payload: { sessions: Session[] } }
   | { type: 'permission.request'; payload: PermissionRequest }
   | { type: 'question.request'; payload: UserQuestionRequest }
@@ -179,6 +244,9 @@ export type ServerEvent =
   | { type: 'trace.update'; payload: { sessionId: string; stepId: string; updates: Partial<TraceStep> } }
   | { type: 'folder.selected'; payload: { path: string } }
   | { type: 'config.status'; payload: { isConfigured: boolean; config: AppConfig | null } }
+  | { type: 'sandbox.progress'; payload: SandboxSetupProgress }
+  | { type: 'sandbox.sync'; payload: SandboxSyncStatus }
+  | { type: 'workdir.changed'; payload: { path: string } }
   | { type: 'error'; payload: { message: string } };
 
 // Settings types
@@ -219,6 +287,8 @@ export interface AppConfig {
   openaiMode?: 'responses' | 'chat';
   claudeCodePath?: string;
   defaultWorkdir?: string;
+  sandboxEnabled?: boolean;
+  enableThinking?: boolean;
   isConfigured: boolean;
 }
 
@@ -235,6 +305,31 @@ export interface ProviderPresets {
   anthropic: ProviderPreset;
   custom: ProviderPreset;
   openai: ProviderPreset;
+}
+
+export interface ApiTestInput {
+  provider: AppConfig['provider'];
+  apiKey: string;
+  baseUrl?: string;
+  customProtocol?: AppConfig['customProtocol'];
+  model?: string;
+  useLiveRequest?: boolean;
+}
+
+export interface ApiTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  status?: number;
+  errorType?:
+    | 'missing_key'
+    | 'missing_base_url'
+    | 'unauthorized'
+    | 'not_found'
+    | 'rate_limited'
+    | 'server_error'
+    | 'network_error'
+    | 'unknown';
+  details?: string;
 }
 
 // MCP types

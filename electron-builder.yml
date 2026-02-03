@@ -6,6 +6,8 @@ directories:
   output: release
   buildResources: resources
 
+npmRebuild: true
+
 files:
   - dist/**/*
   - dist-electron/**/*
@@ -15,15 +17,29 @@ files:
   - node_modules/@img/**/*
   - .claude/skills/**/*
 
+# WSL Agent resources (for Windows sandbox)
+# Lima Agent resources (for macOS sandbox)
+extraResources:
+  - from: dist-wsl-agent
+    to: wsl-agent
+    filter:
+      - "**/*"
+  - from: dist-lima-agent
+    to: lima-agent
+    filter:
+      - "**/*"
+
 # Unpack claude-code so it can be executed as a CLI
 # Also unpack skills so they can be read/written at runtime
 # Sharp native modules must also be unpacked for image processing
+# Software Development MCP server example file must be unpacked
 asarUnpack:
   - node_modules/@anthropic-ai/claude-code/**/*
   - node_modules/@anthropic-ai/claude-agent-sdk/**/*
   - node_modules/@img/**/*
   - node_modules/better-sqlite3/**/*
   - .claude/skills/**/*
+  - src/main/mcp/software-dev-server-example.ts
 
 win:
   target:
@@ -32,6 +48,15 @@ win:
         - x64
   artifactName: ${productName}-${version}-win-${arch}.${ext}
   signAndEditExecutable: false
+  extraResources:
+    - from: resources/node/win32-x64
+      to: node
+      filter:
+        - "**/*"
+    - from: resources/node/win32-x64/node_modules
+      to: node/node_modules
+      filter:
+        - "**/*"
 
 mac:
   target:
@@ -45,6 +70,11 @@ mac:
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
+  extraResources:
+    - from: resources/node/darwin-${arch}
+      to: node
+      filter:
+        - "**/*"
 
 linux:
   target:
@@ -52,6 +82,11 @@ linux:
       arch:
         - x64
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  extraResources:
+    - from: resources/node/linux-x64
+      to: node
+      filter:
+        - "**/*"
 
 nsis:
   oneClick: false
@@ -75,4 +110,3 @@ publish:
   provider: github
   owner: your-username
   repo: open-cowork
-

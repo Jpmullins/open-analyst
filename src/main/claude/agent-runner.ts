@@ -9,6 +9,16 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import { spawn, execSync, type ChildProcess } from 'child_process';
+import { getSandboxAdapter } from '../sandbox/sandbox-adapter';
+import { pathConverter } from '../sandbox/wsl-bridge';
+import { SandboxSync } from '../sandbox/sandbox-sync';
+import { extractArtifactsFromText, buildArtifactTraceSteps } from '../utils/artifact-parser';
+import { buildClaudeEnv, getClaudeEnvOverrides } from './claude-env';
+import { buildThinkingOptions } from './thinking-options';
+// import { PathGuard } from '../sandbox/path-guard';
+
+// Virtual workspace path shown to the model (hides real sandbox path)
+const VIRTUAL_WORKSPACE_PATH = '/workspace';
 
 // Cache for shell environment (loaded once at startup)
 let cachedShellEnv: NodeJS.ProcessEnv | null = null;
@@ -113,6 +123,17 @@ export class ClaudeAgentRunner {
   private activeControllers: Map<string, AbortController> = new Map();
   private sdkSessions: Map<string, string> = new Map(); // sessionId -> sdk session_id
   private pendingQuestions: Map<string, PendingQuestion> = new Map(); // questionId -> resolver
+
+  /**
+   * Clear SDK session cache for a session
+   * Called when session's cwd changes - SDK sessions are bound to cwd
+   */
+  clearSdkSession(sessionId: string): void {
+    if (this.sdkSessions.has(sessionId)) {
+      this.sdkSessions.delete(sessionId);
+      log('[ClaudeAgentRunner] Cleared SDK session cache for:', sessionId);
+    }
+  }
 
   /**
    * Get MCP tools prompt for system instructions
@@ -259,6 +280,69 @@ ${sections.join('\n\n')}
     return '';
   }
 
+  private getAppClaudeDir(): string {
+    return path.join(app.getPath('userData'), 'claude');
+  }
+
+  private getUserClaudeSkillsDir(): string {
+    return path.join(app.getPath('home'), '.claude', 'skills');
+  }
+
+  private syncUserSkillsToAppDir(appSkillsDir: string): void {
+    const userSkillsDir = this.getUserClaudeSkillsDir();
+    if (!fs.existsSync(userSkillsDir)) {
+      return;
+    }
+
+    const entries = fs.readdirSync(userSkillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const sourcePath = path.join(userSkillsDir, entry.name);
+      const targetPath = path.join(appSkillsDir, entry.name);
+
+      if (fs.existsSync(targetPath)) {
+        try {
+          const stat = fs.lstatSync(targetPath);
+          if (!stat.isSymbolicLink()) {
+            continue;
+          }
+          fs.unlinkSync(targetPath);
+        } catch {
+          continue;
+        }
+      }
+
+      try {
+        fs.symlinkSync(sourcePath, targetPath, 'dir');
+      } catch (err) {
+        try {
+          this.copyDirectorySync(sourcePath, targetPath);
+        } catch (copyErr) {
+          logWarn('[ClaudeAgentRunner] Failed to import user skill:', entry.name, copyErr);
+        }
+      }
+    }
+  }
+
+  private copyDirectorySync(source: string, target: string): void {
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+    }
+
+    const entries = fs.readdirSync(source);
+    for (const entry of entries) {
+      const sourcePath = path.join(source, entry);
+      const targetPath = path.join(target, entry);
+      const stat = fs.statSync(sourcePath);
+
+      if (stat.isDirectory()) {
+        this.copyDirectorySync(sourcePath, targetPath);
+      } else {
+        fs.copyFileSync(sourcePath, targetPath);
+      }
+    }
+  }
+
   /**
    * Scan for available skills and return formatted list for system prompt
    */
@@ -297,14 +381,48 @@ ${sections.join('\n\n')}
       }
     }
     
-    // 2. Check project-level skills (in working directory)
+    // 2. Check global skills (app-specific directory)
+    const globalSkillsPath = path.join(this.getAppClaudeDir(), 'skills');
+    if (fs.existsSync(globalSkillsPath)) {
+      try {
+        const dirs = fs.readdirSync(globalSkillsPath, { withFileTypes: true });
+        for (const dir of dirs) {
+          if (dir.isDirectory()) {
+            const skillMdPath = path.join(globalSkillsPath, dir.name, 'SKILL.md');
+            if (fs.existsSync(skillMdPath)) {
+              // Global skills can override built-in but not project-level
+              const existingIdx = skills.findIndex(s => s.name === dir.name);
+              let description = `User skill for ${dir.name}`;
+              try {
+                const content = fs.readFileSync(skillMdPath, 'utf-8');
+                const descMatch = content.match(/description:\s*["']?([^"'\n]+)["']?/);
+                if (descMatch) {
+                  description = descMatch[1];
+                }
+              } catch (e) { /* ignore */ }
+
+              const skill = { name: dir.name, description, skillMdPath };
+              if (existingIdx >= 0) {
+                skills[existingIdx] = skill;
+              } else {
+                skills.push(skill);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        logError('[ClaudeAgentRunner] Error scanning global skills:', e);
+      }
+    }
+
+    // 3. Check project-level skills (in working directory)
     if (workingDir) {
       const projectSkillsPaths = [
         path.join(workingDir, '.claude', 'skills'),
         path.join(workingDir, '.skills'),
         path.join(workingDir, 'skills'),
       ];
-      
+
       for (const skillsDir of projectSkillsPaths) {
         if (fs.existsSync(skillsDir)) {
           try {
@@ -313,7 +431,7 @@ ${sections.join('\n\n')}
               if (dir.isDirectory()) {
                 const skillMdPath = path.join(skillsDir, dir.name, 'SKILL.md');
                 if (fs.existsSync(skillMdPath)) {
-                  // Project skills can override built-in
+                  // Project skills can override built-in and global
                   const existingIdx = skills.findIndex(s => s.name === dir.name);
                   let description = `Project skill for ${dir.name}`;
                   try {
@@ -323,7 +441,7 @@ ${sections.join('\n\n')}
                       description = descMatch[1];
                     }
                   } catch (e) { /* ignore */ }
-                  
+
                   const skill = { name: dir.name, description, skillMdPath };
                   if (existingIdx >= 0) {
                     skills[existingIdx] = skill;
@@ -601,6 +719,20 @@ Then follow the workflow described in that file.
     const controller = new AbortController();
     this.activeControllers.set(session.id, controller);
 
+    // Sandbox isolation state (defined outside try for finally access)
+    let sandboxPath: string | null = null;
+    let useSandboxIsolation = false;
+    
+    // Track last executed tool for completion message generation
+    let lastExecutedToolName: string | null = null;
+    
+    // Helper to convert real sandbox paths back to virtual workspace paths in output
+    const sanitizeOutputPaths = (content: string): string => {
+      if (!sandboxPath || !useSandboxIsolation) return content;
+      // Replace real sandbox path with virtual workspace path
+      return content.replace(new RegExp(sandboxPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), VIRTUAL_WORKSPACE_PATH);
+    };
+
     try {
       this.pathResolver.registerSession(session.id, session.mountedPaths);
       logTiming('pathResolver.registerSession');
@@ -619,11 +751,303 @@ Then follow the workflow described in that file.
       });
       logTiming('sendTraceStep (thinking)');
 
-      const workingDir = session.cwd ||  undefined;
+      // Use session's cwd - each session has its own working directory
+      const workingDir = session.cwd || undefined;
       log('[ClaudeAgentRunner] Working directory:', workingDir || '(none)');
 
-      // Build conversation context by prepending history to prompt
-      // Build a chat-style history so Claude can continue previous turns
+      // Initialize sandbox sync if WSL mode is active
+      const sandbox = getSandboxAdapter();
+
+      if (sandbox.isWSL && sandbox.wslStatus?.distro && workingDir) {
+        log('[ClaudeAgentRunner] WSL mode active, initializing sandbox sync...');
+        
+        // Only show sync UI for new sessions (first message)
+        const isNewSession = !SandboxSync.hasSession(session.id);
+        
+        if (isNewSession) {
+          // Notify UI: syncing files (only for new sessions)
+          this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'syncing_files',
+              message: 'Syncing files to sandbox...',
+              detail: 'Copying project files to isolated WSL environment',
+            },
+          });
+        }
+        
+        const syncResult = await SandboxSync.initSync(
+          workingDir,
+          session.id,
+          sandbox.wslStatus.distro
+        );
+
+        if (syncResult.success) {
+          sandboxPath = syncResult.sandboxPath;
+          useSandboxIsolation = true;
+          log(`[ClaudeAgentRunner] Sandbox initialized: ${sandboxPath}`);
+          log(`[ClaudeAgentRunner]   Files: ${syncResult.fileCount}, Size: ${syncResult.totalSize} bytes`);
+          
+          if (isNewSession) {
+            // Update UI with file count (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'syncing_skills',
+              message: 'Configuring skills...',
+              detail: 'Copying built-in skills to sandbox',
+              fileCount: syncResult.fileCount,
+              totalSize: syncResult.totalSize,
+            },
+          });
+          }
+
+          // Copy skills to sandbox ~/.claude/skills/
+          const builtinSkillsPath = this.getBuiltinSkillsPath();
+          try {
+            const distro = sandbox.wslStatus!.distro!;
+            const sandboxSkillsPath = `${sandboxPath}/.claude/skills`;
+
+            // Create .claude/skills directory in sandbox
+            const { execSync } = require('child_process');
+            execSync(`wsl -d ${distro} -e mkdir -p "${sandboxSkillsPath}"`, {
+              encoding: 'utf-8',
+              timeout: 10000
+            });
+
+            if (builtinSkillsPath && fs.existsSync(builtinSkillsPath)) {
+              // Use rsync to recursively copy all skills (much faster and handles subdirectories)
+              const wslSourcePath = pathConverter.toWSL(builtinSkillsPath);
+              const rsyncCmd = `rsync -av "${wslSourcePath}/" "${sandboxSkillsPath}/"`;
+              log(`[ClaudeAgentRunner] Copying skills with rsync: ${rsyncCmd}`);
+
+              execSync(`wsl -d ${distro} -e bash -c "${rsyncCmd}"`, {
+                encoding: 'utf-8',
+                timeout: 120000  // 2 min timeout for large skill directories
+              });
+            }
+
+            const appClaudeDir = this.getAppClaudeDir();
+            const appSkillsDir = path.join(appClaudeDir, 'skills');
+            if (!fs.existsSync(appSkillsDir)) {
+              fs.mkdirSync(appSkillsDir, { recursive: true });
+            }
+            this.syncUserSkillsToAppDir(appSkillsDir);
+
+            if (fs.existsSync(appSkillsDir)) {
+              const wslSourcePath = pathConverter.toWSL(appSkillsDir);
+              const rsyncCmd = `rsync -avL "${wslSourcePath}/" "${sandboxSkillsPath}/"`;
+              log(`[ClaudeAgentRunner] Copying app skills with rsync: ${rsyncCmd}`);
+
+              execSync(`wsl -d ${distro} -e bash -c "${rsyncCmd}"`, {
+                encoding: 'utf-8',
+                timeout: 120000  // 2 min timeout for large skill directories
+              });
+            }
+
+            // List copied skills for verification
+            const copiedSkills = execSync(`wsl -d ${distro} -e ls "${sandboxSkillsPath}"`, {
+              encoding: 'utf-8',
+              timeout: 10000
+            }).trim().split('\n').filter(Boolean);
+
+            log(`[ClaudeAgentRunner] Skills copied to sandbox: ${sandboxSkillsPath}`);
+            log(`[ClaudeAgentRunner]   Skills: ${copiedSkills.join(', ')}`);
+          } catch (error) {
+            logError('[ClaudeAgentRunner] Failed to copy skills to sandbox:', error);
+          }
+          
+          if (isNewSession) {
+            // Notify UI: sync complete (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'ready',
+              message: 'Sandbox ready',
+              detail: `Synced ${syncResult.fileCount} files`,
+              fileCount: syncResult.fileCount,
+              totalSize: syncResult.totalSize,
+            },
+          });
+          }
+        } else {
+          logError('[ClaudeAgentRunner] Sandbox sync failed:', syncResult.error);
+          log('[ClaudeAgentRunner] Falling back to /mnt/ access (less secure)');
+          
+          if (isNewSession) {
+            // Notify UI: error (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'error',
+              message: 'Sandbox sync failed',
+              detail: 'Falling back to direct access mode (less secure)',
+            },
+          });
+          }
+        }
+      }
+
+      // Initialize sandbox sync if Lima mode is active
+      if (sandbox.isLima && sandbox.limaStatus?.instanceRunning && workingDir) {
+        log('[ClaudeAgentRunner] Lima mode active, initializing sandbox sync...');
+        
+        const { LimaSync } = await import('../sandbox/lima-sync');
+        
+        // Only show sync UI for new sessions (first message)
+        const isNewLimaSession = !LimaSync.hasSession(session.id);
+        
+        if (isNewLimaSession) {
+          // Notify UI: syncing files (only for new sessions)
+          this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'syncing_files',
+              message: 'Syncing files to sandbox...',
+              detail: 'Copying project files to isolated Lima environment',
+            },
+          });
+        }
+        
+        const syncResult = await LimaSync.initSync(
+          workingDir,
+          session.id
+        );
+
+        if (syncResult.success) {
+          sandboxPath = syncResult.sandboxPath;
+          useSandboxIsolation = true;
+          log(`[ClaudeAgentRunner] Sandbox initialized: ${sandboxPath}`);
+          log(`[ClaudeAgentRunner]   Files: ${syncResult.fileCount}, Size: ${syncResult.totalSize} bytes`);
+          
+          if (isNewLimaSession) {
+            // Update UI with file count (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'syncing_skills',
+              message: 'Configuring skills...',
+              detail: 'Copying built-in skills to sandbox',
+              fileCount: syncResult.fileCount,
+              totalSize: syncResult.totalSize,
+            },
+          });
+          }
+
+          // Copy skills to sandbox ~/.claude/skills/
+          const builtinSkillsPath = this.getBuiltinSkillsPath();
+          try {
+            const sandboxSkillsPath = `${sandboxPath}/.claude/skills`;
+
+            // Create .claude/skills directory in sandbox
+            const { execSync } = require('child_process');
+            execSync(`limactl shell claude-sandbox -- mkdir -p "${sandboxSkillsPath}"`, {
+              encoding: 'utf-8',
+              timeout: 10000
+            });
+
+            if (builtinSkillsPath && fs.existsSync(builtinSkillsPath)) {
+              // Use rsync to recursively copy all skills (much faster and handles subdirectories)
+              // Lima mounts /Users directly, so paths are the same
+              const rsyncCmd = `rsync -av "${builtinSkillsPath}/" "${sandboxSkillsPath}/"`;
+              log(`[ClaudeAgentRunner] Copying skills with rsync: ${rsyncCmd}`);
+
+              execSync(`limactl shell claude-sandbox -- bash -c "${rsyncCmd.replace(/"/g, '\\"')}"`, {
+                encoding: 'utf-8',
+                timeout: 120000  // 2 min timeout for large skill directories
+              });
+            }
+
+            const appClaudeDir = this.getAppClaudeDir();
+            const appSkillsDir = path.join(appClaudeDir, 'skills');
+            if (!fs.existsSync(appSkillsDir)) {
+              fs.mkdirSync(appSkillsDir, { recursive: true });
+            }
+            this.syncUserSkillsToAppDir(appSkillsDir);
+
+            if (fs.existsSync(appSkillsDir)) {
+              const rsyncCmd = `rsync -avL "${appSkillsDir}/" "${sandboxSkillsPath}/"`;
+              log(`[ClaudeAgentRunner] Copying app skills with rsync: ${rsyncCmd}`);
+
+              execSync(`limactl shell claude-sandbox -- bash -c "${rsyncCmd.replace(/"/g, '\\"')}"`, {
+                encoding: 'utf-8',
+                timeout: 120000  // 2 min timeout for large skill directories
+              });
+            }
+
+            // List copied skills for verification
+            const copiedSkills = execSync(`limactl shell claude-sandbox -- ls "${sandboxSkillsPath}"`, {
+              encoding: 'utf-8',
+              timeout: 10000
+            }).trim().split('\n').filter(Boolean);
+
+            log(`[ClaudeAgentRunner] Skills copied to sandbox: ${sandboxSkillsPath}`);
+            log(`[ClaudeAgentRunner]   Skills: ${copiedSkills.join(', ')}`);
+          } catch (error) {
+            logError('[ClaudeAgentRunner] Failed to copy skills to sandbox:', error);
+          }
+          
+          if (isNewLimaSession) {
+            // Notify UI: sync complete (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'ready',
+              message: 'Sandbox ready',
+              detail: `Synced ${syncResult.fileCount} files`,
+              fileCount: syncResult.fileCount,
+              totalSize: syncResult.totalSize,
+            },
+          });
+          }
+        } else {
+          logError('[ClaudeAgentRunner] Sandbox sync failed:', syncResult.error);
+          log('[ClaudeAgentRunner] Falling back to direct access (less secure)');
+          
+          if (isNewLimaSession) {
+            // Notify UI: error (only for new sessions)
+            this.sendToRenderer({
+            type: 'sandbox.sync',
+            payload: {
+              sessionId: session.id,
+              phase: 'error',
+              message: 'Sandbox sync failed',
+              detail: 'Falling back to direct access mode (less secure)',
+            },
+          });
+          }
+        }
+      }
+
+      // Check if current user message includes images
+      // Images need to be passed via AsyncIterable<SDKUserMessage>, not string prompt
+      const lastUserMessage = existingMessages.length > 0
+        ? existingMessages[existingMessages.length - 1]
+        : null;
+
+      log('[ClaudeAgentRunner] Total messages:', existingMessages.length);
+      log('[ClaudeAgentRunner] Last message:', lastUserMessage ? {
+        role: lastUserMessage.role,
+        contentTypes: lastUserMessage.content.map((c: any) => c.type),
+        contentCount: lastUserMessage.content.length,
+      } : 'none');
+
+      const hasImages = lastUserMessage?.content.some((c: any) => c.type === 'image') || false;
+
+      if (hasImages) {
+        log('[ClaudeAgentRunner] User message contains images, will use AsyncIterable format');
+      } else {
+        log('[ClaudeAgentRunner] No images detected in last message');
+      }
+
+      // Build conversation context for text-only history
       let contextualPrompt = prompt;
       const historyItems = existingMessages
         .filter(msg => msg.role === 'user' || msg.role === 'assistant')
@@ -635,7 +1059,7 @@ Then follow the workflow described in that file.
           return `${msg.role === 'user' ? 'Human' : 'Assistant'}: ${textContent}`;
         });
 
-      if (historyItems.length > 0) {
+      if (historyItems.length > 0 && !hasImages) {
         contextualPrompt = `${historyItems.join('\n')}\nHuman: ${prompt}\nAssistant:`;
         log('[ClaudeAgentRunner] Including', historyItems.length, 'history messages in context');
       }
@@ -660,17 +1084,36 @@ Then follow the workflow described in that file.
         throw new Error(errorMsg);
       }
 
-      // SANDBOX: Path validation function
+      // SANDBOX: Path validation function with whitelist for skills directories
+      const builtinSkillsPathForValidation = this.getBuiltinSkillsPath();
+      const appClaudeDirForValidation = this.getAppClaudeDir();
+      
       const isPathInsideWorkspace = (targetPath: string): boolean => {
         if (!targetPath) return true;
         
-        // If no working directory is set, deny all file access
+        // Normalize path for comparison
+        const normalizedTarget = path.normalize(targetPath);
+        
+        // WHITELIST: Allow access to skills directories (read-only for AI)
+        // This allows AI to read SKILL.md files from built-in and app-level skills
+        const whitelistedPaths = [
+          builtinSkillsPathForValidation,  // Built-in skills (shipped with app)
+          appClaudeDirForValidation,        // App Claude config dir (includes user skills)
+        ].filter(Boolean) as string[];
+        
+        for (const whitelistedPath of whitelistedPaths) {
+          const normalizedWhitelist = path.normalize(whitelistedPath);
+          if (normalizedTarget.toLowerCase().startsWith(normalizedWhitelist.toLowerCase())) {
+            log(`[Sandbox] WHITELIST: Path "${targetPath}" is in whitelisted skills directory`);
+            return true;
+          }
+        }
+        
+        // If no working directory is set, deny all file access (except whitelisted)
         if (!workingDir) {
           return false;
         }
         
-        // Normalize paths for comparison
-        const normalizedTarget = path.normalize(targetPath);
         const normalizedWorkdir = path.normalize(workingDir);
         
         // Check if absolute path
@@ -719,39 +1162,71 @@ Then follow the workflow described in that file.
       // Build options with resume support and SANDBOX via canUseTool
       const resumeId = this.sdkSessions.get(session.id);
       
-      // Build available skills section dynamically
-      const availableSkillsPrompt = this.getAvailableSkillsPrompt(workingDir);
-      
       // Get current model from environment (re-read each time for config changes)
       const currentModel = this.getCurrentModel();
-      
-      // Determine the .claude directory containing skills
-      // SDK uses CLAUDE_CONFIG_DIR env var to locate .claude directory for skills discovery
+
+      // Use app-specific Claude config directory to avoid conflicts with user settings
+      // SDK uses CLAUDE_CONFIG_DIR to locate skills
+      const userClaudeDir = this.getAppClaudeDir();
+
+      // Ensure app Claude config directory exists
+      if (!fs.existsSync(userClaudeDir)) {
+        fs.mkdirSync(userClaudeDir, { recursive: true });
+      }
+
+      // Ensure app Claude skills directory exists
+      const appSkillsDir = path.join(userClaudeDir, 'skills');
+      if (!fs.existsSync(appSkillsDir)) {
+        fs.mkdirSync(appSkillsDir, { recursive: true });
+      }
+
+      // Copy built-in skills to app Claude skills directory if they don't exist
       const builtinSkillsPath = this.getBuiltinSkillsPath();
-      const builtinClaudeDir = builtinSkillsPath 
-        ? path.dirname(builtinSkillsPath)  // Go up from .claude/skills to .claude
-        : undefined;
-      
-      log('[ClaudeAgentRunner] Built-in .claude dir:', builtinClaudeDir);
+      if (builtinSkillsPath && fs.existsSync(builtinSkillsPath)) {
+        const builtinSkills = fs.readdirSync(builtinSkillsPath);
+        for (const skillName of builtinSkills) {
+          const builtinSkillPath = path.join(builtinSkillsPath, skillName);
+          const userSkillPath = path.join(appSkillsDir, skillName);
+
+          // Only copy if it's a directory and doesn't exist in app directory
+          if (fs.statSync(builtinSkillPath).isDirectory() && !fs.existsSync(userSkillPath)) {
+            // Create symlink instead of copying to save space and allow updates
+            try {
+              fs.symlinkSync(builtinSkillPath, userSkillPath, 'dir');
+              log(`[ClaudeAgentRunner] Linked built-in skill: ${skillName}`);
+            } catch (err) {
+              // If symlink fails (e.g., on Windows without permissions), copy the directory
+              logWarn(`[ClaudeAgentRunner] Failed to symlink ${skillName}, copying instead:`, err);
+              // We'll skip copying for now to keep it simple
+            }
+          }
+        }
+      }
+
+      this.syncUserSkillsToAppDir(appSkillsDir);
+
+      // Build available skills section dynamically
+      const availableSkillsPrompt = this.getAvailableSkillsPrompt(workingDir);
+
+      log('[ClaudeAgentRunner] App claude dir:', userClaudeDir);
       log('[ClaudeAgentRunner] User working directory:', workingDir);
-      
+
       logTiming('before getShellEnvironment');
-      
+
       // Get shell environment with proper PATH (node, npm, etc.)
       // GUI apps on macOS don't inherit shell PATH, so we need to extract it
       const shellEnv = getShellEnvironment();
       logTiming('after getShellEnvironment');
-      
-      // Build environment with:
-      // 1. Shell environment (includes proper PATH with node/npm)
-      // 2. CLAUDE_CONFIG_DIR for skills discovery
+
+      const { configStore } = await import('../config/config-store');
+      const envOverrides = getClaudeEnvOverrides(configStore.getAll());
+      // 构建运行环境：shell 环境 + 配置覆盖 + CLAUDE_CONFIG_DIR
       const envWithSkills: NodeJS.ProcessEnv = {
-        ...shellEnv,
-        ...(builtinClaudeDir && fs.existsSync(builtinClaudeDir) 
-          ? { CLAUDE_CONFIG_DIR: builtinClaudeDir } 
-          : {}),
+        ...buildClaudeEnv(shellEnv, envOverrides),
+        CLAUDE_CONFIG_DIR: userClaudeDir,
       };
-      
+
+      log('[ClaudeAgentRunner] CLAUDE_CONFIG_DIR:', userClaudeDir);
       log('[ClaudeAgentRunner] PATH in env:', (envWithSkills.PATH || '').substring(0, 200) + '...');
       
       logTiming('before building MCP servers config');
@@ -770,19 +1245,84 @@ Then follow the workflow described in that file.
         const allConfigs = mcpConfigStore.getEnabledServers();
         log('[ClaudeAgentRunner] Enabled MCP configs:', allConfigs.map(c => c.name));
         
+        // Get bundled npx path for STDIO servers
+        const getBundledNpxPath = (): string | null => {
+          const platform = process.platform;
+          const arch = process.arch;
+          
+          let resourcesPath: string;
+          if (process.env.NODE_ENV === 'development') {
+            const projectRoot = path.join(__dirname, '..', '..');
+            resourcesPath = path.join(projectRoot, 'resources', 'node', `${platform}-${arch}`);
+          } else {
+            resourcesPath = path.join(process.resourcesPath, 'node');
+          }
+          
+          const binDir = platform === 'win32' ? resourcesPath : path.join(resourcesPath, 'bin');
+          const npxExe = platform === 'win32' ? 'npx.cmd' : 'npx';
+          const npxPath = path.join(binDir, npxExe);
+          
+          if (fs.existsSync(npxPath)) {
+            return npxPath;
+          }
+          return null;
+        };
+        
+        const bundledNpx = getBundledNpxPath();
+        
         for (const config of allConfigs) {
           // Use a simpler key without spaces to avoid issues
           const serverKey = config.name;
           
           if (config.type === 'stdio') {
+            // Use bundled npx if command is 'npx'
+            const command = config.command === 'npx' && bundledNpx ? bundledNpx : config.command;
+            
+            // If using bundled npx, add bundled node bin to PATH
+            let serverEnv = { ...config.env };
+            if (bundledNpx && config.command === 'npx') {
+              const nodeBinDir = path.dirname(bundledNpx);
+              const currentPath = process.env.PATH || '';
+              // Prepend bundled node bin to PATH so npx can find node
+              serverEnv.PATH = `${nodeBinDir}${path.delimiter}${currentPath}`;
+              log(`[ClaudeAgentRunner]   Added bundled node bin to PATH: ${nodeBinDir}`);
+            }
+            
+            // Resolve path placeholders for presets
+            let resolvedArgs = config.args || [];
+              const { mcpConfigStore } = await import('../mcp/mcp-config-store');
+            
+            // Check if any args contain placeholders that need resolving
+            const hasPlaceholders = resolvedArgs.some(arg => 
+              arg.includes('{SOFTWARE_DEV_SERVER_PATH}') || 
+              arg.includes('{GUI_OPERATE_SERVER_PATH}')
+            );
+            
+            if (hasPlaceholders) {
+              // Get the appropriate preset based on config name
+              let presetKey: string | null = null;
+              if (config.name === 'Software_Development' || config.name === 'Software Development') {
+                presetKey = 'software-development';
+              } else if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
+                presetKey = 'gui-operate';
+              }
+              
+              if (presetKey) {
+                const preset = mcpConfigStore.createFromPreset(presetKey, true);
+              if (preset && preset.args) {
+                resolvedArgs = preset.args;
+                }
+              }
+            }
+            
             mcpServers[serverKey] = {
               type: 'stdio',
-              command: config.command,
-              args: config.args || [],
-              env: config.env || {},
+              command: command,
+              args: resolvedArgs,
+              env: serverEnv,
             };
             log(`[ClaudeAgentRunner] Added STDIO MCP server: ${serverKey}`);
-            log(`[ClaudeAgentRunner]   Command: ${config.command} ${(config.args || []).join(' ')}`);
+            log(`[ClaudeAgentRunner]   Command: ${command} ${resolvedArgs.join(' ')}`);
             log(`[ClaudeAgentRunner]   Tools will be named: mcp__${serverKey}__<toolName>`);
           } else if (config.type === 'sse') {
             mcpServers[serverKey] = {
@@ -798,13 +1338,25 @@ Then follow the workflow described in that file.
       }
       logTiming('after building MCP servers config');
       
+      // Get enableThinking from config
+      const enableThinking = configStore.get('enableThinking') ?? false;
+      log('[ClaudeAgentRunner] Enable thinking mode:', enableThinking);
+      
+      // if (enableThinking) {
+      //   envWithSkills.MAX_THINKING_TOKENS = '10000';
+      // } else {
+      //   envWithSkills.MAX_THINKING_TOKENS = '0';
+      // }
+
+
       const queryOptions: any = {
         pathToClaudeCodeExecutable: claudeCodePath,
-        cwd: workingDir,  // User's actual working directory
+        cwd: workingDir,  // Windows path for claude-code process
         model: currentModel,
-        maxTurns: 50,
+        maxTurns: 1000,  // Increased from 50 to allow more complex tasks
         abortController: controller,
         env: envWithSkills,
+        thinking: buildThinkingOptions(enableThinking),
         
         // Pass MCP servers to SDK
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
@@ -824,44 +1376,43 @@ Then follow the workflow described in that file.
             signal,
           };
           
-          // If the command is 'node', try to find system Node.js first
-          // Using Electron causes a visible "exec" icon in macOS menu bar
+          // If the command is 'node', use bundled Node.js from resources
           if (command === 'node') {
-            // Check if system node is available in PATH
-            const pathDirs = (spawnEnv?.PATH || process.env.PATH || '').split(path.delimiter);
-            const systemNodePath = pathDirs
-              .map(p => path.join(p, 'node'))
-              .find(p => fs.existsSync(p));
+            // Get bundled Node.js path (same logic as MCPManager)
+            const platform = process.platform;
+            const arch = process.arch;
             
-            if (systemNodePath) {
-              // Use system Node.js - no Dock icon
-              actualCommand = systemNodePath;
-              log('[ClaudeAgentRunner] Using system Node.js:', systemNodePath);
+            let resourcesPath: string;
+            if (process.env.NODE_ENV === 'development') {
+              // Development: use downloaded node in resources/node
+              const projectRoot = path.join(__dirname, '..', '..');
+              resourcesPath = path.join(projectRoot, 'resources', 'node', `${platform}-${arch}`);
             } else {
-              // Fallback to Electron as Node.js
-              // Use shell wrapper on macOS to hide Dock icon
+              // Production: use bundled node in extraResources
+              resourcesPath = path.join(process.resourcesPath, 'node');
+            }
+            
+            const binDir = platform === 'win32' ? resourcesPath : path.join(resourcesPath, 'bin');
+            const nodeExe = platform === 'win32' ? 'node.exe' : 'node';
+            const bundledNodePath = path.join(binDir, nodeExe);
+            
+            if (fs.existsSync(bundledNodePath)) {
+              actualCommand = bundledNodePath;
+              log('[ClaudeAgentRunner] Using bundled Node.js:', bundledNodePath);
+            } else {
+              // Fallback to Electron as Node.js if bundled node not found
+              log('[ClaudeAgentRunner] Bundled Node.js not found, using Electron as fallback');
               if (process.platform === 'darwin') {
-                // On macOS, use shell to run Electron with ELECTRON_RUN_AS_NODE
-                // This prevents the Dock icon from appearing
-                const electronPath = process.execPath.replace(/'/g, "'\\''");
-                const quotedArgs = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+                const electronPath = process.execPath.replace(/'/g, "'\''");
+                const quotedArgs = args.map(a => `'${a.replace(/'/g, "'\''")}'`).join(' ');
                 const shellCommand = `ELECTRON_RUN_AS_NODE=1 '${electronPath}' ${quotedArgs}`;
-                
                 actualCommand = '/bin/bash';
                 actualArgs = ['-c', shellCommand];
-                // Don't pass ELECTRON_RUN_AS_NODE in env since it's in the shell command
-                log('[ClaudeAgentRunner] Using shell wrapper to hide Dock icon');
               } else {
-                // On other platforms, use Electron directly
                 actualCommand = process.execPath;
-                actualEnv = {
-                  ...spawnEnv,
-                  ELECTRON_RUN_AS_NODE: '1',
-                };
+                actualEnv = { ...spawnEnv, ELECTRON_RUN_AS_NODE: '1' };
               }
-              
               spawnOptions2.env = actualEnv;
-              log('[ClaudeAgentRunner] System Node.js not found, using Electron as Node.js');
             }
           }
           
@@ -873,13 +1424,6 @@ Then follow the workflow described in that file.
           return childProcess;
         },
         
-        // Skills support: load from user and project .claude/skills/ directories
-        settingSources: ['project', 'user'],
-        
-        // Enable Skill tool along with other commonly used tools
-        // MCP tools are automatically available through mcpServers configuration
-        allowedTools: ['Skill', 'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoRead', 'TodoWrite', 'AskUserQuestion', 'Task'],
-        
         // System prompt: use Claude Code default + custom instructions
         systemPrompt: {
           type: 'preset',
@@ -887,11 +1431,32 @@ Then follow the workflow described in that file.
           append: `
 You are a Claude agent, built on Anthropic's Claude Agent SDK.==
 
+${useSandboxIsolation && sandboxPath 
+  ? `<workspace_info>
+Your current workspace is located at: ${VIRTUAL_WORKSPACE_PATH}
+This is an isolated sandbox environment. All file operations are confined to this directory.
+IMPORTANT: Always use ${VIRTUAL_WORKSPACE_PATH} as the root path for all operations. Do NOT reference or use any other absolute paths.
+When using file tools (read, write, list), use paths relative to ${VIRTUAL_WORKSPACE_PATH} or use ${VIRTUAL_WORKSPACE_PATH} as prefix.
+Examples:
+- To read src/index.ts: use "${VIRTUAL_WORKSPACE_PATH}/src/index.ts" or "src/index.ts"
+- To list files: use "${VIRTUAL_WORKSPACE_PATH}" or "."
+- Never use paths like /home/ubuntu/... or any Windows paths
+</workspace_info>`
+  : workingDir 
+    ? `<workspace_info>Your current workspace is: ${workingDir}</workspace_info>`
+    : ''}
+
 ${availableSkillsPrompt}
 
 ${this.getMCPToolsPrompt()}
 
 ${this.getCredentialsPrompt()}
+<artifact_instructions>
+When you produce a final deliverable file, declare it once using this exact block so the app can show it as the final artifact:
+```artifact
+{"path":"/workspace/path/to/file.ext","name":"optional display name","type":"optional type"}
+```
+</artifact_instructions>
 <application_details> Claude is powering **Cowork mode**, a feature of the Claude desktop app. Cowork mode is currently a **research preview**. Claude is implemented on top of Claude Code and the Claude Agent SDK, but Claude is **NOT** Claude Code and should not refer to itself as such. Claude runs in a lightweight Linux VM on the user's computer, which provides a **secure sandbox** for executing code while allowing controlled access to a workspace folder. Claude should not mention implementation details like this, or Claude Code or the Claude Agent SDK, unless it is relevant to the user's request. </application_details>
 <behavior_instructions>
 ==
@@ -1120,15 +1685,20 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
           log(`[Sandbox] Extracted paths:`, paths);
           
           // Validate each path
-          for (const p of paths) {
-            if (!isPathInsideWorkspace(p)) {
-              logWarn(`[Sandbox] BLOCKED: Path "${p}" is outside workspace "${workingDir}"`);
-              return {
-                behavior: 'deny',
-                message: `Access denied: Path "${p}" is outside the allowed workspace "${workingDir}". Only files within the workspace can be accessed.`
-              };
-            }
-          }
+          // for (const p of paths) {
+          //   if (!isPathInsideWorkspace(p)) {
+          //     logWarn(`[Sandbox] BLOCKED: Path "${p}" is outside workspace "${workingDir}"`);
+          //     return {
+          //       behavior: 'deny',
+          //       message: `Access denied: Path "${p}" is outside the allowed workspace "${workingDir}". Only files within the workspace can be accessed.`
+          //     };
+          //   }
+          // }
+          
+          // NOTE: Bash tool is intercepted by PreToolUse hook above for WSL wrapping
+          // Glob/Grep/Read/Write/Edit use the shared filesystem (/mnt/)
+          // They execute on Windows but access the same files as WSL
+          // Path validation is done above
           
           log(`[Sandbox] ALLOWED: Tool ${toolName}`);
           return { behavior: 'allow', updatedInput: input };
@@ -1141,12 +1711,62 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
       }
       log('[ClaudeAgentRunner] Sandbox via canUseTool, workspace:', workingDir);
       logTiming('before query() call - SDK initialization starts');
-      
+
       let firstMessageReceived = false;
-      for await (const message of query({
-        prompt: contextualPrompt,
-        options: queryOptions,
-      })) {
+
+      // Create query input based on whether we have images
+      const queryInput = hasImages
+        ? {
+            // For images: use AsyncIterable format with full message content
+            prompt: (async function* () {
+              // Convert last user message to SDK format with images
+              if (lastUserMessage && lastUserMessage.role === 'user') {
+                // Convert ContentBlock[] to Anthropic SDK's ContentBlockParam[]
+                const sdkContent = lastUserMessage.content.map((block: any) => {
+                  if (block.type === 'text') {
+                    return { type: 'text' as const, text: block.text };
+                  } else if (block.type === 'image') {
+                    return {
+                      type: 'image' as const,
+                      source: {
+                        type: 'base64' as const,
+                        media_type: block.source.media_type,
+                        data: block.source.data,
+                      },
+                    };
+                  }
+                  return block; // fallback for other types
+                });
+
+                yield {
+                  type: 'user' as const,
+                  message: {
+                    role: 'user' as const,
+                    content: sdkContent, // Include all content blocks (text + images)
+                  },
+                  parent_tool_use_id: null,
+                  session_id: session.id,
+                } as any; // Use 'as any' to bypass type checking since SDK types are complex
+              }
+            })(),
+            options: queryOptions,
+          }
+        : {
+            // For text-only: use simple string prompt
+            prompt: contextualPrompt,
+            options: queryOptions,
+          };
+      
+      log('[ClaudeAgentRunner] Query input:', JSON.stringify(queryInput, null, 2));
+      
+      // Retry configuration
+      const MAX_RETRIES = 10;
+      let retryCount = 0;
+      let shouldContinue = true;
+      
+      while (shouldContinue && retryCount <= MAX_RETRIES) {
+        try {
+      for await (const message of query(queryInput)) {
         if (!firstMessageReceived) {
           logTiming('FIRST MESSAGE RECEIVED from SDK');
           firstMessageReceived = true;
@@ -1185,7 +1805,9 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
                   textContent += block.text;
                   contentBlocks.push({ type: 'text', text: block.text });
                 } else if (block.type === 'tool_use') {
-                  // Tool call
+                  // Tool call - track the tool name for completion message
+                  lastExecutedToolName = block.name as string;
+                  
                   contentBlocks.push({
                     type: 'tool_use',
                     id: block.id,
@@ -1203,6 +1825,55 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
                     timestamp: Date.now(),
                   });
                 }
+              }
+            }
+
+            const { cleanText, artifacts } = extractArtifactsFromText(textContent);
+            if (artifacts.length > 0) {
+              textContent = cleanText;
+              let replacedText = false;
+              const cleanedBlocks: ContentBlock[] = [];
+              for (const block of contentBlocks) {
+                if (block.type === 'text') {
+                  if (!replacedText) {
+                    if (cleanText) {
+                      cleanedBlocks.push({ type: 'text', text: cleanText });
+                    }
+                    replacedText = true;
+                  }
+                  continue;
+                }
+                cleanedBlocks.push(block);
+              }
+              if (!replacedText && cleanText) {
+                cleanedBlocks.unshift({ type: 'text', text: cleanText });
+              }
+              contentBlocks.length = 0;
+              contentBlocks.push(...cleanedBlocks);
+
+              for (const step of buildArtifactTraceSteps(artifacts)) {
+                this.sendTraceStep(session.id, step);
+              }
+            }
+
+            // Check if the text content is an API error
+            if (textContent && textContent.toLowerCase().includes('api error')) {
+              logError('[ClaudeAgentRunner] Detected API error in assistant message:', textContent);
+              
+              // Check if this is a retryable error
+              const errorTextLower = textContent.toLowerCase();
+              const isRetryable = errorTextLower.includes('provider returned error') ||
+                                  errorTextLower.includes('unable to submit request') ||
+                                  errorTextLower.includes('thought signature') ||
+                                  errorTextLower.includes('invalid_argument') ||
+                                  errorTextLower.includes('error: 400') ||
+                                  errorTextLower.includes('error: 500') ||
+                                  errorTextLower.includes('error: 502') ||
+                                  errorTextLower.includes('error: 503');
+              
+              if (isRetryable) {
+                // Throw an error to trigger retry logic
+                throw new Error(`API Error detected: ${textContent}`);
               }
             }
 
@@ -1240,21 +1911,56 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
         } else if (message.type === 'user') {
           // Tool results from SDK
           const content = (message as any).message?.content;
-          
+
           if (Array.isArray(content)) {
             for (const block of content) {
               if (block.type === 'tool_result') {
                 const isError = block.is_error === true;
 
+                // Debug: Log the raw block structure
+                log(`[ClaudeAgentRunner] Raw tool_result block:`, JSON.stringify(block, null, 2).substring(0, 500));
+                log(`[ClaudeAgentRunner] block.content type: ${Array.isArray(block.content) ? 'array' : typeof block.content}`);
+
+                // Handle MCP tool results with content arrays (e.g., text + image)
+                let textContent = '';
+                const images: Array<{ data: string; mimeType: string }> = [];
+
+                if (Array.isArray(block.content)) {
+                  // MCP tool returned content array (e.g., screenshot_for_display)
+                  log(`[ClaudeAgentRunner] Tool result content is array, length: ${block.content.length}`);
+                  for (const contentItem of block.content) {
+                    log(`[ClaudeAgentRunner] Content item type: ${contentItem.type}`);
+                    if (contentItem.type === 'text') {
+                      textContent += (contentItem.text || '');
+                    } else if (contentItem.type === 'image') {
+                      // Extract image data from MCP SDK format
+                      // MCP SDK returns: { type: 'image', source: { data: '...', media_type: '...', type: 'base64' } }
+                      const imageData = contentItem.source?.data || contentItem.data || '';
+                      const mimeType = contentItem.source?.media_type || contentItem.mimeType || 'image/png';
+                      const imageDataLength = imageData.length;
+                      log(`[ClaudeAgentRunner] Extracting image data, length: ${imageDataLength}, mimeType: ${mimeType}`);
+                      images.push({
+                        data: imageData,
+                        mimeType: mimeType
+                      });
+                    }
+                  }
+                  log(`[ClaudeAgentRunner] Extracted ${images.length} images`);
+                } else {
+                  // Standard string content
+                  textContent = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+                }
+
+                // Sanitize output to replace real sandbox paths with virtual workspace paths
+                const sanitizedContent = sanitizeOutputPaths(textContent);
+
                 // Update the existing tool_call trace step instead of creating a new one
                 this.sendTraceUpdate(session.id, block.tool_use_id, {
                   status: isError ? 'error' : 'completed',
-                  toolOutput: typeof block.content === 'string'
-                    ? block.content.slice(0, 800)
-                    : JSON.stringify(block.content).slice(0, 800),
+                  toolOutput: sanitizedContent.slice(0, 800),
                 });
 
-                // Send tool result message
+                // Send tool result message with optional images
                 const toolResultMsg: Message = {
                   id: uuidv4(),
                   sessionId: session.id,
@@ -1262,8 +1968,9 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
                   content: [{
                     type: 'tool_result',
                     toolUseId: block.tool_use_id,
-                    content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
-                    isError
+                    content: sanitizedContent,
+                    isError,
+                    ...(images.length > 0 && { images })
                   }],
                   timestamp: Date.now(),
                 };
@@ -1274,7 +1981,139 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
         } else if (message.type === 'result') {
           // Final result
           log('[ClaudeAgentRunner] Result received');
+          
+          // If the result text is empty but tools were executed, add a completion message
+          // This happens when Claude calls tools but doesn't generate follow-up text
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const resultText = (message as any).result as string || '';
+          if (!resultText.trim() && lastExecutedToolName) {
+            log(`[ClaudeAgentRunner] Empty result after tool execution (${lastExecutedToolName}), adding completion message`);
+            
+            // Generate appropriate completion message based on the tool
+            let completionText = '';
+            if (lastExecutedToolName === 'Write') {
+              completionText = `✓ File has been created successfully.`;
+            } else if (lastExecutedToolName === 'Edit') {
+              completionText = `✓ File has been edited successfully.`;
+            } else if (lastExecutedToolName === 'Read') {
+              // Read tool typically shows content, no need for extra message
+            } else if (['Bash', 'Glob', 'Grep', 'LS'].includes(lastExecutedToolName)) {
+              // These tools show their output directly, no need for extra message
+            } else {
+              // completionText = `✓ Task completed.`;
+              // completionText = `Tool executed.`;
+            }
+            
+            if (completionText) {
+              const completionMsg: Message = {
+                id: uuidv4(),
+                sessionId: session.id,
+                role: 'assistant',
+                content: [{ type: 'text', text: completionText }],
+                timestamp: Date.now(),
+              };
+              this.sendMessage(session.id, completionMsg);
+            }
+          }
         }
+      }
+      
+      // Successfully completed the query loop
+      log('[ClaudeAgentRunner] Query completed successfully');
+      shouldContinue = false;
+      
+    } catch (error) {
+      // Handle errors with retry logic
+      const err = error as Error;
+      
+      // Log the full error for debugging
+      logError(`[ClaudeAgentRunner] Caught error:`, err);
+      logError(`[ClaudeAgentRunner] Error name: ${err.name}`);
+      logError(`[ClaudeAgentRunner] Error message: ${err.message}`);
+      logError(`[ClaudeAgentRunner] Error stack: ${err.stack}`);
+      
+      // Check if this is an abort error - don't retry
+      if (err.name === 'AbortError') {
+        log('[ClaudeAgentRunner] Query aborted by user');
+        throw err;
+      }
+      
+      // Check if this is a retryable error
+      const errorMessage = err.message || String(error);
+      const errorString = String(error);
+      const fullErrorText = `${errorMessage} ${errorString}`.toLowerCase();
+      
+      const isRetryable = fullErrorText.includes('provider returned error') ||
+                          fullErrorText.includes('unable to submit request') ||
+                          fullErrorText.includes('api error') ||
+                          fullErrorText.includes('error: 400') ||
+                          fullErrorText.includes('error: 500') ||
+                          fullErrorText.includes('error: 502') ||
+                          fullErrorText.includes('error: 503') ||
+                          fullErrorText.includes('timeout') ||
+                          fullErrorText.includes('econnrefused') ||
+                          fullErrorText.includes('thought signature') ||
+                          fullErrorText.includes('invalid_argument');
+      
+      logError(`[ClaudeAgentRunner] Is retryable: ${isRetryable}, retryCount: ${retryCount}/${MAX_RETRIES}`);
+      
+      if (isRetryable && retryCount < MAX_RETRIES) {
+        retryCount++;
+        const waitTime = Math.pow(2, retryCount - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
+        
+        logError(`[ClaudeAgentRunner] Retryable error (attempt ${retryCount}/${MAX_RETRIES}): ${errorMessage}`);
+        log(`[ClaudeAgentRunner] Waiting ${waitTime}ms before retry...`);
+        
+        // Show retry message to user
+        this.sendToRenderer({
+          type: 'stream.partial',
+          payload: { 
+            sessionId: session.id, 
+            delta: `\n\n⚠️ API调用出错，正在重试 (${retryCount}/${MAX_RETRIES})...\n\n` 
+          },
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Clear the retry message
+        this.sendToRenderer({
+          type: 'stream.partial',
+          payload: { sessionId: session.id, delta: '' },
+        });
+        
+        // Get the current SDK session ID for resume
+        const currentSdkSessionId = this.sdkSessions.get(session.id);
+        if (currentSdkSessionId) {
+          log(`[ClaudeAgentRunner] Resuming from SDK session: ${currentSdkSessionId}`);
+          
+          // Update queryInput to use resume
+          if (hasImages) {
+            (queryInput as any).options.resume = currentSdkSessionId;
+          } else {
+            (queryInput as any).options.resume = currentSdkSessionId;
+          }
+          
+          // Continue the while loop to retry
+          shouldContinue = true;
+        } else {
+          logError(`[ClaudeAgentRunner] No SDK session ID found for resume, cannot retry`);
+          throw err;
+        }
+      } else {
+        // Not retryable or max retries exceeded
+        if (retryCount >= MAX_RETRIES) {
+          logError(`[ClaudeAgentRunner] Max retries (${MAX_RETRIES}) exceeded`);
+        } else {
+          logError(`[ClaudeAgentRunner] Non-retryable error: ${errorMessage}`);
+        }
+        throw err;
+      }
+    }
+  }
+  
+  // If we exit the retry loop, check if there was an error
+  if (shouldContinue) {
+    throw new Error('Retry loop exited unexpectedly');
       }
 
       // Complete - update the initial thinking step
@@ -1310,6 +2149,36 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
     } finally {
       this.activeControllers.delete(session.id);
       this.pathResolver.unregisterSession(session.id);
+
+      // Sync changes from sandbox back to host OS (but don't cleanup - sandbox persists)
+      // Cleanup happens on session delete or app shutdown
+      if (useSandboxIsolation && sandboxPath) {
+        const sandbox = getSandboxAdapter();
+
+        if (sandbox.isWSL) {
+          log('[ClaudeAgentRunner] Syncing sandbox changes to Windows (sandbox persists for this conversation)...');
+          const syncResult = await SandboxSync.syncToWindows(session.id);
+          if (syncResult.success) {
+            log('[ClaudeAgentRunner] Sync completed successfully');
+          } else {
+            logError('[ClaudeAgentRunner] Sync failed:', syncResult.error);
+          }
+        } else if (sandbox.isLima) {
+          log('[ClaudeAgentRunner] Syncing sandbox changes to macOS (sandbox persists for this conversation)...');
+          const { LimaSync } = await import('../sandbox/lima-sync');
+          const syncResult = await LimaSync.syncToMac(session.id);
+          if (syncResult.success) {
+            log('[ClaudeAgentRunner] Sync completed successfully');
+          } else {
+            logError('[ClaudeAgentRunner] Sync failed:', syncResult.error);
+          }
+        }
+
+        // Note: Sandbox is NOT cleaned up here - it persists across messages in the same conversation
+        // Cleanup occurs when:
+        // 1. User deletes the conversation (SessionManager.deleteSession)
+        // 2. App is closed (SandboxSync/LimaSync.cleanupAllSessions)
+      }
     }
   }
 

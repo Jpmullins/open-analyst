@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { useIPC } from '../hooks/useIPC';
 import { useAppStore } from '../store';
-import type { Message, ContentBlock, ToolUseContent, ToolResultContent, QuestionItem } from '../types';
+import { splitTextByFileMentions, getFileLinkButtonClassName } from '../utils/file-link';
+import type { Message, ContentBlock, ToolUseContent, ToolResultContent, QuestionItem, FileAttachmentContent } from '../types';
 import {
   ChevronDown,
   ChevronRight,
@@ -23,6 +25,7 @@ import {
   CheckSquare,
   Clock,
   Plug,
+  FileText,
 } from 'lucide-react';
 
 interface MessageCardProps {
@@ -38,11 +41,30 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
   const contentBlocks = Array.isArray(rawContent)
     ? (rawContent as ContentBlock[])
     : [{ type: 'text', text: String(rawContent ?? '') } as ContentBlock];
+  const [copied, setCopied] = useState(false);
+
+  // Extract text content for copying
+  const getTextContent = () => {
+    return contentBlocks
+      .filter(block => block.type === 'text')
+      .map(block => (block as { type: 'text'; text: string }).text)
+      .join('\n');
+  };
+
+  const handleCopy = async () => {
+    const text = getTextContent();
+    if (text) {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="animate-fade-in">
       {isUser ? (
         // User message - compact styling with smaller padding and radius
+        <div className="flex items-start gap-2 justify-end group">
         <div
           className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
             isQueued ? 'opacity-70 border-dashed' : ''
@@ -72,6 +94,18 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
               />
             ))
           )}
+          </div>
+          <button
+            onClick={handleCopy}
+            className="mt-1 w-6 h-6 flex items-center justify-center rounded-md bg-surface-muted hover:bg-surface-active transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+            title="复制消息"
+          >
+            {copied ? (
+              <Check className="w-3 h-3 text-success" />
+            ) : (
+              <Copy className="w-3 h-3 text-text-muted" />
+            )}
+          </button>
         </div>
       ) : (
         // Assistant message
@@ -101,6 +135,36 @@ interface ContentBlockViewProps {
 }
 
 function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: ContentBlockViewProps) {
+  const { activeSessionId, sessions, workingDir } = useAppStore();
+  const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) : null;
+  const currentWorkingDir = activeSession?.cwd || workingDir;
+
+  const resolveFilePath = (value: string) => {
+    if (/^(?:[A-Za-z]:\\|\\\\|\/)/.test(value)) {
+      return value;
+    }
+    if (!currentWorkingDir) {
+      return value;
+    }
+    return `${currentWorkingDir.replace(/[\\/]+$/, '')}/${value}`;
+  };
+
+  const renderFileButton = (value: string, key?: string) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => {
+        if (typeof window !== 'undefined' && window.electronAPI?.showItemInFolder) {
+          void window.electronAPI.showItemInFolder(resolveFilePath(value));
+        }
+      }}
+      className={getFileLinkButtonClassName()}
+      title="在文件夹中定位"
+    >
+      {value}
+    </button>
+  );
+
   switch (block.type) {
     case 'text': {
       const textBlock = block as { type: 'text'; text: string };
@@ -141,7 +205,7 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                         void window.electronAPI.openExternal(href);
                       }
                     }}
-                    className="text-accent hover:text-accent-hover underline underline-offset-2"
+                    className="text-accent hover:text-accent-hover"
                   >
                     {children}
                   </a>
@@ -159,6 +223,11 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                 const isInline = !match;
 
                 if (isInline) {
+                  const raw = String(children);
+                  const parts = splitTextByFileMentions(raw);
+                  if (parts.length === 1 && parts[0].type === 'file') {
+                    return renderFileButton(parts[0].value);
+                  }
                   return (
                     <code className="px-1.5 py-0.5 rounded bg-surface-muted text-accent font-mono text-sm" {...props}>
                       {children}
@@ -173,7 +242,19 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                 );
               },
               p({ children }) {
-                return <p>{children}</p>;
+                const mapped = (Array.isArray(children) ? children : [children]).flatMap((child, index) => {
+                  if (typeof child === 'string') {
+                    const parts = splitTextByFileMentions(child);
+                    return parts.map((part, partIndex) => {
+                      if (part.type === 'file') {
+                        return renderFileButton(part.value, `${index}-${partIndex}`);
+                      }
+                      return <span key={`${index}-${partIndex}`}>{part.value}</span>;
+                    });
+                  }
+                  return child;
+                });
+                return <p className="text-left">{mapped}</p>;
               },
               table({ children }) {
                 return (
@@ -226,6 +307,36 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
       );
     }
 
+    case 'image': {
+      const imageBlock = block as { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+      const { source } = imageBlock;
+      const imageSrc = `data:${source.media_type};base64,${source.data}`;
+
+      return (
+        <div className={`${isUser ? 'inline-block' : ''}`}>
+          <img
+            src={imageSrc}
+            alt="Pasted content"
+            className="w-full max-w-full rounded-lg border border-border"
+            style={{ maxHeight: '600px', objectFit: 'contain' }}
+          />
+        </div>
+      );
+    }
+
+    case 'file_attachment': {
+      const fileBlock = block as FileAttachmentContent;
+
+      return (
+        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-muted border border-border">
+          <FileText className="w-4 h-4 text-accent flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-text-primary truncate">{fileBlock.filename}</p>
+          </div>
+        </div>
+      );
+    }
+
     case 'tool_use':
       return <ToolUseBlock block={block} />;
 
@@ -245,20 +356,8 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
 }
 
 function ToolUseBlock({ block }: { block: ToolUseContent }) {
-  const { activeSessionId, messagesBySession } = useAppStore();
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const toolResult = useMemo(() => {
-    const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
-    let latestResult: ToolResultContent | null = null;
-    for (const message of messages) {
-      for (const content of message.content) {
-        if (content.type === 'tool_result' && content.toolUseId === block.id) {
-          latestResult = content;
-        }
-      }
-    }
-    return latestResult;
-  }, [activeSessionId, messagesBySession, block.id]);
 
   // Check if this is AskUserQuestion - render inline question UI
   if (block.name === 'AskUserQuestion') {
@@ -349,21 +448,11 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       {expanded && (
         <div className="p-4 space-y-4 bg-surface">
           <div>
-            <p className="text-xs font-medium text-text-muted mb-2">Request</p>
+            <p className="text-xs font-medium text-text-muted mb-2">{t('messageCard.request')}</p>
             <pre className="code-block text-xs">
               {JSON.stringify(block.input, null, 2)}
             </pre>
           </div>
-          {toolResult && (
-            <div>
-              <p className={`text-xs font-medium mb-2 ${toolResult.isError ? 'text-error' : 'text-text-muted'}`}>
-                Result
-              </p>
-              <pre className="code-block text-xs whitespace-pre-wrap">
-                {toolResult.content}
-              </pre>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -639,26 +728,8 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
 }
 
 function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultContent; allBlocks?: ContentBlock[]; message?: Message }) {
-  const { activeSessionId, messagesBySession, traceStepsBySession } = useAppStore();
+  const { traceStepsBySession } = useAppStore();
   const [expanded, setExpanded] = useState(false);
-  const hasToolUse = useMemo(() => {
-    if (allBlocks?.some((content) => content.type === 'tool_use' && (content as ToolUseContent).id === block.toolUseId)) {
-      return true;
-    }
-    const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
-    for (const messageItem of messages) {
-      for (const content of messageItem.content) {
-        if (content.type === 'tool_use' && content.id === block.toolUseId) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }, [activeSessionId, messagesBySession, allBlocks, block.toolUseId]);
-
-  if (hasToolUse) {
-    return null;
-  }
 
   // Try to find the tool name from trace steps
   let toolName: string | undefined;
@@ -787,6 +858,17 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
   };
 
   const summary = generateSummary(block.content, block.isError || false);
+  const hasImages = block.images && block.images.length > 0;
+
+  // Debug: Log the entire block to see what we're receiving
+  console.log('[ToolResultBlock] Full block:', {
+    toolUseId: block.toolUseId,
+    hasImages: hasImages,
+    imagesCount: block.images?.length || 0,
+    contentLength: block.content?.length || 0,
+    imagesMimeTypes: block.images?.map(img => img.mimeType),
+    imagesDataLengths: block.images?.map(img => img.data?.length || 0)
+  });
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
@@ -803,6 +885,11 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
         )}
         <span className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}>
           {summary}
+          {hasImages && (
+            <span className="ml-2 text-xs text-text-muted">
+              📸 {block.images.length} image{block.images.length > 1 ? 's' : ''}
+            </span>
+          )}
         </span>
         {expanded ? (
           <ChevronDown className="w-4 h-4 text-text-muted" />
@@ -812,10 +899,26 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
       </button>
 
       {expanded && (
-        <div className="p-4 bg-surface">
+        <div className="p-4 bg-surface space-y-4">
           <pre className="code-block text-xs whitespace-pre-wrap font-mono">
             {block.content}
           </pre>
+
+          {/* Render images if present */}
+          {block.images && block.images.length > 0 && (
+            <div className="space-y-3">
+              {block.images.map((image, index) => (
+                <div key={index} className="border border-border rounded-lg overflow-hidden">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt={`Screenshot ${index + 1}`}
+                    className="w-full h-auto"
+                    style={{ maxHeight: '600px', objectFit: 'contain' }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

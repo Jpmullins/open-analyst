@@ -4,7 +4,12 @@ node_modules/
 # Build outputs
 dist/
 dist-electron/
+dist-wsl-agent/
+dist-lima-agent/
 release/
+
+# Bundled Node.js binaries
+resources/node/
 
 # IDE
 .vscode/
@@ -44,6 +49,8 @@ coverage/
 # Claude 
 .claude/*
 !.claude/skills/
+CLAUDE.md
+
 
 # codex
 .codex/*
