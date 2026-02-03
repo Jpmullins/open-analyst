@@ -947,9 +947,15 @@ export class MCPManager {
       throw new Error(`MCP server not connected: ${tool.serverId}`);
     }
 
-    // Extract the actual tool name (remove prefix)
-    // Format: mcp__<ServerName>__<toolName> -> <toolName>
-    const actualToolName = toolName.replace(/^mcp__[^_]+__/, '');
+    // 提取实际工具名（格式：mcp__<ServerName>__<toolName>）
+    let actualToolName = toolName;
+    if (toolName.startsWith('mcp__')) {
+      const remainder = toolName.slice('mcp__'.length);
+      const separatorIndex = remainder.indexOf('__');
+      if (separatorIndex !== -1) {
+        actualToolName = remainder.slice(separatorIndex + 2);
+      }
+    }
 
     log(`[MCPManager] Calling tool ${actualToolName} on server ${tool.serverName}`);
 

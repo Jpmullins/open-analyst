@@ -12,6 +12,7 @@ import { spawn, execSync, type ChildProcess } from 'child_process';
 import { getSandboxAdapter } from '../sandbox/sandbox-adapter';
 import { pathConverter } from '../sandbox/wsl-bridge';
 import { SandboxSync } from '../sandbox/sandbox-sync';
+import { buildThinkingOptions } from './thinking-options';
 // import { PathGuard } from '../sandbox/path-guard';
 
 // Virtual workspace path shown to the model (hides real sandbox path)
@@ -1354,11 +1355,7 @@ Then follow the workflow described in that file.
         maxTurns: 1000,  // Increased from 50 to allow more complex tasks
         abortController: controller,
         env: envWithSkills,
-        // Thinking mode configuration based on settings
-        // For Claude API: use 'thinking' parameter with type 'enabled'/'disabled'
-        // thinking: enableThinking 
-        //   ? { type: 'enabled', budget_tokens: 10000 }  // Enable with reasonable budget
-        //   : { type: 'disabled' },                       // Disable thinking
+        thinking: buildThinkingOptions(enableThinking),
         
         // Pass MCP servers to SDK
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
