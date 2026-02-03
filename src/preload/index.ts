@@ -207,6 +207,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('logs.setEnabled', enabled),
     isEnabled: (): Promise<{ success: boolean; enabled?: boolean; error?: string }> =>
       ipcRenderer.invoke('logs.isEnabled'),
+    write: (level: 'info' | 'warn' | 'error', ...args: any[]): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('logs.write', level, args),
   },
 });
 
@@ -329,6 +331,7 @@ declare global {
         clear: () => Promise<{ success: boolean; deletedCount?: number; error?: string }>;
         setEnabled: (enabled: boolean) => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
         isEnabled: () => Promise<{ success: boolean; enabled?: boolean; error?: string }>;
+        write: (level: 'info' | 'warn' | 'error', ...args: any[]) => Promise<{ success: boolean; error?: string }>;
       };
     };
   }

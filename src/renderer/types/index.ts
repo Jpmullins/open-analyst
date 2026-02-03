@@ -74,6 +74,10 @@ export interface ToolResultContent {
   toolUseId: string;
   content: string;
   isError?: boolean;
+  images?: Array<{
+    data: string;          // base64 encoded image data
+    mimeType: string;      // e.g., 'image/png'
+  }>;
 }
 
 export interface ThinkingContent {
@@ -283,6 +287,7 @@ export interface AppConfig {
   claudeCodePath?: string;
   defaultWorkdir?: string;
   sandboxEnabled?: boolean;
+  enableThinking?: boolean;
   isConfigured: boolean;
 }
 

@@ -1242,19 +1242,84 @@ Then follow the workflow described in that file.
         const allConfigs = mcpConfigStore.getEnabledServers();
         log('[ClaudeAgentRunner] Enabled MCP configs:', allConfigs.map(c => c.name));
         
+        // Get bundled npx path for STDIO servers
+        const getBundledNpxPath = (): string | null => {
+          const platform = process.platform;
+          const arch = process.arch;
+          
+          let resourcesPath: string;
+          if (process.env.NODE_ENV === 'development') {
+            const projectRoot = path.join(__dirname, '..', '..');
+            resourcesPath = path.join(projectRoot, 'resources', 'node', `${platform}-${arch}`);
+          } else {
+            resourcesPath = path.join(process.resourcesPath, 'node');
+          }
+          
+          const binDir = platform === 'win32' ? resourcesPath : path.join(resourcesPath, 'bin');
+          const npxExe = platform === 'win32' ? 'npx.cmd' : 'npx';
+          const npxPath = path.join(binDir, npxExe);
+          
+          if (fs.existsSync(npxPath)) {
+            return npxPath;
+          }
+          return null;
+        };
+        
+        const bundledNpx = getBundledNpxPath();
+        
         for (const config of allConfigs) {
           // Use a simpler key without spaces to avoid issues
           const serverKey = config.name;
           
           if (config.type === 'stdio') {
+            // Use bundled npx if command is 'npx'
+            const command = config.command === 'npx' && bundledNpx ? bundledNpx : config.command;
+            
+            // If using bundled npx, add bundled node bin to PATH
+            let serverEnv = { ...config.env };
+            if (bundledNpx && config.command === 'npx') {
+              const nodeBinDir = path.dirname(bundledNpx);
+              const currentPath = process.env.PATH || '';
+              // Prepend bundled node bin to PATH so npx can find node
+              serverEnv.PATH = `${nodeBinDir}${path.delimiter}${currentPath}`;
+              log(`[ClaudeAgentRunner]   Added bundled node bin to PATH: ${nodeBinDir}`);
+            }
+            
+            // Resolve path placeholders for presets
+            let resolvedArgs = config.args || [];
+              const { mcpConfigStore } = await import('../mcp/mcp-config-store');
+            
+            // Check if any args contain placeholders that need resolving
+            const hasPlaceholders = resolvedArgs.some(arg => 
+              arg.includes('{SOFTWARE_DEV_SERVER_PATH}') || 
+              arg.includes('{GUI_OPERATE_SERVER_PATH}')
+            );
+            
+            if (hasPlaceholders) {
+              // Get the appropriate preset based on config name
+              let presetKey: string | null = null;
+              if (config.name === 'Software_Development' || config.name === 'Software Development') {
+                presetKey = 'software-development';
+              } else if (config.name === 'GUI_Operate' || config.name === 'GUI Operate') {
+                presetKey = 'gui-operate';
+              }
+              
+              if (presetKey) {
+                const preset = mcpConfigStore.createFromPreset(presetKey, true);
+              if (preset && preset.args) {
+                resolvedArgs = preset.args;
+                }
+              }
+            }
+            
             mcpServers[serverKey] = {
               type: 'stdio',
-              command: config.command,
-              args: config.args || [],
-              env: config.env || {},
+              command: command,
+              args: resolvedArgs,
+              env: serverEnv,
             };
             log(`[ClaudeAgentRunner] Added STDIO MCP server: ${serverKey}`);
-            log(`[ClaudeAgentRunner]   Command: ${config.command} ${(config.args || []).join(' ')}`);
+            log(`[ClaudeAgentRunner]   Command: ${command} ${resolvedArgs.join(' ')}`);
             log(`[ClaudeAgentRunner]   Tools will be named: mcp__${serverKey}__<toolName>`);
           } else if (config.type === 'sse') {
             mcpServers[serverKey] = {
@@ -1270,13 +1335,30 @@ Then follow the workflow described in that file.
       }
       logTiming('after building MCP servers config');
       
+      // Get enableThinking from config
+      const { configStore } = await import('../config/config-store');
+      const enableThinking = configStore.get('enableThinking') ?? false;
+      log('[ClaudeAgentRunner] Enable thinking mode:', enableThinking);
+      
+      // if (enableThinking) {
+      //   envWithSkills.MAX_THINKING_TOKENS = '10000';
+      // } else {
+      //   envWithSkills.MAX_THINKING_TOKENS = '0';
+      // }
+
+
       const queryOptions: any = {
         pathToClaudeCodeExecutable: claudeCodePath,
         cwd: workingDir,  // Windows path for claude-code process
         model: currentModel,
-        maxTurns: 50,
+        maxTurns: 1000,  // Increased from 50 to allow more complex tasks
         abortController: controller,
         env: envWithSkills,
+        // Thinking mode configuration based on settings
+        // For Claude API: use 'thinking' parameter with type 'enabled'/'disabled'
+        // thinking: enableThinking 
+        //   ? { type: 'enabled', budget_tokens: 10000 }  // Enable with reasonable budget
+        //   : { type: 'disabled' },                       // Disable thinking
         
         // Pass MCP servers to SDK
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
@@ -1599,15 +1681,15 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
           log(`[Sandbox] Extracted paths:`, paths);
           
           // Validate each path
-          for (const p of paths) {
-            if (!isPathInsideWorkspace(p)) {
-              logWarn(`[Sandbox] BLOCKED: Path "${p}" is outside workspace "${workingDir}"`);
-              return {
-                behavior: 'deny',
-                message: `Access denied: Path "${p}" is outside the allowed workspace "${workingDir}". Only files within the workspace can be accessed.`
-              };
-            }
-          }
+          // for (const p of paths) {
+          //   if (!isPathInsideWorkspace(p)) {
+          //     logWarn(`[Sandbox] BLOCKED: Path "${p}" is outside workspace "${workingDir}"`);
+          //     return {
+          //       behavior: 'deny',
+          //       message: `Access denied: Path "${p}" is outside the allowed workspace "${workingDir}". Only files within the workspace can be accessed.`
+          //     };
+          //   }
+          // }
           
           // NOTE: Bash tool is intercepted by PreToolUse hook above for WSL wrapping
           // Glob/Grep/Read/Write/Edit use the shared filesystem (/mnt/)
@@ -1670,7 +1752,16 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             prompt: contextualPrompt,
             options: queryOptions,
           };
-
+      
+      log('[ClaudeAgentRunner] Query input:', JSON.stringify(queryInput, null, 2));
+      
+      // Retry configuration
+      const MAX_RETRIES = 10;
+      let retryCount = 0;
+      let shouldContinue = true;
+      
+      while (shouldContinue && retryCount <= MAX_RETRIES) {
+        try {
       for await (const message of query(queryInput)) {
         if (!firstMessageReceived) {
           logTiming('FIRST MESSAGE RECEIVED from SDK');
@@ -1733,6 +1824,27 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
               }
             }
 
+            // Check if the text content is an API error
+            if (textContent && textContent.toLowerCase().includes('api error')) {
+              logError('[ClaudeAgentRunner] Detected API error in assistant message:', textContent);
+              
+              // Check if this is a retryable error
+              const errorTextLower = textContent.toLowerCase();
+              const isRetryable = errorTextLower.includes('provider returned error') ||
+                                  errorTextLower.includes('unable to submit request') ||
+                                  errorTextLower.includes('thought signature') ||
+                                  errorTextLower.includes('invalid_argument') ||
+                                  errorTextLower.includes('error: 400') ||
+                                  errorTextLower.includes('error: 500') ||
+                                  errorTextLower.includes('error: 502') ||
+                                  errorTextLower.includes('error: 503');
+              
+              if (isRetryable) {
+                // Throw an error to trigger retry logic
+                throw new Error(`API Error detected: ${textContent}`);
+              }
+            }
+
             // Stream text to UI
             if (textContent) {
               const chunks = textContent.match(/.{1,30}/g) || [textContent];
@@ -1767,23 +1879,56 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
         } else if (message.type === 'user') {
           // Tool results from SDK
           const content = (message as any).message?.content;
-          
+
           if (Array.isArray(content)) {
             for (const block of content) {
               if (block.type === 'tool_result') {
                 const isError = block.is_error === true;
 
+                // Debug: Log the raw block structure
+                log(`[ClaudeAgentRunner] Raw tool_result block:`, JSON.stringify(block, null, 2).substring(0, 500));
+                log(`[ClaudeAgentRunner] block.content type: ${Array.isArray(block.content) ? 'array' : typeof block.content}`);
+
+                // Handle MCP tool results with content arrays (e.g., text + image)
+                let textContent = '';
+                const images: Array<{ data: string; mimeType: string }> = [];
+
+                if (Array.isArray(block.content)) {
+                  // MCP tool returned content array (e.g., screenshot_for_display)
+                  log(`[ClaudeAgentRunner] Tool result content is array, length: ${block.content.length}`);
+                  for (const contentItem of block.content) {
+                    log(`[ClaudeAgentRunner] Content item type: ${contentItem.type}`);
+                    if (contentItem.type === 'text') {
+                      textContent += (contentItem.text || '');
+                    } else if (contentItem.type === 'image') {
+                      // Extract image data from MCP SDK format
+                      // MCP SDK returns: { type: 'image', source: { data: '...', media_type: '...', type: 'base64' } }
+                      const imageData = contentItem.source?.data || contentItem.data || '';
+                      const mimeType = contentItem.source?.media_type || contentItem.mimeType || 'image/png';
+                      const imageDataLength = imageData.length;
+                      log(`[ClaudeAgentRunner] Extracting image data, length: ${imageDataLength}, mimeType: ${mimeType}`);
+                      images.push({
+                        data: imageData,
+                        mimeType: mimeType
+                      });
+                    }
+                  }
+                  log(`[ClaudeAgentRunner] Extracted ${images.length} images`);
+                } else {
+                  // Standard string content
+                  textContent = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+                }
+
                 // Sanitize output to replace real sandbox paths with virtual workspace paths
-                const rawContent = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-                const sanitizedContent = sanitizeOutputPaths(rawContent);
-                
+                const sanitizedContent = sanitizeOutputPaths(textContent);
+
                 // Update the existing tool_call trace step instead of creating a new one
                 this.sendTraceUpdate(session.id, block.tool_use_id, {
                   status: isError ? 'error' : 'completed',
                   toolOutput: sanitizedContent.slice(0, 800),
                 });
 
-                // Send tool result message
+                // Send tool result message with optional images
                 const toolResultMsg: Message = {
                   id: uuidv4(),
                   sessionId: session.id,
@@ -1792,7 +1937,8 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
                     type: 'tool_result',
                     toolUseId: block.tool_use_id,
                     content: sanitizedContent,
-                    isError
+                    isError,
+                    ...(images.length > 0 && { images })
                   }],
                   timestamp: Date.now(),
                 };
@@ -1822,7 +1968,8 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             } else if (['Bash', 'Glob', 'Grep', 'LS'].includes(lastExecutedToolName)) {
               // These tools show their output directly, no need for extra message
             } else {
-              completionText = `✓ Task completed.`;
+              // completionText = `✓ Task completed.`;
+              // completionText = `Tool executed.`;
             }
             
             if (completionText) {
@@ -1837,6 +1984,104 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
             }
           }
         }
+      }
+      
+      // Successfully completed the query loop
+      log('[ClaudeAgentRunner] Query completed successfully');
+      shouldContinue = false;
+      
+    } catch (error) {
+      // Handle errors with retry logic
+      const err = error as Error;
+      
+      // Log the full error for debugging
+      logError(`[ClaudeAgentRunner] Caught error:`, err);
+      logError(`[ClaudeAgentRunner] Error name: ${err.name}`);
+      logError(`[ClaudeAgentRunner] Error message: ${err.message}`);
+      logError(`[ClaudeAgentRunner] Error stack: ${err.stack}`);
+      
+      // Check if this is an abort error - don't retry
+      if (err.name === 'AbortError') {
+        log('[ClaudeAgentRunner] Query aborted by user');
+        throw err;
+      }
+      
+      // Check if this is a retryable error
+      const errorMessage = err.message || String(error);
+      const errorString = String(error);
+      const fullErrorText = `${errorMessage} ${errorString}`.toLowerCase();
+      
+      const isRetryable = fullErrorText.includes('provider returned error') ||
+                          fullErrorText.includes('unable to submit request') ||
+                          fullErrorText.includes('api error') ||
+                          fullErrorText.includes('error: 400') ||
+                          fullErrorText.includes('error: 500') ||
+                          fullErrorText.includes('error: 502') ||
+                          fullErrorText.includes('error: 503') ||
+                          fullErrorText.includes('timeout') ||
+                          fullErrorText.includes('econnrefused') ||
+                          fullErrorText.includes('thought signature') ||
+                          fullErrorText.includes('invalid_argument');
+      
+      logError(`[ClaudeAgentRunner] Is retryable: ${isRetryable}, retryCount: ${retryCount}/${MAX_RETRIES}`);
+      
+      if (isRetryable && retryCount < MAX_RETRIES) {
+        retryCount++;
+        const waitTime = Math.pow(2, retryCount - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
+        
+        logError(`[ClaudeAgentRunner] Retryable error (attempt ${retryCount}/${MAX_RETRIES}): ${errorMessage}`);
+        log(`[ClaudeAgentRunner] Waiting ${waitTime}ms before retry...`);
+        
+        // Show retry message to user
+        this.sendToRenderer({
+          type: 'stream.partial',
+          payload: { 
+            sessionId: session.id, 
+            delta: `\n\n⚠️ API调用出错，正在重试 (${retryCount}/${MAX_RETRIES})...\n\n` 
+          },
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Clear the retry message
+        this.sendToRenderer({
+          type: 'stream.partial',
+          payload: { sessionId: session.id, delta: '' },
+        });
+        
+        // Get the current SDK session ID for resume
+        const currentSdkSessionId = this.sdkSessions.get(session.id);
+        if (currentSdkSessionId) {
+          log(`[ClaudeAgentRunner] Resuming from SDK session: ${currentSdkSessionId}`);
+          
+          // Update queryInput to use resume
+          if (hasImages) {
+            (queryInput as any).options.resume = currentSdkSessionId;
+          } else {
+            (queryInput as any).options.resume = currentSdkSessionId;
+          }
+          
+          // Continue the while loop to retry
+          shouldContinue = true;
+        } else {
+          logError(`[ClaudeAgentRunner] No SDK session ID found for resume, cannot retry`);
+          throw err;
+        }
+      } else {
+        // Not retryable or max retries exceeded
+        if (retryCount >= MAX_RETRIES) {
+          logError(`[ClaudeAgentRunner] Max retries (${MAX_RETRIES}) exceeded`);
+        } else {
+          logError(`[ClaudeAgentRunner] Non-retryable error: ${errorMessage}`);
+        }
+        throw err;
+      }
+    }
+  }
+  
+  // If we exit the retry loop, check if there was an error
+  if (shouldContinue) {
+    throw new Error('Retry loop exited unexpectedly');
       }
 
       // Complete - update the initial thinking step

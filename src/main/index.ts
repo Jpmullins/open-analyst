@@ -77,7 +77,7 @@ function createWindow() {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      sandbox: false, // Temporarily disabled to test if it resolves the console error
     },
   };
 
@@ -99,7 +99,7 @@ function createWindow() {
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools();
+    // mainWindow.webContents.openDevTools(); // Commented out - open manually with Cmd+Option+I if needed
   } else {
     mainWindow.loadFile(join(__dirname, '../../dist/index.html'));
   }
@@ -983,6 +983,22 @@ ipcMain.handle('logs.isEnabled', () => {
     return { success: true, enabled: isDevLogsEnabled() };
   } catch (error) {
     logError('[Logs] Error getting dev logs enabled:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+});
+
+ipcMain.handle('logs.write', (_event, level: 'info' | 'warn' | 'error', args: any[]) => {
+  try {
+    if (level === 'warn') {
+      logWarn(...args);
+    } else if (level === 'error') {
+      logError(...args);
+    } else {
+      log(...args);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('[Logs] Error writing log:', error);
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 });

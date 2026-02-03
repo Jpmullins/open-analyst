@@ -112,6 +112,30 @@ export function ChatView() {
     prevPartialLengthRef.current = partialLength;
   }, [messages.length, partialMessage]);
 
+  // Additional scroll trigger for content height changes (e.g., TodoWrite expand/collapse)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // Use ResizeObserver to detect height changes in the messages container
+    // We need to observe the inner content div, not the scroll container itself
+    const messagesContainer = container.querySelector('.max-w-3xl');
+    if (!messagesContainer) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (isUserAtBottomRef.current) {
+        // Scroll to bottom when content height changes
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }
+    });
+
+    resizeObserver.observe(messagesContainer);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [displayedMessages]); // Re-create observer when messages change to ensure we're observing the right element
+
   useEffect(() => {
     textareaRef.current?.focus();
   }, [activeSessionId]);
@@ -387,10 +411,10 @@ export function ChatView() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-
+    
     // Get value from ref to handle both controlled and uncontrolled cases
     const currentPrompt = textareaRef.current?.value || prompt;
-
+    
     if ((!currentPrompt.trim() && pastedImages.length === 0 && attachedFiles.length === 0) || !activeSessionId || isSubmitting) return;
 
     setIsSubmitting(true);
@@ -509,13 +533,13 @@ export function ChatView() {
             displayedMessages.map((message) => {
               const isStreaming = typeof message.id === 'string' && message.id.startsWith('partial-');
               return (
-                <div key={message.id}>
+              <div key={message.id}>
                   <MessageCard message={message} isStreaming={isStreaming} />
-                </div>
+              </div>
               );
             })
           )}
-
+          
           {/* Processing indicator - show when we have an active turn but no partial message yet */}
           {hasActiveTurn && (!partialMessage || partialMessage.trim() === '') && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface border border-border max-w-fit">
@@ -525,7 +549,7 @@ export function ChatView() {
               </span>
             </div>
           )}
-
+          
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -642,13 +666,13 @@ export function ChatView() {
                     <Square className="w-4 h-4" />
                   </button>
                 )}
-                <button
-                  type="submit"
+                  <button
+                    type="submit"
                   disabled={(!prompt.trim() && !textareaRef.current?.value.trim() && pastedImages.length === 0 && attachedFiles.length === 0) || isSubmitting}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent-hover transition-colors"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
               </div>
             </div>
 

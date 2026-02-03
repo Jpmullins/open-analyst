@@ -64,35 +64,35 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
       {isUser ? (
         // User message - compact styling with smaller padding and radius
         <div className="flex items-start gap-2 justify-end group">
-          <div
-            className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
-              isQueued ? 'opacity-70 border-dashed' : ''
-            } ${isCancelled ? 'opacity-60' : ''}`}
-          >
-            {isQueued && (
-              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-                <Clock className="w-3 h-3" />
-                <span>排队中</span>
-              </div>
-            )}
-            {isCancelled && (
-              <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
-                <XCircle className="w-3 h-3" />
-                <span>已取消</span>
-              </div>
-            )}
-            {contentBlocks.length === 0 ? (
-              <span className="text-text-muted italic">Empty message</span>
-            ) : (
-              contentBlocks.map((block, index) => (
-                <ContentBlockView
-                  key={index}
-                  block={block}
-                  isUser={isUser}
-                  isStreaming={isStreaming}
-                />
-              ))
-            )}
+        <div
+          className={`message-user px-4 py-2.5 max-w-[80%] break-words ${
+            isQueued ? 'opacity-70 border-dashed' : ''
+          } ${isCancelled ? 'opacity-60' : ''}`}
+        >
+          {isQueued && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <Clock className="w-3 h-3" />
+              <span>排队中</span>
+            </div>
+          )}
+          {isCancelled && (
+            <div className="mb-1 flex items-center gap-1 text-[11px] text-text-muted">
+              <XCircle className="w-3 h-3" />
+              <span>已取消</span>
+            </div>
+          )}
+          {contentBlocks.length === 0 ? (
+            <span className="text-text-muted italic">Empty message</span>
+          ) : (
+            contentBlocks.map((block, index) => (
+              <ContentBlockView
+                key={index}
+                block={block}
+                isUser={isUser}
+                isStreaming={isStreaming}
+              />
+            ))
+          )}
           </div>
           <button
             onClick={handleCopy}
@@ -810,6 +810,17 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
   };
 
   const summary = generateSummary(block.content, block.isError || false);
+  const hasImages = block.images && block.images.length > 0;
+
+  // Debug: Log the entire block to see what we're receiving
+  console.log('[ToolResultBlock] Full block:', {
+    toolUseId: block.toolUseId,
+    hasImages: hasImages,
+    imagesCount: block.images?.length || 0,
+    contentLength: block.content?.length || 0,
+    imagesMimeTypes: block.images?.map(img => img.mimeType),
+    imagesDataLengths: block.images?.map(img => img.data?.length || 0)
+  });
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
@@ -826,6 +837,11 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
         )}
         <span className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}>
           {summary}
+          {hasImages && (
+            <span className="ml-2 text-xs text-text-muted">
+              📸 {block.images.length} image{block.images.length > 1 ? 's' : ''}
+            </span>
+          )}
         </span>
         {expanded ? (
           <ChevronDown className="w-4 h-4 text-text-muted" />
@@ -835,10 +851,26 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
       </button>
 
       {expanded && (
-        <div className="p-4 bg-surface">
+        <div className="p-4 bg-surface space-y-4">
           <pre className="code-block text-xs whitespace-pre-wrap font-mono">
             {block.content}
           </pre>
+
+          {/* Render images if present */}
+          {block.images && block.images.length > 0 && (
+            <div className="space-y-3">
+              {block.images.map((image, index) => (
+                <div key={index} className="border border-border rounded-lg overflow-hidden">
+                  <img
+                    src={`data:${image.mimeType};base64,${image.data}`}
+                    alt={`Screenshot ${index + 1}`}
+                    className="w-full h-auto"
+                    style={{ maxHeight: '600px', objectFit: 'contain' }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
