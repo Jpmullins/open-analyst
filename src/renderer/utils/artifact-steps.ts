@@ -18,27 +18,13 @@ type ArtifactStepResult = {
 export function getArtifactLabel(pathValue: string, name?: string): string {
   const trimmedName = name?.trim();
   const trimmedPath = pathValue.trim();
-  if (trimmedName) {
-    if (!trimmedPath) {
-      return trimmedName;
-    }
+  if (trimmedPath) {
     const normalized = trimmedPath.replace(/\\/g, '/');
     const parts = normalized.split('/');
-    const basename = parts[parts.length - 1] || trimmedPath;
-    const lastDot = basename.lastIndexOf('.');
-    if (lastDot > 0 && !trimmedName.includes('.')) {
-      return `${trimmedName}${basename.slice(lastDot)}`;
-    }
-    return trimmedName;
+    return parts[parts.length - 1] || trimmedPath;
   }
 
-  if (!trimmedPath) {
-    return '';
-  }
-
-  const normalized = trimmedPath.replace(/\\/g, '/');
-  const parts = normalized.split('/');
-  return parts[parts.length - 1] || trimmedPath;
+  return trimmedName ?? '';
 }
 
 export type ArtifactIconKey =
