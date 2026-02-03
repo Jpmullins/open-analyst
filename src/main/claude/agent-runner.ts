@@ -13,6 +13,8 @@ import { getSandboxAdapter } from '../sandbox/sandbox-adapter';
 import { pathConverter } from '../sandbox/wsl-bridge';
 import { SandboxSync } from '../sandbox/sandbox-sync';
 import { extractArtifactsFromText, buildArtifactTraceSteps } from '../utils/artifact-parser';
+import { buildClaudeEnv, getClaudeEnvOverrides } from './claude-env';
+import { configStore } from '../config/config-store';
 // import { PathGuard } from '../sandbox/path-guard';
 
 // Virtual workspace path shown to the model (hides real sandbox path)
@@ -1219,8 +1221,9 @@ Then follow the workflow described in that file.
       // Build environment with:
       // 1. Shell environment (includes proper PATH with node/npm)
       // 2. CLAUDE_CONFIG_DIR pointing to app-specific config directory for skills
+      const envOverrides = getClaudeEnvOverrides(configStore.getAll());
       const envWithSkills: NodeJS.ProcessEnv = {
-        ...shellEnv,
+        ...buildClaudeEnv(shellEnv, envOverrides),
         CLAUDE_CONFIG_DIR: userClaudeDir,
       };
 
