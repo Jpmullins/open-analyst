@@ -31,12 +31,13 @@ import { writeMCPLog } from './mcp-logger';
 
 const execAsync = promisify(exec);
 
-// Get workspace directory from environment or use current directory
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
-
 // Get Open Cowork data directory for persistent storage
 // Use ~/Library/Application Support/open-cowork on macOS
 const OPEN_COWORK_DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
+
+// Directory for storing GUI operate files (screenshots, etc.)
+const GUI_OPERATE_DIR = path.join(OPEN_COWORK_DATA_DIR, 'gui_operate');
+const SCREENSHOTS_DIR = path.join(GUI_OPERATE_DIR, 'screenshots');
 
 // ============================================================================
 // Click History Tracking for GUI Locate (App-level Persistent Storage)
@@ -1256,7 +1257,7 @@ async function takeScreenshot(
   region?: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
   const timestamp = Date.now();
-  const defaultPath = path.join(WORKSPACE_DIR, `screenshot_${timestamp}.png`);
+  const defaultPath = path.join(SCREENSHOTS_DIR, `screenshot_${timestamp}.png`);
   const finalPath = outputPath || defaultPath;
 
   // Ensure the directory exists
@@ -1321,31 +1322,31 @@ async function takeScreenshotForDisplay(
   displayIndex?: number,
   region?: { x: number; y: number; width: number; height: number },
   reason?: string,
-  annotateClicks?: boolean
+  // annotateClicks?: boolean
 ): Promise<{ content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }> {
   const timestamp = Date.now();
-  const tempPath = path.join(WORKSPACE_DIR, `screenshot_display_${timestamp}.png`);
+  const tempPath = path.join(SCREENSHOTS_DIR, `screenshot_display_${timestamp}.png`);
 
   // Take the screenshot first
   await takeScreenshot(tempPath, displayIndex, region);
 
   let finalPath = tempPath;
-  let clickHistoryInfo: string | undefined;
+  // let clickHistoryInfo: string | undefined;
 
-  // Annotate with click history if requested
-  if (annotateClicks && currentAppName) {
-    try {
-      const annotateResult = await annotateScreenshotWithClickHistory(
-        tempPath,
-        displayIndex ?? 0
-      );
-      finalPath = annotateResult.annotatedPath;
-      clickHistoryInfo = annotateResult.clickHistoryInfo;
-    } catch (error) {
-      writeMCPLog(`[takeScreenshotForDisplay] Failed to annotate screenshot: ${error}`, 'Screenshot');
-      // Continue with un-annotated screenshot
-    }
-  }
+  // // Annotate with click history if requested
+  // if (annotateClicks && currentAppName) {
+  //   try {
+  //     const annotateResult = await annotateScreenshotWithClickHistory(
+  //       tempPath,
+  //       displayIndex ?? 0
+  //     );
+  //     finalPath = annotateResult.annotatedPath;
+  //     clickHistoryInfo = annotateResult.clickHistoryInfo;
+  //   } catch (error) {
+  //     writeMCPLog(`[takeScreenshotForDisplay] Failed to annotate screenshot: ${error}`, 'Screenshot');
+  //     // Continue with un-annotated screenshot
+  //   }
+  // }
 
   // Read the screenshot file and convert to base64
   const imageBuffer = await fs.readFile(finalPath);
@@ -1366,7 +1367,7 @@ async function takeScreenshotForDisplay(
       scaleFactor: display.scaleFactor,
     },
     timestamp: new Date().toISOString(),
-    annotated: annotateClicks && currentAppName ? true : false,
+    // annotated: annotateClicks && currentAppName ? true : false,
   };
 
   if (reason) {
@@ -1377,9 +1378,9 @@ async function takeScreenshotForDisplay(
     metadata.region = region;
   }
 
-  if (clickHistoryInfo) {
-    metadata.clickHistoryInfo = clickHistoryInfo;
-  }
+  // if (clickHistoryInfo) {
+  //   metadata.clickHistoryInfo = clickHistoryInfo;
+  // }
 
   // Return MCP response with both text and image content
   return {
@@ -2302,7 +2303,7 @@ async function planGUIActions(
   }
   
   // Take screenshot to understand current GUI state
-  const screenshotPath = path.join(WORKSPACE_DIR, `gui_plan_${Date.now()}.png`);
+  const screenshotPath = path.join(SCREENSHOTS_DIR, `gui_plan_${Date.now()}.png`);
   await takeScreenshot(screenshotPath, displayIndex);
   
   // Get image dimensions
@@ -2417,7 +2418,7 @@ async function locateGUIElement(
   }
   
   // Take screenshot
-  const screenshotPath = path.join(WORKSPACE_DIR, `gui_locate_${Date.now()}.png`);
+  const screenshotPath = path.join(SCREENSHOTS_DIR, `gui_locate_${Date.now()}.png`);
   await takeScreenshot(screenshotPath, displayIndex);
 
   // Analyze screenshot to find element
@@ -2675,7 +2676,7 @@ async function verifyGUIState(
   }
   
   // Take screenshot
-  const screenshotPath = path.join(WORKSPACE_DIR, `gui_verify_${Date.now()}.png`);
+  const screenshotPath = path.join(SCREENSHOTS_DIR, `gui_verify_${Date.now()}.png`);
   await takeScreenshot(screenshotPath, displayIndex);
   
   // Analyze with vision model
@@ -3221,14 +3222,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'screenshot_for_display': {
-        const { display_index, region, reason, annotate_clicks } = args as {
+        const { display_index, region, reason} = args as {
           display_index?: number;
           region?: { x: number; y: number; width: number; height: number };
           reason?: string;
-          annotate_clicks?: boolean;
         };
         // This tool returns a special format with image data, so return directly
-        return await takeScreenshotForDisplay(display_index, region, reason, annotate_clicks);
+        return await takeScreenshotForDisplay(display_index, region, reason);
       }
 
       case 'get_mouse_position': {
