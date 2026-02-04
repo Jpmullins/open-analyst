@@ -30,8 +30,8 @@ export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'en
   'software-development': {
     name: 'Software_Development',
     type: 'stdio',
-    command: 'npx',
-    args: ['-y', 'tsx', '{SOFTWARE_DEV_SERVER_PATH}'], // Path will be resolved at runtime
+    command: 'node',
+    args: ['{SOFTWARE_DEV_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
     env: {
       WORKSPACE_DIR: '',
       TEST_ENV: 'development',
@@ -45,8 +45,8 @@ export const MCP_SERVER_PRESETS: Record<string, Omit<MCPServerConfig, 'id' | 'en
   'gui-operate': {
     name: 'GUI_Operate',
     type: 'stdio',
-    command: 'npx',
-    args: ['-y', 'tsx', '{GUI_OPERATE_SERVER_PATH}'], // Path will be resolved at runtime
+    command: 'node',
+    args: ['{GUI_OPERATE_SERVER_PATH}'], // Path will be resolved at runtime (compiled JS in production)
     env: {},
     requiresEnv: [],
     envDescription: {
@@ -140,17 +140,15 @@ class MCPConfigStore {
     // In development: __dirname points to dist-electron/main
     // In production: appPath points to the app.asar or unpacked app
     if (app.isPackaged) {
-      // Production: look for the file in app.asar.unpacked or resources
-      const unpackedPath = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'src', 'main', 'mcp', filename);
-      const resourcesPath = path.join(process.resourcesPath || '', 'src', 'main', 'mcp', filename);
+      // Production: use compiled JavaScript files from extraResources/mcp
+      // Convert .ts extension to .js
+      const jsFilename = filename.replace(/\.ts$/, '.js');
+      const mcpPath = path.join(process.resourcesPath || '', 'mcp', jsFilename);
       
-      // Check if file exists in unpacked location
+      // Check if compiled JS file exists in resources
       try {
-        if (fs.existsSync(unpackedPath)) {
-          return unpackedPath;
-        }
-        if (fs.existsSync(resourcesPath)) {
-          return resourcesPath;
+        if (fs.existsSync(mcpPath)) {
+          return mcpPath;
         }
       } catch {
         // Fall through to development path

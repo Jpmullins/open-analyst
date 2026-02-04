@@ -18,23 +18,30 @@
  * - Windows: Uses PowerShell with .NET System.Windows.Forms
  */
 
+// Bootstrap logging - log as early as possible
+import { writeMCPLog } from './mcp-logger.js';
+writeMCPLog('=== Module Loading Started ===', 'Bootstrap');
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+writeMCPLog('Imported MCP SDK modules', 'Bootstrap');
+
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { writeMCPLog } from './mcp-logger';
+writeMCPLog('Imported Node.js built-in modules', 'Bootstrap');
 
 const execAsync = promisify(exec);
 
 // Detect platform
 const PLATFORM = os.platform(); // 'darwin' for macOS, 'win32' for Windows
+writeMCPLog(`Platform detected: ${PLATFORM}`, 'Bootstrap');
 
 // Get Open Cowork data directory for persistent storage
 // Use platform-appropriate paths:
@@ -4307,27 +4314,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  writeMCPLog('GUI Operate MCP Server running on stdio', 'Server Start');
-  
-  // No need for auto-save on exit - each click is saved individually
-  process.on('SIGINT', () => {
-    writeMCPLog('Received SIGINT, exiting...', 'Server Shutdown');
-    process.exit(0);
-  });
-  
-  process.on('SIGTERM', () => {
-    writeMCPLog('Received SIGTERM, exiting...', 'Server Shutdown');
-    process.exit(0);
-  });
-  
-  process.on('exit', () => {
-    writeMCPLog('Process exiting', 'Server Shutdown');
-  });
+  try {
+    writeMCPLog('=== GUI Operate MCP Server Starting ===', 'Initialization');
+    writeMCPLog(`Node version: ${process.version}`, 'Initialization');
+    writeMCPLog(`Platform: ${process.platform}`, 'Initialization');
+    writeMCPLog(`Working directory: ${process.cwd()}`, 'Initialization');
+    writeMCPLog(`Script path: ${__filename}`, 'Initialization');
+    
+    writeMCPLog('Creating StdioServerTransport...', 'Initialization');
+    const transport = new StdioServerTransport();
+    
+    writeMCPLog('Connecting server to transport...', 'Initialization');
+    await server.connect(transport);
+    
+    writeMCPLog('GUI Operate MCP Server running on stdio', 'Server Start');
+    writeMCPLog('=== Server Ready ===', 'Server Start');
+    writeMCPLog('Waiting for MCP requests...', 'Server Start');
+    
+    // Keep the process alive - server will handle MCP protocol messages
+    // The transport handles the stdio communication automatically
+    
+    // No need for auto-save on exit - each click is saved individually
+    process.on('SIGINT', () => {
+      writeMCPLog('Received SIGINT, exiting...', 'Server Shutdown');
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      writeMCPLog('Received SIGTERM, exiting...', 'Server Shutdown');
+      process.exit(0);
+    });
+    
+    process.on('exit', (code) => {
+      writeMCPLog(`Process exiting with code: ${code}`, 'Server Shutdown');
+    });
+    
+    // Add unhandled rejection handler
+    process.on('unhandledRejection', (reason, promise) => {
+      writeMCPLog(`Unhandled Rejection at: ${promise}, reason: ${reason}`, 'Error');
+    });
+    
+    // Add uncaught exception handler
+    process.on('uncaughtException', (error) => {
+      writeMCPLog(`Uncaught Exception: ${error.message}\nStack: ${error.stack}`, 'Fatal Error');
+      process.exit(1);
+    });
+    
+  } catch (error) {
+    writeMCPLog(`Error in main(): ${error instanceof Error ? error.message : String(error)}`, 'Fatal Error');
+    if (error instanceof Error && error.stack) {
+      writeMCPLog(`Stack trace: ${error.stack}`, 'Fatal Error');
+    }
+    throw error;
+  }
 }
 
+// Add startup log before main execution
+writeMCPLog('=== Script Loaded ===', 'Bootstrap');
+writeMCPLog(`Module loaded, about to call main()`, 'Bootstrap');
+
 main().catch((error) => {
-  writeMCPLog(`Fatal error: ${error instanceof Error ? error.message : String(error)}`, 'Fatal Error');
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : 'No stack trace';
+  writeMCPLog(`Fatal error in main(): ${errorMsg}`, 'Fatal Error');
+  writeMCPLog(`Stack trace: ${stack}`, 'Fatal Error');
   process.exit(1);
 });

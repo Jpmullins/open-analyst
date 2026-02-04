@@ -313,20 +313,21 @@ export class MCPManager {
     // In development: __dirname points to dist-electron/main
     // In production: appPath points to the app.asar or unpacked app
     if (app.isPackaged) {
-      // Production: look for the file in app.asar.unpacked or resources
-      const unpackedPath = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'src', 'main', 'mcp', filename);
-      const resourcesPath = path.join(process.resourcesPath || '', 'src', 'main', 'mcp', filename);
+      // Production: use compiled JavaScript files from extraResources/mcp
+      // Convert .ts extension to .js
+      const jsFilename = filename.replace(/\.ts$/, '.js');
+      const mcpPath = path.join(process.resourcesPath || '', 'mcp', jsFilename);
       
-      // Check if file exists in unpacked location
+      // Check if compiled JS file exists in resources
       try {
-        if (fs.existsSync(unpackedPath)) {
-          return unpackedPath;
+        if (fs.existsSync(mcpPath)) {
+          log(`[MCPManager] Found MCP server at: ${mcpPath}`);
+          return mcpPath;
+        } else {
+          logError(`[MCPManager] File not found at: ${mcpPath}`);
         }
-        if (fs.existsSync(resourcesPath)) {
-          return resourcesPath;
-        }
-      } catch {
-        // Fall through to development path
+      } catch (error) {
+        logError(`[MCPManager] Error checking MCP server path: ${error}`);
       }
     }
     
@@ -385,6 +386,26 @@ export class MCPManager {
       let command = config.command;
       // Resolve path placeholders for presets
       let args = config.args || [];
+      
+      // Auto-migrate old configs: if using 'npx -y tsx' with built-in MCP servers, switch to 'node'
+      const isBuiltinServer = (config.name === 'GUI_Operate' || config.name === 'GUI Operate' || 
+                                config.name === 'Software_Development' || config.name === 'Software Development');
+      const isOldConfig = (command === 'npx' || command.endsWith('/npx')) && 
+                          args.includes('-y') && args.includes('tsx');
+      
+      if (isBuiltinServer && isOldConfig && app.isPackaged) {
+        log(`[MCPManager] Auto-migrating ${config.name} from npx/tsx to node (production mode)`);
+        
+        // Get bundled node path
+        const bundledNode = this.getBundledNodePath();
+        if (bundledNode) {
+          command = bundledNode.node;
+          // Remove '-y', 'tsx' from args, keep only the script path
+          args = args.filter(arg => arg !== '-y' && arg !== 'tsx');
+          log(`[MCPManager] Updated command: ${command} ${args.join(' ')}`);
+        }
+      }
+      
       args = args.map(arg => {
         // Software Development server path
         if (arg === '{SOFTWARE_DEV_SERVER_PATH}') {
@@ -415,6 +436,18 @@ export class MCPManager {
       
       // Get environment variables
       const env = await this.getEnhancedEnv(config.env || {});
+      
+      // In production, set NODE_PATH to include unpacked node_modules
+      if (app.isPackaged && isBuiltinServer) {
+        const unpackedNodeModules = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules');
+        const asarNodeModules = path.join(process.resourcesPath || '', 'app.asar', 'node_modules');
+        
+        // Add both paths to NODE_PATH (unpacked takes priority)
+        const nodePaths = [unpackedNodeModules, asarNodeModules];
+        
+        env.NODE_PATH = nodePaths.join(path.delimiter);
+        log(`[MCPManager] Set NODE_PATH for MCP server: ${env.NODE_PATH}`);
+      }
 
       log(`[MCPManager] Creating STDIO transport: ${command} ${args.join(' ')}`);
       log(`[MCPManager] Environment variables: ${Object.keys(env).length} vars`);

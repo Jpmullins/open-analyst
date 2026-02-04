@@ -6,6 +6,7 @@ dist/
 dist-electron/
 dist-wsl-agent/
 dist-lima-agent/
+dist-mcp/
 release/
 
 # Bundled Node.js binaries
