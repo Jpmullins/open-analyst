@@ -30,7 +30,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 writeMCPLog('Imported MCP SDK modules', 'Bootstrap');
 
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
 import * as path from 'path';
@@ -600,6 +600,333 @@ const DISPLAY_CONFIG_CACHE_TTL = 5000; // 5 seconds cache
 // Helper Functions
 // ============================================================================
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getResourcesDirCandidates(): string[] {
+  const candidates: string[] = [];
+
+  // If Electron main process passes resourcesPath into env for spawned MCP servers
+  const envResources = process.env.OPEN_COWORK_RESOURCES_PATH;
+  if (envResources) candidates.push(envResources);
+
+  // Packaged: .../Contents/Resources/mcp -> .../Contents/Resources
+  candidates.push(path.resolve(__dirname, '..'));
+
+  // Dev (running bundled JS from dist-mcp): .../dist-mcp -> .../resources
+  candidates.push(path.resolve(__dirname, '..', 'resources'));
+
+  // Dev (running TS from src/main/mcp): .../src/main/mcp -> .../resources
+  candidates.push(path.resolve(__dirname, '..', '..', '..', 'resources'));
+
+  // Dedupe
+  return [...new Set(candidates)];
+}
+
+async function resolveBundledExecutable(relativeFromResources: string): Promise<string | null> {
+  for (const resourcesDir of getResourcesDirCandidates()) {
+    const candidate = path.join(resourcesDir, relativeFromResources);
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+let cachedCliclickPath: string | null | undefined;
+
+async function resolveCliclickPath(): Promise<string | null> {
+  if (cachedCliclickPath !== undefined) return cachedCliclickPath;
+  if (PLATFORM !== 'darwin') {
+    cachedCliclickPath = null;
+    return null;
+  }
+
+  // 1) Explicit override (useful for debugging)
+  const envOverride = process.env.OPEN_COWORK_CLICLICK_PATH;
+  if (envOverride && (await pathExists(envOverride))) {
+    cachedCliclickPath = envOverride;
+    return envOverride;
+  }
+
+  // 2) Bundled with the app (recommended): Resources/tools/bin/cliclick
+  const bundled = await resolveBundledExecutable(path.join('tools', 'bin', 'cliclick'));
+  if (bundled) {
+    cachedCliclickPath = bundled;
+    return bundled;
+  }
+
+  // 3) Common Homebrew locations (packaged apps may have limited PATH)
+  const commonLocations = ['/opt/homebrew/bin/cliclick', '/usr/local/bin/cliclick'];
+  for (const p of commonLocations) {
+    if (await pathExists(p)) {
+      cachedCliclickPath = p;
+      return p;
+    }
+  }
+
+  // 4) PATH lookup
+  try {
+    const { stdout } = await executeCommand('/usr/bin/which cliclick', 2000);
+    const whichPath = stdout.trim();
+    if (whichPath) {
+      cachedCliclickPath = whichPath;
+      return whichPath;
+    }
+  } catch {
+    // ignore
+  }
+
+  cachedCliclickPath = null;
+  return null;
+}
+
+type PythonExec = {
+  python: string;
+  pythonRoot: string;
+  env: NodeJS.ProcessEnv;
+};
+
+let cachedPythonExec: PythonExec | null | undefined;
+
+async function resolvePythonExec(): Promise<PythonExec | null> {
+  if (cachedPythonExec !== undefined) return cachedPythonExec;
+
+  const baseEnv: NodeJS.ProcessEnv = { ...process.env };
+
+  // 1) Explicit override (useful for debugging)
+  const envPython = process.env.OPEN_COWORK_PYTHON_PATH;
+  const envPythonHome = process.env.OPEN_COWORK_PYTHON_HOME;
+  if (envPython && (await pathExists(envPython))) {
+    const pythonRoot = envPythonHome || path.resolve(envPython, '..', '..');
+    const extraSite = path.join(pythonRoot, 'site-packages');
+    const env: NodeJS.ProcessEnv = {
+      ...baseEnv,
+      PYTHONHOME: pythonRoot,
+      PYTHONNOUSERSITE: '1',
+      PYTHONDONTWRITEBYTECODE: '1',
+      PYTHONUTF8: '1',
+    };
+    if (await pathExists(extraSite)) {
+      env.PYTHONPATH = [extraSite, baseEnv.PYTHONPATH].filter(Boolean).join(path.delimiter);
+    }
+    cachedPythonExec = { python: envPython, pythonRoot, env };
+    return cachedPythonExec;
+  }
+
+  // 2) Bundled with the app (recommended)
+  // Packaged layout: Resources/python/bin/python3
+  // Dev layout:      resources/python/darwin-${arch}/bin/python3
+  if (PLATFORM === 'darwin') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const packaged = await resolveBundledExecutable(path.join('python', 'bin', 'python3'));
+    const devBundled = await resolveBundledExecutable(path.join('python', `darwin-${arch}`, 'bin', 'python3'));
+    const pythonPath = packaged || devBundled;
+    if (pythonPath) {
+      const pythonRoot = path.resolve(pythonPath, '..', '..');
+      const extraSite = path.join(pythonRoot, 'site-packages');
+      const env: NodeJS.ProcessEnv = {
+        ...baseEnv,
+        PYTHONHOME: pythonRoot,
+        PYTHONNOUSERSITE: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
+        PYTHONUTF8: '1',
+      };
+      if (await pathExists(extraSite)) {
+        env.PYTHONPATH = [extraSite, baseEnv.PYTHONPATH].filter(Boolean).join(path.delimiter);
+      }
+
+      cachedPythonExec = { python: pythonPath, pythonRoot, env };
+      return cachedPythonExec;
+    }
+
+    // 3) System python (fallback)
+    const systemPython = '/usr/bin/python3';
+    if (await pathExists(systemPython)) {
+      cachedPythonExec = {
+        python: systemPython,
+        pythonRoot: path.resolve(systemPython, '..', '..'),
+        env: {
+          ...baseEnv,
+          PYTHONNOUSERSITE: '1',
+          PYTHONDONTWRITEBYTECODE: '1',
+          PYTHONUTF8: '1',
+        },
+      };
+      return cachedPythonExec;
+    }
+  }
+
+  // Generic fallback for other platforms: rely on PATH if available
+  try {
+    const { stdout } = await executeCommand(PLATFORM === 'win32' ? 'where python' : '/usr/bin/which python3', 2000);
+    const p = stdout.trim().split(/\r?\n/).filter(Boolean)[0];
+    if (p) {
+      cachedPythonExec = {
+        python: p,
+        pythonRoot: path.resolve(p, '..', '..'),
+        env: {
+          ...baseEnv,
+          PYTHONNOUSERSITE: '1',
+          PYTHONDONTWRITEBYTECODE: '1',
+          PYTHONUTF8: '1',
+        },
+      };
+      return cachedPythonExec;
+    }
+  } catch {
+    // ignore
+  }
+
+  cachedPythonExec = null;
+  return null;
+}
+
+async function executePython(
+  code: string,
+  timeout: number = 10000
+): Promise<{ stdout: string; stderr: string }> {
+  const execInfo = await resolvePythonExec();
+  if (!execInfo) {
+    throw new Error(
+      'Python 3 runtime not found.\n' +
+      '- Recommended (macOS): bundle Python into the app at Resources/python/bin/python3 with required packages (Pillow, pyobjc-framework-Quartz)\n' +
+      '- Or install python3 + dependencies on this machine.\n'
+    );
+  }
+
+  const { python, env } = execInfo;
+
+  return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(python, ['-c', code], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      reject(new Error('Python execution timed out'));
+    }, timeout);
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(`Python spawn failed: ${err.message}`));
+    });
+
+    child.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+
+    child.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const msg = (stderr || stdout).trim();
+        reject(new Error(msg || `Python exited with code ${code}`));
+      }
+    });
+  });
+}
+
+async function macReadClipboardBytes(timeoutMs: number = 2000): Promise<Buffer | null> {
+  if (PLATFORM !== 'darwin') return null;
+
+  const pbpastePath = '/usr/bin/pbpaste';
+  return await new Promise<Buffer | null>((resolve) => {
+    const child = spawn(pbpastePath, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdoutChunks: Buffer[] = [];
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      resolve(null);
+    }, timeoutMs);
+
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+
+    child.stdout.on('data', (d) => {
+      stdoutChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve(Buffer.concat(stdoutChunks));
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function macWriteClipboardBytes(bytes: Buffer, timeoutMs: number = 5000): Promise<void> {
+  if (PLATFORM !== 'darwin') {
+    throw new Error('pbcopy is only available on macOS.');
+  }
+
+  const pbcopyPath = '/usr/bin/pbcopy';
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(pbcopyPath, [], { stdio: ['pipe', 'ignore', 'pipe'] });
+    const stderrChunks: Buffer[] = [];
+
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      reject(new Error('pbcopy timed out'));
+    }, timeoutMs);
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.stderr.on('data', (d) => {
+      stderrChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
+    });
+
+    child.stdin.on('error', () => {
+      // Ignore stdin errors here; we'll rely on exit code/stderr.
+    });
+
+    child.stdin.end(bytes);
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+        reject(new Error(stderr || `pbcopy exited with code ${code}`));
+      }
+    });
+  });
+}
+
 /**
  * Execute a shell command with timeout
  */
@@ -619,19 +946,6 @@ async function executeCommand(
 }
 
 /**
- * Check if cliclick is installed (macOS only)
- */
-async function checkCliclickInstalled(): Promise<boolean> {
-  if (PLATFORM !== 'darwin') return false;
-  try {
-    await executeCommand('which cliclick');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Execute cliclick command with error handling (macOS only)
  */
 async function executeCliclick(command: string): Promise<{ stdout: string; stderr: string }> {
@@ -639,19 +953,32 @@ async function executeCliclick(command: string): Promise<{ stdout: string; stder
     throw new Error('cliclick is only available on macOS. Use Windows-specific functions instead.');
   }
 
-  const isInstalled = await checkCliclickInstalled();
-  if (!isInstalled) {
-    throw new Error('cliclick is not installed. Install it with: brew install cliclick');
+  const cliclickPath = await resolveCliclickPath();
+  if (!cliclickPath) {
+    throw new Error(
+      'cliclick is required for GUI automation on macOS but was not found.\n' +
+      '- Recommended: bundle it inside the app at Resources/tools/bin/cliclick\n' +
+      '- Or install it on this machine: brew install cliclick\n' +
+      `Searched: bundled Resources/tools/bin/cliclick, /opt/homebrew/bin/cliclick, /usr/local/bin/cliclick, and PATH.`
+    );
   }
 
-  const fullCommand = `cliclick ${command}`;
+  const quotedCliclick = `"${cliclickPath.replace(/"/g, '\\"')}"`;
+  const fullCommand = `${quotedCliclick} ${command}`;
   writeMCPLog(`[executeCliclick] Executing command: ${fullCommand}`, 'Cliclick Command');
 
+  try {
   const result = await executeCommand(fullCommand);
-
   writeMCPLog(`[executeCliclick] Command completed. stdout: ${result.stdout}, stderr: ${result.stderr}`, 'Cliclick Result');
-
   return result;
+  } catch (error: any) {
+    const baseMessage = error?.message || String(error);
+    const hint =
+      '\n\nmacOS 权限提示 / Permissions:\n' +
+      '- System Settings → Privacy & Security → Accessibility：允许 Open Cowork\n' +
+      '- System Settings → Privacy & Security → Automation：允许 Open Cowork 控制 “System Events”\n';
+    throw new Error(`${baseMessage}${hint}`);
+  }
 }
 
 // ============================================================================
@@ -1814,27 +2141,19 @@ async function performType(
       'Type Operation'
     );
 
-    // Try to snapshot current clipboard as base64 so we can restore it after paste
-    let previousClipboardBase64: string | null = null;
+    // Snapshot current clipboard bytes so we can restore it after paste (best-effort).
+    let previousClipboardBytes: Buffer | null = null;
     if (preserveClipboard) {
       try {
-        const { stdout } = await executeCommand(
-          `python3 -c "import base64, subprocess, sys; sys.stdout.write(base64.b64encode(subprocess.check_output(['pbpaste'])).decode())"`,
-          2000
-        );
-        previousClipboardBase64 = stdout.trim() || null;
+        previousClipboardBytes = await macReadClipboardBytes(2000);
       } catch {
         // If pbpaste fails (non-text clipboard, permissions, etc.), skip restore
-        previousClipboardBase64 = null;
+        previousClipboardBytes = null;
       }
     }
 
-    // Set clipboard to the target text (as bytes) via base64 to avoid shell escaping issues
-    const textBase64 = Buffer.from(text, 'utf-8').toString('base64');
-    await executeCommand(
-      `python3 -c "import base64, subprocess; subprocess.run(['pbcopy'], input=base64.b64decode('${textBase64}'), check=True)"`,
-      5000
-    );
+    // Set clipboard to the target text (as bytes) without requiring Python.
+    await macWriteClipboardBytes(Buffer.from(text, 'utf-8'), 5000);
 
     // Paste (Cmd+V)
     await performKeyPress('v', ['cmd']);
@@ -1844,13 +2163,11 @@ async function performType(
       await executeCommand(`osascript -e 'tell application "System Events" to key code 36'`);
     }
 
-    // Restore previous clipboard if we captured it and it's not too large for a command line
-    if (preserveClipboard && previousClipboardBase64 && previousClipboardBase64.length <= 200000) {
+    // Restore previous clipboard if we captured it (best-effort).
+    // Limit size to avoid excessive memory / IPC overhead.
+    if (preserveClipboard && previousClipboardBytes && previousClipboardBytes.length <= 10 * 1024 * 1024) {
       try {
-        await executeCommand(
-          `python3 -c "import base64, subprocess; subprocess.run(['pbcopy'], input=base64.b64decode('${previousClipboardBase64}'), check=True)"`,
-          5000
-        );
+        await macWriteClipboardBytes(previousClipboardBytes, 5000);
       } catch {
         // Best-effort restore
       }
@@ -2074,7 +2391,7 @@ Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
   `.trim().replace(/\n/g, '; ');
   
   try {
-    await executeCommand(`python3 -c "${scrollScript}"`);
+    await executePython(scrollScript, 5000);
   } catch {
     // Fallback: try using AppleScript with key simulation
     // This is a rough approximation for systems without pyobjc
@@ -2166,7 +2483,8 @@ async function takeScreenshot(
   }
 
   // macOS implementation
-  let command = 'screencapture -C';
+  // Use absolute path because packaged apps may have a limited PATH.
+  let command = '/usr/sbin/screencapture -C';
 
   // -x: no sound
   command += ' -x';
@@ -2196,7 +2514,16 @@ async function takeScreenshot(
 
   command += ` "${finalPath}"`;
 
+  try {
   await executeCommand(command);
+  } catch (error: any) {
+    const baseMessage = error?.message || String(error);
+    const hint =
+      '\n\nmacOS 权限提示 / Permissions:\n' +
+      '- System Settings → Privacy & Security → Screen Recording：允许 Open Cowork\n' +
+      '- 重新启动应用后再试 / Restart the app and try again\n';
+    throw new Error(`${baseMessage}${hint}`);
+  }
 
   // Verify the file was created
   try {
@@ -2958,7 +3285,7 @@ except Exception as e:
 `.trim();
   
   try {
-    const result = await executeCommand(`python -c "${pythonScript.replace(/"/g, '\\"')}"`);
+    const result = await executePython(pythonScript, 20000);
     
     if (result.stdout.includes('SUCCESS')) {
       writeMCPLog(`[annotateScreenshot] Successfully annotated screenshot with ${clickHistoryForDisplay.length} click markers`, 'Screenshot Annotation');
@@ -3180,7 +3507,7 @@ except Exception as e:
     exit(1)
     `.trim();
 
-    const result = await executeCommand(`python -c "${pythonScript.replace(/"/g, '\\"')}"`, 5000);
+    const result = await executePython(pythonScript, 5000);
 
     if (result.stdout.includes('Success')) {
       const markInfo = boundingBox
@@ -3207,7 +3534,8 @@ async function getImageDimensions(imagePath: string): Promise<{ width: number; h
     const platform = os.platform();
     
     if (platform === 'darwin') {
-      const { stdout } = await executeCommand(`sips -g pixelWidth -g pixelHeight "${imagePath}"`);
+      // Use absolute path because packaged apps may have a limited PATH.
+      const { stdout } = await executeCommand(`/usr/bin/sips -g pixelWidth -g pixelHeight "${imagePath}"`);
       const widthMatch = stdout.match(/pixelWidth:\s*(\d+)/);
       const heightMatch = stdout.match(/pixelHeight:\s*(\d+)/);
       

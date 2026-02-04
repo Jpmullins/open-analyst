@@ -333,8 +333,22 @@ export class MCPManager {
     
     // Development: __dirname is dist-electron/main
     // Need to go up 2 levels to get to project root (dist-electron/main -> dist-electron -> project root)
-    // Then navigate to src/main/mcp/[filename]
     const projectRoot = path.join(__dirname, '..', '..');
+
+    // Prefer bundled JS from dist-mcp in development.
+    // This avoids running TypeScript directly with `node` (which will fail without a TS loader).
+    const jsFilename = filename.replace(/\.ts$/, '.js');
+    const devBundledPath = path.join(projectRoot, 'dist-mcp', jsFilename);
+    try {
+      if (fs.existsSync(devBundledPath)) {
+        log(`[MCPManager] Found bundled MCP server (dev) at: ${devBundledPath}`);
+        return devBundledPath;
+      }
+    } catch (error) {
+      logWarn(`[MCPManager] Error checking dev bundled MCP server path: ${error}`);
+    }
+
+    // Fallback to source TypeScript (requires running via tsx/ts-node if using command 'node')
     const sourcePath = path.join(projectRoot, 'src', 'main', 'mcp', filename);
     
     // Verify file exists and log for debugging
@@ -417,6 +431,23 @@ export class MCPManager {
       }
         return arg;
       });
+
+      // Dev guard: running TypeScript directly with `node` will fail (no TS loader).
+      // We expect built-in servers to be bundled into dist-mcp/*.js in development.
+      if (!app.isPackaged && isBuiltinServer) {
+        const cmdBase = path.basename(command).toLowerCase();
+        const isNodeCmd = cmdBase === 'node' || cmdBase === 'node.exe';
+        const tsScript = args.find(a => typeof a === 'string' && a.endsWith('.ts'));
+        if (isNodeCmd && tsScript) {
+          throw new Error(
+            `[MCPManager] Development config is trying to run a TypeScript MCP server with node:\n` +
+            `  ${command} ${args.join(' ')}\n\n` +
+            `Fix:\n` +
+            `- Run: npm run build:mcp (or restart npm run dev, which should run it)\n` +
+            `- Or change this server command to: npx -y tsx <server.ts>\n`
+          );
+        }
+      }
       
       // If command is 'npx', check if it's in PATH
       if (command === 'npx' || command.endsWith('/npx')) {
@@ -447,6 +478,10 @@ export class MCPManager {
         
         env.NODE_PATH = nodePaths.join(path.delimiter);
         log(`[MCPManager] Set NODE_PATH for MCP server: ${env.NODE_PATH}`);
+
+        // Pass resourcesPath to MCP servers so they can reliably locate bundled tools/resources
+        // (Node processes spawned from bundled Node.js do not have process.resourcesPath)
+        env.OPEN_COWORK_RESOURCES_PATH = process.resourcesPath || '';
       }
 
       log(`[MCPManager] Creating STDIO transport: ${command} ${args.join(' ')}`);

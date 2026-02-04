@@ -157,8 +157,21 @@ class MCPConfigStore {
     
     // Development: __dirname is dist-electron/main
     // Need to go up 2 levels to get to project root (dist-electron/main -> dist-electron -> project root)
-    // Then navigate to src/main/mcp/[filename]
     const projectRoot = path.join(__dirname, '..', '..');
+
+    // Prefer bundled JS from dist-mcp in development.
+    // This avoids attempting to run TypeScript directly with `node`.
+    const jsFilename = filename.replace(/\.ts$/, '.js');
+    const devBundledPath = path.join(projectRoot, 'dist-mcp', jsFilename);
+    try {
+      if (fs.existsSync(devBundledPath)) {
+        return devBundledPath;
+      }
+    } catch {
+      // Fall through to source path
+    }
+
+    // Fallback: navigate to src/main/mcp/[filename]
     const sourcePath = path.join(projectRoot, 'src', 'main', 'mcp', filename);
     
     // Verify file exists and log for debugging

@@ -58,3 +58,5 @@ CLAUDE.md
 
 dist*
 resources/node
+resources/tools
+resources/python
