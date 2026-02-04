@@ -13,7 +13,6 @@ import {
   FileText,
   FileSpreadsheet,
   FilePieChart,
-  FileSliders,
   FileCode2,
   FileArchive,
   FileAudio2,

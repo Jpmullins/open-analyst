@@ -3,14 +3,14 @@
  * 消息路由器：将远程消息路由到 Agent，将 Agent 响应路由回 Channel
  */
 
-import { log, logError, logWarn } from '../utils/logger';
+import { log, logError } from '../utils/logger';
 import type {
   RemoteMessage,
   RemoteResponse,
   RemoteSessionMapping,
   ChannelType,
 } from './types';
-import type { Message, ContentBlock, TextContent, ImageContent, ServerEvent } from '../../renderer/types/index';
+import type { Message, ContentBlock, TextContent } from '../../renderer/types/index';
 
 // Callback type for sending responses back to channels
 type ResponseCallback = (response: RemoteResponse) => Promise<void>;
@@ -128,7 +128,7 @@ export class MessageRouter {
   /**
    * Create new session mapping
    */
-  private createSessionMapping(message: RemoteMessage, key: string): RemoteSessionMapping {
+  private createSessionMapping(message: RemoteMessage, _key: string): RemoteSessionMapping {
     const sessionId = this.generateSessionId();
     
     return {
@@ -394,16 +394,9 @@ export class MessageRouter {
   }
   
   /**
-   * Extract prompt text from message (legacy method for compatibility)
-   */
-  private extractPrompt(message: RemoteMessage): string {
-    return this.extractPromptAndCwd(message).prompt;
-  }
-  
-  /**
    * Handle agent message (complete message)
    */
-  private handleAgentMessage(sessionId: string, originalMessage: RemoteMessage, agentMessage: Message): void {
+  private handleAgentMessage(sessionId: string, _originalMessage: RemoteMessage, agentMessage: Message): void {
     // Extract text from agent message
     const textContent = agentMessage.content.find(c => c.type === 'text') as TextContent | undefined;
     
@@ -423,7 +416,7 @@ export class MessageRouter {
   /**
    * Handle partial response (streaming)
    */
-  private handlePartialResponse(sessionId: string, originalMessage: RemoteMessage, delta: string): void {
+  private handlePartialResponse(sessionId: string, _originalMessage: RemoteMessage, delta: string): void {
     // Accumulate partial response
     const buffer = this.responseBuffers.get(sessionId) || '';
     this.responseBuffers.set(sessionId, buffer + delta);

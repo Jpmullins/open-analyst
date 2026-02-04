@@ -613,7 +613,7 @@ export class RemoteGateway extends EventEmitter {
   // WebSocket Connection Handling
   // ============================================================================
   
-  private handleWSConnection(ws: WebSocket, req: IncomingMessage): void {
+  private handleWSConnection(ws: WebSocket, _req: IncomingMessage): void {
     const clientId = this.generateClientId();
     
     const client: WSClient = {
@@ -711,7 +711,7 @@ export class RemoteGateway extends EventEmitter {
       return;
     }
     
-    const { text, sessionId } = message.payload as { text: string; sessionId?: string };
+    const { text } = message.payload as { text: string; sessionId?: string };
     
     // Create a remote message from WS client
     const remoteMessage: RemoteMessage = {

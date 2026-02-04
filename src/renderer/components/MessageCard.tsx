@@ -917,7 +917,7 @@ function ToolResultBlock({ block, allBlocks, message }: { block: ToolResultConte
         )}
         <span className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}>
           {summary}
-          {hasImages && (
+          {hasImages && block.images && (
             <span className="ml-2 text-xs text-text-muted">
               📸 {block.images.length} image{block.images.length > 1 ? 's' : ''}
             </span>

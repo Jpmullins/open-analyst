@@ -26,9 +26,9 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { start } from 'repl';
-import { log, logError, logWarn } from '../utils/logger';
-import { configStore } from '../config/config-store';
+// import { start } from 'repl';
+// import { log, logError, logWarn } from '../utils/logger';
+// import { configStore } from '../config/config-store';
 import { writeMCPLog } from './mcp-logger';
 
 
@@ -1970,6 +1970,8 @@ async function executeGUIInteraction(action: string, x?: number, y?: number, val
 // }
 
 // Helper: Execute Claude Code command
+// @ts-ignore - Reserved for future use
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function executeClaudeCode(prompt: string, workingDir: string = WORKSPACE_DIR): Promise<string> {
   try {
     // Check if claude-code is available
@@ -2007,6 +2009,8 @@ async function readFile(filePath: string): Promise<string> {
 }
 
 // Helper: Write file content
+// @ts-ignore - Reserved for future use
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function writeFile(filePath: string, content: string): Promise<void> {
   const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
   try {
@@ -2019,6 +2023,8 @@ async function writeFile(filePath: string, content: string): Promise<void> {
 }
 
 // Helper: Delete file
+// @ts-ignore - Reserved for future use
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function deleteFile(filePath: string): Promise<void> {
   const fullPath = path.isAbsolute(filePath) ? filePath : path.join(WORKSPACE_DIR, filePath);
   try {

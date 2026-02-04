@@ -3,7 +3,7 @@
  * 远程控制模块类型定义
  */
 
-import type { Session, Message, ContentBlock, TraceStep, SessionStatus } from '../../renderer/types/index';
+// Types are defined locally in this file
 
 // ============================================================================
 // Gateway Configuration

@@ -39,6 +39,12 @@ It provides a sandboxed workspace where AI can manage files, generate profession
 <a id="features"></a>
 ## ✨ Key Features
 
+|               | MCP & Skills | Remote Control | GUI Operation |
+| ------------- | ------------ | -------------- | ------------- |
+| Claude Cowork | ✓            | ✗              | ✗             |
+| OpenClaw      | ✓            | ✓              | ✗             |
+| OpenCowork    | ✓            | ✓              | ✓             |
+
 - **One-Click Install, Ready to Use**: Pre-built installers for Windows and macOS, no environment setup needed—just download and start using.
 - **Flexible Model Support**: Supports **Claude**, **OpenAI-compatible APIs**, and Chinese models like **GLM**, **MiniMax**, **Kimi**. Use your OpenRouter, Anthropic, or other API keys with flexible configuration. More models coming soon!
 - **Smart File Management**: Read, write, and organize files within your workspace.
@@ -51,6 +57,9 @@ It provides a sandboxed workspace where AI can manage files, generate profession
 - **UI Enhancements**: Beautiful and flexible UI design, system language switching, comprehensive MCP/Skills/Tools call display.
 
 <a id="demo"></a>
+
+
+
 ## 🎬 Demo
 
 See Open Cowork in action:

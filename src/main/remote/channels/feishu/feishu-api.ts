@@ -3,7 +3,7 @@
  * 飞书开放平台 API 封装
  */
 
-import { log, logError, logWarn } from '../../../utils/logger';
+import { log, logError } from '../../../utils/logger';
 
 const FEISHU_API_BASE = 'https://open.feishu.cn/open-apis';
 
@@ -207,7 +207,7 @@ export class FeishuAPI {
     // Create form data
     const formData = new FormData();
     formData.append('image_type', 'message');
-    formData.append('image', new Blob([imageBuffer]), 'image.png');
+    formData.append('image', new Blob([new Uint8Array(imageBuffer)]), 'image.png');
     
     const response = await fetch(`${FEISHU_API_BASE}/im/v1/images`, {
       method: 'POST',
@@ -235,7 +235,7 @@ export class FeishuAPI {
     const formData = new FormData();
     formData.append('file_type', fileType);
     formData.append('file_name', fileName);
-    formData.append('file', new Blob([fileBuffer]), fileName);
+    formData.append('file', new Blob([new Uint8Array(fileBuffer)]), fileName);
     
     const response = await fetch(`${FEISHU_API_BASE}/im/v1/files`, {
       method: 'POST',
@@ -355,7 +355,7 @@ export class FeishuAPI {
   /**
    * Send typing indicator (Feishu doesn't have native support, but we can use this for other purposes)
    */
-  async sendTypingIndicator(chatId: string): Promise<void> {
+  async sendTypingIndicator(_chatId: string): Promise<void> {
     // Feishu doesn't support typing indicators
     // This is a no-op placeholder
   }

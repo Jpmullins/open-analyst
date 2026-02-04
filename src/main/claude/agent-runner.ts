@@ -1088,6 +1088,8 @@ Then follow the workflow described in that file.
       const builtinSkillsPathForValidation = this.getBuiltinSkillsPath();
       const appClaudeDirForValidation = this.getAppClaudeDir();
       
+      // @ts-ignore - Reserved for future use
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const isPathInsideWorkspace = (targetPath: string): boolean => {
         if (!targetPath) return true;
         
@@ -1453,9 +1455,9 @@ ${this.getMCPToolsPrompt()}
 ${this.getCredentialsPrompt()}
 <artifact_instructions>
 When you produce a final deliverable file, declare it once using this exact block so the app can show it as the final artifact:
-```artifact
+\`\`\`artifact
 {"path":"/workspace/path/to/file.ext","name":"optional display name","type":"optional type"}
-```
+\`\`\`
 </artifact_instructions>
 <application_details> Claude is powering **Cowork mode**, a feature of the Claude desktop app. Cowork mode is currently a **research preview**. Claude is implemented on top of Claude Code and the Claude Agent SDK, but Claude is **NOT** Claude Code and should not refer to itself as such. Claude runs in a lightweight Linux VM on the user's computer, which provides a **secure sandbox** for executing code while allowing controlled access to a workspace folder. Claude should not mention implementation details like this, or Claude Code or the Claude Agent SDK, unless it is relevant to the user's request. </application_details>
 <behavior_instructions>

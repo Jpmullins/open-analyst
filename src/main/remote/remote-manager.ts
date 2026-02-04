@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { log, logError, logWarn } from '../utils/logger';
+import { log, logError } from '../utils/logger';
 import { RemoteGateway } from './gateway';
 import { MessageRouter } from './message-router';
 import { FeishuChannel } from './channels/feishu';
@@ -395,6 +395,7 @@ export class RemoteManager extends EventEmitter {
     // Build question message for Feishu
     let messageText = '🤔 **需要你的回答**\n\n';
     
+    // @ts-ignore - qIdx not used in this loop but kept for consistency
     questions.forEach((q, qIdx) => {
       if (q.header) {
         messageText += `**${q.header}**\n`;
@@ -583,7 +584,7 @@ export class RemoteManager extends EventEmitter {
   handlePotentialInteractionResponse(
     channelType: ChannelType,
     channelId: string,
-    senderId: string,
+    _senderId: string,
     messageText: string
   ): boolean {
     // Find any pending interaction for this user
@@ -945,8 +946,8 @@ export class RemoteManager extends EventEmitter {
     workingDirectory: string | undefined,
     channelType: ChannelType,
     channelId: string,
-    onMessage: (message: Message) => void,
-    onPartial: (delta: string) => void,
+    _onMessage: (message: Message) => void,
+    _onPartial: (delta: string) => void,
   ): Promise<void> {
     if (!this.agentExecutor) {
       throw new Error('Agent executor not set');
@@ -1006,16 +1007,17 @@ export class RemoteManager extends EventEmitter {
    * Emit status update to renderer
    */
   private emitStatusUpdate(): void {
+    // Type assertion needed because remote.status is not in ServerEvent union yet
     this.emitToRenderer({
       type: 'remote.status' as any,
-      payload: this.getStatus(),
-    });
+      payload: this.getStatus() as any,
+    } as any);
   }
   
   /**
    * Emit event to renderer
    */
-  private emitToRenderer(event: ServerEvent): void {
+  private emitToRenderer(event: any): void {
     if (this.sendToRenderer) {
       this.sendToRenderer(event);
     }

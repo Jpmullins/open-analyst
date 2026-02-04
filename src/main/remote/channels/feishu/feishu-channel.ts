@@ -20,7 +20,6 @@ export class FeishuChannel extends ChannelBase {
   private config: FeishuChannelConfig;
   private api: FeishuAPI;
   private wsClient?: any;  // WebSocket client for long polling
-  private webhookHandler?: (data: any) => void;
   
   // Bot info
   private botOpenId?: string;
@@ -138,7 +137,7 @@ export class FeishuChannel extends ChannelBase {
   /**
    * Handle incoming webhook request
    */
-  handleWebhook(headers: Record<string, string>, body: string): { status: number; data: any } {
+  handleWebhook(_headers: Record<string, string>, body: string): { status: number; data: any } {
     log('[Feishu] Received webhook request');
     
     try {
@@ -221,25 +220,27 @@ export class FeishuChannel extends ChannelBase {
       // Build remote message
       // Use chatId as channelId - Feishu API needs chat_id to send messages
       const remoteMessage: RemoteMessage = {
+        id: data.messageId,
         channelType: 'feishu',
         channelId: data.chatId,  // Use actual chat_id for sending messages
-        messageId: data.messageId,
         sender: {
           id: data.senderId,
           name: '', // Will be filled if needed
-          type: 'user',
+          isBot: false,
         },
         content: {
           type: 'text',
           text: data.text || '',
-          raw: data.content,
         },
         timestamp: parseInt(data.createTime) || Date.now(),
-        metadata: {
+        isGroup: data.chatType === 'group',
+        isMentioned: data.mentions?.some((m: any) => m.id?.open_id === this.botOpenId) || false,
+        raw: {
           chatId: data.chatId,
           chatType: data.chatType,
           messageType: data.messageType,
-          senderId: data.senderId,  // Store senderId for reference
+          senderId: data.senderId,
+          content: data.content,
         },
       };
       

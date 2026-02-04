@@ -7,13 +7,9 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Power,
-  Wifi,
-  WifiOff,
   Users,
   MessageSquare,
-  RefreshCw,
   Check,
-  X,
   Trash2,
   Shield,
   Loader2,
@@ -21,11 +17,9 @@ import {
   ExternalLink,
   Zap,
   Settings2,
-  ChevronRight,
   Smartphone,
   Link2,
   CheckCircle2,
-  Circle,
   AlertTriangle,
 } from 'lucide-react';
 
@@ -101,11 +95,15 @@ interface TunnelStatus {
 type ConfigStep = 'feishu' | 'connection' | 'advanced';
 
 export function RemoteControlPanel() {
+  // @ts-ignore - Reserved for future i18n support
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { t } = useTranslation();
   
   // State
   const [isLoading, setIsLoading] = useState(true);
   const [status, setStatus] = useState<GatewayStatus | null>(null);
+  // @ts-ignore - Reserved for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [config, setConfig] = useState<RemoteConfig | null>(null);
   const [pairedUsers, setPairedUsers] = useState<PairedUser[]>([]);
   const [pendingPairings, setPendingPairings] = useState<PairingRequest[]>([]);
@@ -401,7 +399,7 @@ export function RemoteControlPanel() {
           { id: 'feishu', label: '飞书配置', icon: MessageSquare, done: isFeishuConfigured },
           { id: 'connection', label: '连接方式', icon: Link2, done: isConnectionConfigured },
           { id: 'advanced', label: '高级设置', icon: Settings2, done: true },
-        ].map((step, index) => (
+        ].map((step) => (
           <button
             key={step.id}
             onClick={() => setActiveStep(step.id as ConfigStep)}

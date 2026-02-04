@@ -1,4 +1,4 @@
-export function resolveArtifactPath(pathValue: string, cwd?: string): string {
+export function resolveArtifactPath(pathValue: string, cwd?: string | null): string {
   if (!pathValue) {
     return pathValue;
   }
