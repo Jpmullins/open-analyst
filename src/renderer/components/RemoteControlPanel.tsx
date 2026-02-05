@@ -14,6 +14,7 @@ import {
   Shield,
   Loader2,
   Copy,
+  ExternalLink,
   Zap,
   Settings2,
   Smartphone,
