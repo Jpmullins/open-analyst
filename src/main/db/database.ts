@@ -96,7 +96,7 @@ function getDatabasePath(): string {
     mkdirSync(dbDir, { recursive: true });
   }
   
-  return join(dbDir, 'cowork.db');
+  return join(dbDir, 'open-analyst.db');
 }
 
 /**

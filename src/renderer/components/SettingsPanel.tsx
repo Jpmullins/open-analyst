@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, ChevronDown, Package, Languages, Shield, Wifi } from 'lucide-react';
+import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, ChevronDown, Package, Shield } from 'lucide-react';
 import type { ProviderPresets, Skill, ApiTestResult } from '../types';
-import { RemoteControlPanel } from './RemoteControlPanel';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -43,10 +42,10 @@ interface MCPServerStatus {
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'remote' | 'logs' | 'language';
+  initialTab?: 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
 }
 
-type TabId = 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'remote' | 'logs' | 'language';
+type TabId = 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
 
 const SERVICE_OPTIONS = [
   { value: 'gmail', label: 'Gmail' },
@@ -93,9 +92,7 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
     { id: 'credentials' as TabId, label: t('settings.credentials'), icon: Key, description: t('settings.credentialsDesc') },
     { id: 'connectors' as TabId, label: t('settings.connectors'), icon: Plug, description: t('settings.connectorsDesc') },
     { id: 'skills' as TabId, label: t('settings.skills'), icon: Package, description: t('settings.skillsDesc') },
-    { id: 'remote' as TabId, label: t('settings.remote', '远程控制'), icon: Wifi, description: t('settings.remoteDesc', '通过飞书等平台远程使用') },
     { id: 'logs' as TabId, label: t('settings.logs'), icon: AlertCircle, description: t('settings.logsDesc') },
-    { id: 'language' as TabId, label: t('settings.language'), icon: Languages, description: t('settings.languageDesc') },
   ];
 
   return (
@@ -166,14 +163,8 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
             <div className={activeTab === 'skills' ? '' : 'hidden'}>
               {viewedTabs.has('skills') && <SkillsTab />}
             </div>
-            <div className={activeTab === 'remote' ? '' : 'hidden'}>
-              {viewedTabs.has('remote') && <RemoteControlPanel />}
-            </div>
             <div className={activeTab === 'logs' ? '' : 'hidden'}>
               {viewedTabs.has('logs') && <LogsTab />}
-            </div>
-            <div className={activeTab === 'language' ? '' : 'hidden'}>
-              {viewedTabs.has('language') && <LanguageTab />}
             </div>
           </div>
         </div>
@@ -964,7 +955,7 @@ function SandboxTab() {
             <div className="flex-1 min-w-0">
               <h3 className="text-base font-semibold text-text-primary">{t('sandbox.enableSandbox')}</h3>
               <p className="text-sm text-amber-500 mt-0.5">
-                🚧 功能调试中，暂时不支持
+                🚧 This feature is temporarily unavailable during debugging.
               </p>
             </div>
           </div>
@@ -972,7 +963,7 @@ function SandboxTab() {
           <button
             disabled={true}
             aria-label="Sandbox temporarily unavailable"
-            title="功能调试中，暂时不支持"
+            title="Feature temporarily unavailable during debugging"
             className="relative inline-flex h-8 w-14 items-center rounded-full transition-all duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 bg-gray-300 dark:bg-gray-600"
           >
             <span
@@ -2286,7 +2277,7 @@ function ServerForm({
                       type="password"
                       value={newEnvValue}
                       onChange={(e) => setNewEnvValue(e.target.value)}
-                      placeholder="输入值"
+                      placeholder="Enter value"
                       className="w-full px-3 py-1.5 rounded bg-surface border border-border text-text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent/30"
                     />
                     <div className="flex gap-2">
@@ -2579,56 +2570,6 @@ function SkillCard({ skill, onToggleEnabled, onDelete, isLoading }: {
             </button>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== Language Tab ====================
-
-function LanguageTab() {
-  const { i18n, t } = useTranslation();
-  const currentLang = i18n.language.startsWith('zh') ? 'zh' : 'en';
-
-  const languages = [
-    { code: 'en', nativeName: 'English' },
-    { code: 'zh', nativeName: '中文' },
-  ];
-
-  const handleLanguageChange = (langCode: string) => {
-    i18n.changeLanguage(langCode);
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Info Banner */}
-      <div className="px-4 py-3 rounded-xl bg-blue-500/10 text-blue-600 text-sm">
-        <p className="font-medium mb-1">🌐 {t('language.selectLanguage')}</p>
-        <p className="text-xs opacity-80">
-          {t('language.currentLanguage')}: {currentLang === 'zh' ? t('language.chinese') : t('language.english')}
-        </p>
-      </div>
-
-      {/* Language Options */}
-      <div className="space-y-2">
-        {languages.map((lang) => (
-          <button
-            key={lang.code}
-            onClick={() => handleLanguageChange(lang.code)}
-            className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
-              currentLang === lang.code
-                ? 'border-accent bg-accent/5'
-                : 'border-border bg-surface hover:border-accent/50'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="font-medium text-text-primary">{lang.nativeName}</div>
-              {currentLang === lang.code && (
-                <CheckCircle className="w-5 h-5 text-accent" />
-              )}
-            </div>
-          </button>
-        ))}
       </div>
     </div>
   );

@@ -100,7 +100,7 @@ export function Sidebar() {
   const handleDeleteAllSessions = () => {
     if (sessions.length === 0) return;
     
-    const confirmed = window.confirm(`确定要删除所有 ${sessions.length} 个对话吗？此操作无法撤销。`);
+    const confirmed = window.confirm(`Delete all ${sessions.length} conversations? This action cannot be undone.`);
     if (confirmed) {
       // Delete all sessions
       sessions.forEach(session => {
@@ -152,7 +152,7 @@ export function Sidebar() {
               <div className="w-8 h-8 rounded-lg bg-accent-muted flex items-center justify-center">
                 <Sparkles className="w-4 h-4 text-accent" />
               </div>
-              <h1 className="text-lg font-semibold text-text-primary whitespace-nowrap">Open Cowork</h1>
+              <h1 className="text-lg font-semibold text-text-primary whitespace-nowrap">Open Analyst</h1>
             </div>
             <div className="flex items-center gap-2">
         <button

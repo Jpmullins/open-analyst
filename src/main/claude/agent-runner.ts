@@ -1057,8 +1057,8 @@ Then follow the workflow described in that file.
       // Check if Claude Code is found
       if (!claudeCodePath || !fs.existsSync(claudeCodePath)) {
         const errorMsg = !claudeCodePath 
-          ? 'Claude Code 未找到。请先安装: npm install -g @anthropic-ai/claude-code，或在设置中手动指定路径。'
-          : `Claude Code 路径不存在: ${claudeCodePath}。请检查路径或在设置中重新配置。`;
+          ? 'Claude Code not found. Install it with: npm install -g @anthropic-ai/claude-code, or set the path in settings.'
+          : `Claude Code path does not exist: ${claudeCodePath}. Check the path or update it in settings.`;
         logError('[ClaudeAgentRunner]', errorMsg);
         this.sendToRenderer({
           type: 'error',
@@ -1155,7 +1155,6 @@ Then follow the workflow described in that file.
         const baseLower = (baseUrl || '').toLowerCase();
 
         if (baseLower.includes('deepseek')) return false;
-        if (baseLower.includes('open.bigmodel.cn')) return false;
         if (!modelLower) return false;
 
         return (
@@ -1224,7 +1223,7 @@ Then follow the workflow described in that file.
 
       const { configStore } = await import('../config/config-store');
       const envOverrides = getClaudeEnvOverrides(configStore.getAll());
-      // 构建运行环境：shell 环境 + 配置覆盖 + CLAUDE_CONFIG_DIR
+      // Build runtime environment: shell env + config overrides + CLAUDE_CONFIG_DIR
       const envWithSkills: NodeJS.ProcessEnv = {
         ...buildClaudeEnv(shellEnv, envOverrides),
         CLAUDE_CONFIG_DIR: userClaudeDir,
@@ -1272,7 +1271,7 @@ Then follow the workflow described in that file.
         const allConfigs = mcpConfigStore.getEnabledServers();
         log('[ClaudeAgentRunner] Enabled MCP configs:', allConfigs.map(c => c.name));
         
-        // 获取 STDIO 服务的内置 node/npx 路径
+        // Get bundled node/npx path for STDIO services
         const getBundledNodePaths = (): { node: string; npx: string } | null => {
           const platform = process.platform;
           const arch = process.arch;
@@ -1305,12 +1304,12 @@ Then follow the workflow described in that file.
           const serverKey = config.name;
           
           if (config.type === 'stdio') {
-            // 当命令是 npx 或 node 时优先使用内置路径
+            // Prefer bundled path when command is npx or node
             const command = (config.command === 'npx' && bundledNpx)
               ? bundledNpx
               : (config.command === 'node' && bundledNodePaths ? bundledNodePaths.node : config.command);
             
-            // 使用内置 npx/node 时，将内置 node bin 注入 PATH
+            // When using bundled npx/node, inject bundled node bin into PATH
             let serverEnv = { ...config.env };
             if (bundledNodePaths && (config.command === 'npx' || config.command === 'node')) {
               const nodeBinDir = path.dirname(bundledNodePaths.node);
@@ -2105,7 +2104,7 @@ Cowork mode includes **WebFetch** and **WebSearch** tools for retrieving web con
           type: 'stream.partial',
           payload: { 
             sessionId: session.id, 
-            delta: `\n\n⚠️ API调用出错，正在重试 (${retryCount}/${MAX_RETRIES})...\n\n` 
+            delta: `\n\n⚠️ API call failed, retrying (${retryCount}/${MAX_RETRIES})...\n\n` 
           },
         });
         

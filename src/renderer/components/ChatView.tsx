@@ -126,7 +126,7 @@ export function ChatView() {
       isUserAtBottomRef.current = distanceToBottom <= 80;
     };
     updateScrollState();
-    // 用户阅读旧消息时，阻止新消息自动滚动打断视线
+    // Prevent auto-scroll from interrupting users reading older messages
     const onScroll = () => updateScrollState();
     container.addEventListener('scroll', onScroll, { passive: true });
     return () => container.removeEventListener('scroll', onScroll);
@@ -738,7 +738,7 @@ export function ChatView() {
             </div>
 
             <p className="text-xs text-text-muted text-center mt-2">
-              Open Cowork is AI-powered and may make mistakes. Please double-check responses.
+              Open Analyst is AI-powered and may make mistakes. Please double-check responses.
             </p>
           </form>
         </div>

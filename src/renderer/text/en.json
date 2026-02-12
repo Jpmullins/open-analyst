@@ -51,7 +51,7 @@
   },
   "language": {
     "english": "English",
-    "chinese": "中文",
+    "chinese": "Chinese",
     "selectLanguage": "Select Language",
     "currentLanguage": "Current language"
   },
@@ -67,7 +67,7 @@
     "selectProtocol": "Select the compatible protocol for the service",
     "enterOpenAIUrl": "Enter OpenAI-compatible service URL",
     "enterAnthropicUrl": "Enter Anthropic-compatible service URL",
-    "enterModelId": "Enter model ID, e.g., moonshotai/kimi-k2-0905, openai/gpt-4o",
+    "enterModelId": "Enter model ID, e.g., anthropic/claude-sonnet-4.5, openai/gpt-4o",
     "saveSettings": "Save Settings",
     "testConnection": "Test Connection",
     "testingConnection": "Testing...",

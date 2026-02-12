@@ -108,9 +108,7 @@ export class MCPManager {
     if (!bundledNode) {
       const errorMessage = 
         'Bundled Node.js not found. Please reinstall the application.\n' +
-        '未找到内置的 Node.js。请重新安装应用。\n\n' +
-        'The application requires bundled Node.js to run MCP servers.\n' +
-        '应用需要内置的 Node.js 来运行 MCP 服务器。';
+        'The application requires bundled Node.js to run MCP servers.';
       
       logError('[MCPManager] Bundled Node.js not found');
       throw new Error(errorMessage);
@@ -590,7 +588,7 @@ export class MCPManager {
     // Create MCP client
     const client = new Client(
       {
-        name: 'open-cowork',
+        name: 'open-analyst',
         version: '0.1.0',
       },
       {
@@ -1015,7 +1013,7 @@ export class MCPManager {
       throw new Error(`MCP server not connected: ${tool.serverId}`);
     }
 
-    // 提取实际工具名（格式：mcp__<ServerName>__<toolName>）
+    // Extract actual tool name (format: mcp__<ServerName>__<toolName>)
     let actualToolName = toolName;
     if (toolName.startsWith('mcp__')) {
       const remainder = toolName.slice('mcp__'.length);

@@ -60,12 +60,11 @@ export const PROVIDER_PRESETS = {
     baseUrl: 'https://openrouter.ai/api',
     models: [
       { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-      { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4' },
-      { id: 'moonshotai/kimi-k2-0905', name: 'Kimi K2' },
-      { id: 'z-ai/glm-4.7', name: 'GLM-4.7' },
+      { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
+      { id: 'openai/gpt-4o', name: 'GPT-4o' },
     ],
     keyPlaceholder: 'sk-or-v1-...',
-    keyHint: '从 openrouter.ai/keys 获取',
+    keyHint: 'Get key from openrouter.ai/keys',
   },
   anthropic: {
     name: 'Anthropic',
@@ -76,7 +75,7 @@ export const PROVIDER_PRESETS = {
       { id: 'claude-haiku-4-5', name: 'claude-haiku-4-5' },
     ],
     keyPlaceholder: 'sk-ant-...',
-    keyHint: '从 console.anthropic.com 获取',
+    keyHint: 'Get key from console.anthropic.com',
   },
   openai: {
     name: 'OpenAI',
@@ -87,18 +86,18 @@ export const PROVIDER_PRESETS = {
       { id: 'gpt-5.2-mini', name: 'gpt-5.2-mini' },
     ],
     keyPlaceholder: 'sk-...',
-    keyHint: '从 platform.openai.com 获取',
+    keyHint: 'Get key from platform.openai.com',
   },
   custom: {
-    name: '更多模型',
-    baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    name: 'Custom Endpoint',
+    baseUrl: 'https://api.anthropic.com',
     models: [
-      { id: 'glm-4.7', name: 'GLM-4.7' },
-      { id: 'glm-4-plus', name: 'GLM-4-Plus' },
-      { id: 'glm-4-air', name: 'GLM-4-Air' },
+      { id: 'claude-sonnet-4-5', name: 'claude-sonnet-4-5' },
+      { id: 'gpt-4o', name: 'gpt-4o' },
+      { id: 'gpt-4o-mini', name: 'gpt-4o-mini' },
     ],
     keyPlaceholder: 'sk-xxx',
-    keyHint: '输入你的 API Key',
+    keyHint: 'Enter your API key',
   },
 };
 
@@ -110,13 +109,13 @@ class ConfigStore {
       name: 'config',
       defaults: defaultConfig,
       // Encrypt the API key for basic security
-      encryptionKey: 'open-cowork-config-v1',
+      encryptionKey: 'open-analyst-config-v1',
     };
     
     // Add projectName for non-Electron environments (e.g., MCP servers)
     // This is required by the underlying 'conf' package
     if (typeof process !== 'undefined' && !process.versions.electron) {
-      storeOptions.projectName = 'open-cowork';
+      storeOptions.projectName = 'open-analyst';
     }
     
     this.store = new Store<AppConfig>(storeOptions);
@@ -178,9 +177,9 @@ class ConfigStore {
    * Apply config to environment variables
    * This should be called before creating sessions
    * 
-   * 环境变量映射：
-   * - OpenAI 直连: OPENAI_API_KEY = apiKey, OPENAI_BASE_URL 可选
-   * - Anthropic 直连: ANTHROPIC_API_KEY = apiKey
+   * Environment variable mapping:
+   * - OpenAI direct: OPENAI_API_KEY = apiKey, OPENAI_BASE_URL optional
+   * - Anthropic direct: ANTHROPIC_API_KEY = apiKey
    * - Custom Anthropic: ANTHROPIC_API_KEY = apiKey
    * - OpenRouter: ANTHROPIC_AUTH_TOKEN = apiKey, ANTHROPIC_API_KEY = '' (proxy mode)
    */

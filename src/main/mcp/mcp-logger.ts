@@ -28,14 +28,14 @@ function getLogsDirectory(): string {
   let appDataDir: string;
   
   if (platform === 'darwin') {
-    // macOS: ~/Library/Application Support/open-cowork
-    appDataDir = path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
+    // macOS: ~/Library/Application Support/open-analyst
+    appDataDir = path.join(os.homedir(), 'Library', 'Application Support', 'open-analyst');
   } else if (platform === 'win32') {
-    // Windows: %APPDATA%/open-cowork
-    appDataDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-cowork');
+    // Windows: %APPDATA%/open-analyst
+    appDataDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-analyst');
   } else {
-    // Linux: ~/.config/open-cowork
-    appDataDir = path.join(os.homedir(), '.config', 'open-cowork');
+    // Linux: ~/.config/open-analyst
+    appDataDir = path.join(os.homedir(), '.config', 'open-analyst');
   }
   
   logsDir = path.join(appDataDir, 'logs');

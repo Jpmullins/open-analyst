@@ -44,6 +44,7 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
       '@main': resolve(__dirname, 'src/main'),
       '@renderer': resolve(__dirname, 'src/renderer'),
+      'react-i18next': resolve(__dirname, 'src/renderer/shims/react-i18next.ts'),
     },
   },
   build: {
@@ -51,4 +52,3 @@ export default defineConfig({
     emptyOutDir: true,
   },
 });
-

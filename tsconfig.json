@@ -22,10 +22,10 @@
     "paths": {
       "@/*": ["src/*"],
       "@main/*": ["src/main/*"],
-      "@renderer/*": ["src/renderer/*"]
+      "@renderer/*": ["src/renderer/*"],
+      "react-i18next": ["src/renderer/shims/react-i18next.ts"]
     }
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
-

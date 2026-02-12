@@ -40,7 +40,7 @@ function initLogFile(): void {
     // Write header
     const header = `
 ================================================================================
-Open Cowork Application Log
+Open Analyst Application Log
 Started: ${new Date().toISOString()}
 Platform: ${process.platform}
 Arch: ${process.arch}

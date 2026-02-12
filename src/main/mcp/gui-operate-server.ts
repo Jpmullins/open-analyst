@@ -43,13 +43,13 @@ const execAsync = promisify(exec);
 const PLATFORM = os.platform(); // 'darwin' for macOS, 'win32' for Windows
 writeMCPLog(`Platform detected: ${PLATFORM}`, 'Bootstrap');
 
-// Get Open Cowork data directory for persistent storage
+// Get Open Analyst data directory for persistent storage
 // Use platform-appropriate paths:
-// - macOS: ~/Library/Application Support/open-cowork
-// - Windows: %APPDATA%/open-cowork
+// - macOS: ~/Library/Application Support/open-analyst
+// - Windows: %APPDATA%/open-analyst
 const OPEN_COWORK_DATA_DIR = PLATFORM === 'win32'
-  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-cowork')
-  : path.join(os.homedir(), 'Library', 'Application Support', 'open-cowork');
+  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'open-analyst')
+  : path.join(os.homedir(), 'Library', 'Application Support', 'open-analyst');
 
 // Directory for storing GUI operate files (screenshots, etc.)
 const GUI_OPERATE_DIR = path.join(OPEN_COWORK_DATA_DIR, 'gui_operate');
@@ -105,14 +105,13 @@ let currentAppName: string = '';
 let lastClickEntry: ClickHistoryEntry | null = null; // Track the most recent click for success verification
 
 const APP_NAME_ALIAS_GROUPS: string[][] = [
-  ['calendar', '日历'],
-  ['notes', '备忘录'],
-  ['music', '音乐'],
-  ['finder', '访达'],
-  ['system settings', 'settings', '系统设置'],
-  ['ticktick', '滴答清单'],
-  ['wechat', '微信'],
-  ['trash', '废纸篓'],
+  ['calendar'],
+  ['notes'],
+  ['music'],
+  ['finder'],
+  ['system settings', 'settings'],
+  ['ticktick'],
+  ['trash'],
   ['chrome', 'google chrome'],
 ];
 
@@ -1381,10 +1380,10 @@ async function executeCliclick(command: string): Promise<{ stdout: string; stder
   // Treat this as a hard failure to avoid reporting false-positive click success.
   if (/Accessibility privileges not enabled/i.test(result.stderr || '')) {
     const hint =
-      '\n\nmacOS 权限提示 / Permissions:\n' +
-      '- System Settings → Privacy & Security → Accessibility：允许 Open Cowork\n' +
-      '- 如果是终端运行：允许 Terminal/iTerm\n' +
-      '- 授权后请重启 Open Cowork 再重试\n';
+      '\n\nmacOS permissions required:\n' +
+      '- System Settings -> Privacy & Security -> Accessibility: allow Open Analyst\n' +
+      '- If running from terminal: allow Terminal/iTerm\n' +
+      '- Restart Open Analyst and try again\n';
     throw new Error(`cliclick cannot control UI because Accessibility permission is not enabled.${hint}`);
   }
 
@@ -1392,9 +1391,9 @@ async function executeCliclick(command: string): Promise<{ stdout: string; stder
   } catch (error: any) {
     const baseMessage = error?.message || String(error);
     const hint =
-      '\n\nmacOS 权限提示 / Permissions:\n' +
-      '- System Settings → Privacy & Security → Accessibility：允许 Open Cowork\n' +
-      '- System Settings → Privacy & Security → Automation：允许 Open Cowork 控制 “System Events”\n';
+      '\n\nmacOS permissions required:\n' +
+      '- System Settings -> Privacy & Security -> Accessibility: allow Open Analyst\n' +
+      '- System Settings -> Privacy & Security -> Automation: allow Open Analyst to control "System Events"\n';
     throw new Error(`${baseMessage}${hint}`);
   }
 }
@@ -3082,9 +3081,9 @@ async function takeScreenshot(
   } catch (error: any) {
     const baseMessage = error?.message || String(error);
     const hint =
-      '\n\nmacOS 权限提示 / Permissions:\n' +
-      '- System Settings → Privacy & Security → Screen Recording：允许 Open Cowork\n' +
-      '- 重新启动应用后再试 / Restart the app and try again\n';
+      '\n\nmacOS permissions required:\n' +
+      '- System Settings -> Privacy & Security -> Screen Recording: allow Open Analyst\n' +
+      '- Restart the app and try again\n';
     throw new Error(`${baseMessage}${hint}`);
   }
 
@@ -3430,8 +3429,8 @@ async function callVisionAPIWithTimeout(
     };
     
     if (isOpenRouter) {
-      headers['HTTP-Referer'] = 'https://github.com/OpenCoworkAI/open-cowork';
-      headers['X-Title'] = 'Open Cowork';
+      headers['HTTP-Referer'] = 'https://github.com/ARLIS/open-analyst';
+      headers['X-Title'] = 'Open Analyst';
     }
     
     return new Promise<string>((resolve, reject) => {

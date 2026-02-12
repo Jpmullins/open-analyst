@@ -33,14 +33,14 @@ export function Titlebar() {
           <button
             onClick={handleMinimize}
             className="w-12 h-full flex items-center justify-center hover:bg-surface transition-colors"
-            title="最小化"
+            title="Minimize"
           >
             <Minus className="w-4 h-4 text-text-secondary" />
           </button>
           <button
             onClick={handleMaximize}
             className="w-12 h-full flex items-center justify-center hover:bg-surface transition-colors"
-            title={isMaximized ? '还原' : '最大化'}
+            title={isMaximized ? 'Restore' : 'Maximize'}
           >
             {isMaximized ? (
               <Copy className="w-3.5 h-3.5 text-text-secondary" />
@@ -51,7 +51,7 @@ export function Titlebar() {
           <button
             onClick={handleClose}
             className="w-12 h-full flex items-center justify-center hover:bg-red-500 transition-colors group"
-            title="关闭"
+            title="Close"
           >
             <X className="w-4 h-4 text-text-secondary group-hover:text-white" />
           </button>

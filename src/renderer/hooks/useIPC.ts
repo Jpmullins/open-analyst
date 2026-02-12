@@ -69,7 +69,7 @@ export function useIPC() {
             if (pending.length > 0) {
               store.activateNextTurn(event.payload.sessionId, event.payload.step.id);
             } else if (activeTurn) {
-              // 绑定真实 stepId，避免 mock stepId 导致无法清理
+              // Bind to the real stepId to avoid cleanup issues with mock IDs
               store.updateActiveTurnStep(event.payload.sessionId, event.payload.step.id);
             }
           }
@@ -89,7 +89,7 @@ export function useIPC() {
             const steps = useAppStore.getState().traceStepsBySession[event.payload.sessionId] || [];
             const step = steps.find((item) => item.id === event.payload.stepId);
             if (step?.type === 'thinking') {
-              // 兜底：若 session.status 丢失，仍能结束加载状态
+              // Fallback: end loading if session.status event is missing
               store.updateSession(event.payload.sessionId, { status: 'idle' });
               store.setLoading(false);
             }
