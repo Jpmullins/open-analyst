@@ -1,0 +1,29 @@
+<svg width="960" height="320" viewBox="0 0 960 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Open Analyst Logo</title>
+  <desc id="desc">Geometric shield mark with OA monogram and Open Analyst wordmark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1727"/>
+      <stop offset="100%" stop-color="#123454"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#16C8C8"/>
+      <stop offset="100%" stop-color="#3E7BFA"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="320" rx="28" fill="#F4F8FC"/>
+
+  <g transform="translate(40 40)">
+    <rect x="0" y="0" width="240" height="240" rx="28" fill="url(#bg)"/>
+    <path d="M54 120C54 82.9969 83.9969 53 121 53H186V81H121C99.4609 81 82 98.4609 82 120C82 141.539 99.4609 159 121 159H186V187H121C83.9969 187 54 157.003 54 120Z" fill="url(#accent)"/>
+    <path d="M164 70H192L152 187H124L164 70Z" fill="#EAF7FF"/>
+    <path d="M142 125H194V153H142V125Z" fill="#EAF7FF"/>
+    <path d="M194 70H221L181 187H154L194 70Z" fill="url(#accent)"/>
+  </g>
+
+  <g transform="translate(320 90)">
+    <text x="0" y="68" fill="#0D2238" font-family="'Segoe UI', 'Inter', sans-serif" font-size="74" font-weight="750" letter-spacing="0.5">OPEN ANALYST</text>
+    <text x="2" y="116" fill="#34526F" font-family="'Segoe UI', 'Inter', sans-serif" font-size="30" font-weight="500" letter-spacing="3.2">INTELLIGENCE WORKBENCH</text>
+  </g>
+</svg>
