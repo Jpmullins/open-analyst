@@ -740,6 +740,11 @@ export function ChatView() {
             <p className="text-xs text-text-muted text-center mt-2">
               Open Analyst is AI-powered and may make mistakes. Please double-check responses.
             </p>
+            {!isElectron && (
+              <p className="text-xs text-amber-600 text-center mt-1">
+                Container mode uses headless API on port 8787 for file/tools execution.
+              </p>
+            )}
           </form>
         </div>
       </div>

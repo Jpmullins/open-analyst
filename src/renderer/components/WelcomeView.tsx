@@ -25,12 +25,43 @@ export function WelcomeView() {
   const [pastedImages, setPastedImages] = useState<Array<{ url: string; base64: string; mediaType: string }>>([]);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; path: string; size: number; type: string }>>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [folderSelectError, setFolderSelectError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { startSession, changeWorkingDir, isElectron } = useIPC();
+  const { startSession, changeWorkingDir, setWorkingDirPath, selectFolder, isElectron } = useIPC();
   const workingDir = useAppStore((state) => state.workingDir);
+  const setWorkingDir = useAppStore((state) => state.setWorkingDir);
 
   const handleSelectFolder = async () => {
-    await changeWorkingDir();
+    setFolderSelectError(null);
+    try {
+      const result = await changeWorkingDir();
+      if (result?.success && result.path) {
+        // Keep UI in sync even if backend event arrives late/misses.
+        setWorkingDir(result.path);
+        return;
+      }
+
+      // Fallback for environments where workdir.select may be blocked.
+      const fallbackPath = await selectFolder();
+      if (fallbackPath) {
+        const setResult = await setWorkingDirPath(fallbackPath);
+        if (setResult?.success) {
+          setWorkingDir(fallbackPath);
+          return;
+        }
+        if (setResult?.error) {
+          setFolderSelectError(setResult.error);
+        }
+        return;
+      }
+
+      if (result?.error && result.error !== 'User cancelled') {
+        setFolderSelectError(result.error);
+      }
+    } catch (error) {
+      console.error('[WelcomeView] Failed to select folder:', error);
+      setFolderSelectError('Failed to open folder picker');
+    }
   };
 
   // Handle paste event for images
@@ -504,14 +535,21 @@ export function WelcomeView() {
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn btn-primary px-5 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span>{isSubmitting ? t('welcome.starting') : t('welcome.letsGo')}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              {folderSelectError && (
+                <span className="text-xs text-error max-w-[280px] truncate" title={folderSelectError}>
+                  {folderSelectError}
+                </span>
+              )}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="btn btn-primary px-5 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>{isSubmitting ? t('welcome.starting') : t('welcome.letsGo')}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </form>
       </div>

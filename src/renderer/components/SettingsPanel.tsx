@@ -2,6 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Key, Plug, Settings, ChevronRight, AlertCircle, Eye, EyeOff, Plus, Trash2, Edit3, Save, Mail, Globe, Lock, Server, Cpu, Loader2, Power, PowerOff, CheckCircle, ChevronDown, Package, Shield } from 'lucide-react';
 import type { ProviderPresets, Skill, ApiTestResult } from '../types';
+import { useAppStore } from '../store';
+import {
+  FALLBACK_PRESETS,
+  getBrowserConfig,
+  saveBrowserConfig,
+  testApiConnectionBrowser,
+} from '../utils/browser-config';
+import { headlessSaveConfig } from '../utils/headless-api';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -95,6 +103,8 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
     { id: 'logs' as TabId, label: t('settings.logs'), icon: AlertCircle, description: t('settings.logsDesc') },
   ];
 
+  const headlessOnlyTab = !isElectron && activeTab !== 'api';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-surface rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[85vh] overflow-hidden border border-border flex">
@@ -147,24 +157,29 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-6">
+            {headlessOnlyTab && (
+              <div className="px-4 py-3 rounded-xl bg-amber-500/10 text-amber-700 text-sm mb-4">
+                This tab requires Electron desktop runtime. In container mode, API settings and headless tools are available.
+              </div>
+            )}
             {/* Lazy load tabs - only mount when first viewed, then keep mounted */}
             <div className={activeTab === 'api' ? '' : 'hidden'}>
               {viewedTabs.has('api') && <APISettingsTab />}
             </div>
             <div className={activeTab === 'sandbox' ? '' : 'hidden'}>
-              {viewedTabs.has('sandbox') && <SandboxTab />}
+              {viewedTabs.has('sandbox') && isElectron && <SandboxTab />}
             </div>
             <div className={activeTab === 'credentials' ? '' : 'hidden'}>
-              {viewedTabs.has('credentials') && <CredentialsTab />}
+              {viewedTabs.has('credentials') && isElectron && <CredentialsTab />}
             </div>
             <div className={activeTab === 'connectors' ? '' : 'hidden'}>
-              {viewedTabs.has('connectors') && <ConnectorsTab />}
+              {viewedTabs.has('connectors') && isElectron && <ConnectorsTab />}
             </div>
             <div className={activeTab === 'skills' ? '' : 'hidden'}>
-              {viewedTabs.has('skills') && <SkillsTab />}
+              {viewedTabs.has('skills') && isElectron && <SkillsTab />}
             </div>
             <div className={activeTab === 'logs' ? '' : 'hidden'}>
-              {viewedTabs.has('logs') && <LogsTab />}
+              {viewedTabs.has('logs') && isElectron && <LogsTab />}
             </div>
           </div>
         </div>
@@ -177,6 +192,8 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
 
 function APISettingsTab() {
   const { t } = useTranslation();
+  const setAppConfig = useAppStore((state) => state.setAppConfig);
+  const setIsConfigured = useAppStore((state) => state.setIsConfigured);
   const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom' | 'openai'>('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
@@ -200,6 +217,25 @@ function APISettingsTab() {
     if (isElectron) {
       loadConfig();
     } else {
+      const cfg = getBrowserConfig();
+      setPresets(FALLBACK_PRESETS);
+      const newProvider = cfg.provider || 'openrouter';
+      setProvider(newProvider);
+      previousProviderRef.current = newProvider;
+      setApiKey(cfg.apiKey || '');
+      const preset = FALLBACK_PRESETS[cfg.provider];
+      setBaseUrl(cfg.baseUrl || preset?.baseUrl || '');
+      setCustomProtocol(cfg.customProtocol || 'anthropic');
+
+      const isPresetModel = preset?.models.some((m: any) => m.id === cfg.model);
+      if (isPresetModel) {
+        setModel(cfg.model || '');
+        setUseCustomModel(false);
+      } else if (cfg.model) {
+        setUseCustomModel(true);
+        setCustomModel(cfg.model);
+      }
+      setEnableThinking(cfg.enableThinking || false);
       setIsLoadingConfig(false);
     }
   }, []);
@@ -289,14 +325,17 @@ function APISettingsTab() {
         ? baseUrl.trim()
         : (presetBaseUrl || baseUrl).trim();
 
-      const result = await window.electronAPI.config.test({
+      const request = {
         provider,
         apiKey: apiKey.trim(),
         baseUrl: resolvedBaseUrl || undefined,
         customProtocol,
         model: finalModel,
         useLiveRequest: useLiveTest,
-      });
+      };
+      const result = isElectron
+        ? await window.electronAPI.config.test(request)
+        : await testApiConnectionBrowser(request);
       setTestResult(result);
     } catch (err) {
       setTestResult({
@@ -334,7 +373,7 @@ function APISettingsTab() {
           ? 'responses'
           : undefined;
 
-      await window.electronAPI.config.save({
+      const payload = {
         provider,
         apiKey: apiKey.trim(),
         baseUrl: resolvedBaseUrl || undefined,
@@ -342,7 +381,20 @@ function APISettingsTab() {
         model: finalModel,
         openaiMode: resolvedOpenaiMode,
         enableThinking,
-      });
+      };
+
+      if (isElectron) {
+        const result = await window.electronAPI.config.save(payload);
+        if (result.success) {
+          setAppConfig(result.config);
+          setIsConfigured(Boolean(result.config.apiKey));
+        }
+      } else {
+        const saved = saveBrowserConfig(payload);
+        await headlessSaveConfig(saved).catch(() => {});
+        setAppConfig(saved);
+        setIsConfigured(Boolean(saved.apiKey));
+      }
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (err) {

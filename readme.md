@@ -40,6 +40,43 @@ Then:
 3. Choose a working directory.
 4. Start a session in the UI.
 
+## Container Mode (Docker/K8s)
+
+For headless environments, run renderer + headless agent service:
+
+```bash
+npm run dev:container:stack
+```
+
+This starts:
+1. Headless API service on `0.0.0.0:8787` (tool execution + file operations)
+2. Vite on `0.0.0.0:5173` (renderer UI)
+
+If you prefer separate processes (recommended for production):
+
+```bash
+npm run serve:headless
+npm run dev:container
+```
+
+If you also want the full prebuild pipeline (Node bundles + MCP bundles):
+
+```bash
+npm run dev:container:full
+```
+
+For CI/container image builds:
+
+```bash
+npm run build:container
+```
+
+Notes:
+1. Container mode uses the headless API (`:8787`) instead of Electron IPC.
+2. Working directory can be local filesystem path or `s3://...` URI.
+3. Current headless execution supports local filesystem tools; `s3://` is persisted as config but tool execution against S3 is not yet implemented.
+4. Full desktop runtime still requires Electron (or an X/Wayland-capable runtime like Xvfb).
+
 ## Build
 
 ```bash

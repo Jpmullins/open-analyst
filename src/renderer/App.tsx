@@ -11,6 +11,8 @@ import { Titlebar } from './components/Titlebar';
 import { SandboxSetupDialog } from './components/SandboxSetupDialog';
 import { SandboxSyncToast } from './components/SandboxSyncToast';
 import type { AppConfig } from './types';
+import { getBrowserConfig, saveBrowserConfig } from './utils/browser-config';
+import { headlessGetWorkingDir, headlessSaveConfig } from './utils/headless-api';
 
 // Check if running in Electron
 const isElectronEnv = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -30,6 +32,7 @@ function App() {
     setIsConfigured,
     setAppConfig,
     setSandboxSetupComplete,
+    setWorkingDir,
   } = useAppStore();
   const { listSessions, isElectron } = useIPC();
   const initialized = useRef(false);
@@ -41,7 +44,19 @@ function App() {
 
     if (isElectron) {
       listSessions();
+      return;
     }
+
+    const browserConfig = getBrowserConfig();
+    setIsConfigured(Boolean(browserConfig.apiKey));
+    setAppConfig(browserConfig);
+    headlessGetWorkingDir()
+      .then((result) => {
+        if (result?.workingDir) {
+          setWorkingDir(result.workingDir);
+        }
+      })
+      .catch(() => {});
   }, []); // Empty deps - run once
 
   // Apply theme to document root
@@ -56,7 +71,10 @@ function App() {
   // Handle config save
   const handleConfigSave = useCallback(async (newConfig: Partial<AppConfig>) => {
     if (!isElectronEnv) {
-      console.log('[App] Browser mode - config save simulated');
+      const saved = saveBrowserConfig(newConfig);
+      headlessSaveConfig(saved).catch(() => {});
+      setIsConfigured(Boolean(saved.apiKey));
+      setAppConfig(saved);
       return;
     }
     

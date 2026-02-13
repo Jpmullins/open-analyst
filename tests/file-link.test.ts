@@ -52,10 +52,16 @@ describe('splitTextByFileMentions', () => {
     expect(parts).toEqual([{ type: 'text', value: input }]);
   });
 
-  it('ignores filenames embedded in sentences without boundaries', () => {
+  it('detects bounded filenames embedded in regular sentences', () => {
     const input = 'I see there is already a slide1.html file. Let me create another slide file first: slide2.html:';
     const parts = splitTextByFileMentions(input);
-    expect(parts).toEqual([{ type: 'text', value: input }]);
+    expect(parts).toEqual([
+      { type: 'text', value: 'I see there is already a ' },
+      { type: 'file', value: 'slide1.html' },
+      { type: 'text', value: ' file. Let me create another slide file first: ' },
+      { type: 'file', value: 'slide2.html' },
+      { type: 'text', value: ':' },
+    ]);
   });
 
   it('provides a left-aligned file link button class', () => {

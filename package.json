@@ -5,8 +5,13 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "npm run download:node && npm run prepare:python && npm run build:wsl-agent && npm run build:lima-agent && npm run build:mcp && vite",
+    "dev:container": "OPEN_ANALYST_NO_ELECTRON=1 vite --host 0.0.0.0 --port 5173",
+    "serve:headless": "node scripts/headless-server.js",
+    "dev:container:stack": "sh -c 'node scripts/headless-server.js & OPEN_ANALYST_NO_ELECTRON=1 vite --host 0.0.0.0 --port 5173'",
+    "dev:container:full": "npm run download:node && npm run prepare:python && npm run build:wsl-agent && npm run build:lima-agent && npm run build:mcp && OPEN_ANALYST_NO_ELECTRON=1 vite --host 0.0.0.0 --port 5173",
     "build": "npm run build:app",
     "build:app": "npm run download:node && npm run prepare:gui-tools && npm run prepare:python:all && npm run build:wsl-agent && npm run build:lima-agent && npm run build:mcp && tsc && vite build",
+    "build:container": "OPEN_ANALYST_NO_ELECTRON=1 vite build",
     "build:wsl-agent": "tsc -p src/main/sandbox/wsl-agent/tsconfig.json",
     "build:lima-agent": "tsc -p src/main/sandbox/lima-agent/tsconfig.json",
     "build:mcp": "node scripts/bundle-mcp.js",

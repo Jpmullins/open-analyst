@@ -36,6 +36,7 @@ import type { TraceStep, TraceStepStatus, MCPServerInfo } from '../types';
 
 export function ContextPanel() {
   const { t } = useTranslation();
+  const isElectronEnv = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const {
     activeSessionId,
     sessions,
@@ -46,12 +47,13 @@ export function ContextPanel() {
     toggleContextPanel,
     workingDir,
   } = useAppStore();
-  const { getMCPServers, changeWorkingDir } = useIPC();
+  const { getMCPServers, getHeadlessTools, changeWorkingDir } = useIPC();
   const [progressOpen, setProgressOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(true);
   const [contextOpen, setContextOpen] = useState(true);
   const [expandedConnector, setExpandedConnector] = useState<string | null>(null);
   const [mcpServers, setMcpServers] = useState<MCPServerInfo[]>([]);
+  const [headlessTools, setHeadlessTools] = useState<Array<{ name: string; description: string }>>([]);
   const [copiedPath, setCopiedPath] = useState(false);
   const [isChangingDir, setIsChangingDir] = useState(false);
 
@@ -89,6 +91,17 @@ export function ContextPanel() {
     const interval = setInterval(loadMCPServers, 5000);
     return () => clearInterval(interval);
   }, [getMCPServers]);
+
+  useEffect(() => {
+    if (isElectronEnv) return;
+    const loadTools = async () => {
+      const tools = await getHeadlessTools();
+      setHeadlessTools(tools);
+    };
+    loadTools();
+    const interval = setInterval(loadTools, 8000);
+    return () => clearInterval(interval);
+  }, [getHeadlessTools, isElectronEnv]);
 
   if (contextPanelCollapsed) {
     return (
@@ -308,6 +321,27 @@ export function ContextPanel() {
                 )}
               </div>
             </div>
+
+            {!isElectronEnv && (
+              <div>
+                <p className="text-xs text-text-muted mb-2">Available Tools</p>
+                <div className="space-y-1">
+                  {headlessTools.map((tool) => (
+                    <div
+                      key={tool.name}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-muted"
+                      title={tool.description}
+                    >
+                      {getToolIcon(tool.name)}
+                      <span className="text-sm text-text-primary truncate">{tool.name}</span>
+                    </div>
+                  ))}
+                  {headlessTools.length === 0 && (
+                    <p className="text-xs text-text-muted px-2">No headless tools detected</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Connectors - Inside Context */}
             <div>
@@ -643,8 +677,10 @@ function getToolIcon(toolName: string) {
       return <Search className="w-4 h-4 text-orange-500" />;
     case 'WebFetch':
     case 'webFetch':
+    case 'web_fetch':
     case 'WebSearch':
     case 'webSearch':
+    case 'web_search':
       return <Globe className="w-4 h-4 text-blue-500" />;
     default:
       return <File className="w-4 h-4 text-text-muted" />;

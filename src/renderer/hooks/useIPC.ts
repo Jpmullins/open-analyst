@@ -1,9 +1,38 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../store';
 import type { ClientEvent, ServerEvent, PermissionResult, Session, Message, TraceStep, ContentBlock } from '../types';
+import {
+  createBrowserChatCompletion,
+  getBrowserConfig,
+  type BrowserChatMessage,
+} from '../utils/browser-config';
+import {
+  headlessChat,
+  headlessGetWorkingDir,
+  headlessSetWorkingDir,
+  headlessGetTools,
+} from '../utils/headless-api';
+import type { HeadlessTraceStep } from '../utils/headless-api';
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+function contentBlocksToText(content: ContentBlock[]): string {
+  return content
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+    .trim();
+}
+
+function messageToBrowserChatMessage(message: Message): BrowserChatMessage | null {
+  if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system') {
+    return null;
+  }
+  const content = contentBlocksToText(message.content);
+  if (!content) return null;
+  return { role: message.role, content };
+}
 
 export function useIPC() {
   // Use refs to store stable references to store actions
@@ -158,7 +187,23 @@ export function useIPC() {
     activateNextTurn,
     clearPendingTurns,
     cancelQueuedMessages,
+    addTraceStep,
   } = useAppStore();
+
+  const applyHeadlessTraces = useCallback((sessionId: string, traces: HeadlessTraceStep[]) => {
+    traces.forEach((trace) => {
+      addTraceStep(sessionId, {
+        id: trace.id || `trace-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: trace.type,
+        status: trace.status,
+        title: trace.title || trace.toolName || 'Tool',
+        toolName: trace.toolName,
+        toolInput: trace.toolInput,
+        toolOutput: trace.toolOutput,
+        timestamp: Date.now(),
+      });
+    });
+  }, [addTraceStep]);
 
   // Send event to main process
   const send = useCallback((event: ClientEvent) => {
@@ -197,8 +242,10 @@ export function useIPC() {
 
       // Browser mode mock
       if (!isElectron) {
+        let sessionId = '';
+        let mockStepId = '';
         try {
-          const sessionId = `mock-session-${Date.now()}`;
+          sessionId = `mock-session-${Date.now()}`;
           const session: Session = {
             id: sessionId,
             title: title || 'New Session',
@@ -234,26 +281,61 @@ export function useIPC() {
             timestamp: Date.now(),
           };
           addMessage(sessionId, userMessage);
-          const mockStepId = `mock-step-${Date.now()}`;
+          mockStepId = `mock-step-${Date.now()}`;
           activateNextTurn(sessionId, mockStepId);
+          updateSession(sessionId, { status: 'running' });
 
-          await new Promise(resolve => setTimeout(resolve, 500));
+          const browserConfig = getBrowserConfig();
+          const messages = useAppStore.getState().messagesBySession[sessionId] || [];
+          const chatMessages = messages
+            .map(messageToBrowserChatMessage)
+            .filter((item): item is BrowserChatMessage => item !== null);
+          let assistantText = '';
+          let traces: HeadlessTraceStep[] = [];
+          try {
+            const result = await headlessChat(chatMessages, prompt);
+            assistantText = result.text;
+            traces = result.traces;
+          } catch {
+            assistantText = await createBrowserChatCompletion(browserConfig, chatMessages);
+          }
+          if (traces.length > 0) {
+            applyHeadlessTraces(sessionId, traces);
+          }
 
-          const assistantMessage: Message = {
+          addMessage(sessionId, {
             id: `msg-assistant-${Date.now()}`,
             sessionId,
             role: 'assistant',
-            content: [{ type: 'text', text: `Mock response to: "${prompt}"` }],
+            content: [{ type: 'text', text: assistantText }],
             timestamp: Date.now(),
-          };
-          addMessage(sessionId, assistantMessage);
+          });
 
           updateSession(sessionId, { status: 'idle' });
           clearActiveTurn(sessionId, mockStepId);
+          clearPendingTurns(sessionId);
           setLoading(false);
 
           return session;
         } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (sessionId) {
+            addMessage(sessionId, {
+              id: `msg-assistant-${Date.now()}`,
+              sessionId,
+              role: 'assistant',
+              content: [{ type: 'text', text: `Error: ${message}` }],
+              timestamp: Date.now(),
+            });
+            updateSession(sessionId, { status: 'error' });
+            if (mockStepId) {
+              clearActiveTurn(sessionId, mockStepId);
+            } else {
+              clearActiveTurn(sessionId);
+            }
+            clearPendingTurns(sessionId);
+          }
+          setLoading(false);
           throw e;
         }
       }
@@ -294,7 +376,7 @@ export function useIPC() {
         throw e;
       }
     },
-    [invoke, addSession, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn]
+    [invoke, addSession, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces]
   );
 
   // Continue an existing session
@@ -330,27 +412,59 @@ export function useIPC() {
       
       // Browser mode mock
       if (!isElectron) {
+        let mockStepId = '';
         try {
           updateSession(sessionId, { status: 'running' });
-          const mockStepId = `mock-step-${Date.now()}`;
+          mockStepId = `mock-step-${Date.now()}`;
           activateNextTurn(sessionId, mockStepId);
-          
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          const assistantMessage: Message = {
+
+          const browserConfig = getBrowserConfig();
+          const messages = useAppStore.getState().messagesBySession[sessionId] || [];
+          const chatMessages = messages
+            .map(messageToBrowserChatMessage)
+            .filter((item): item is BrowserChatMessage => item !== null);
+          let assistantText = '';
+          let traces: HeadlessTraceStep[] = [];
+          try {
+            const result = await headlessChat(chatMessages, prompt);
+            assistantText = result.text;
+            traces = result.traces;
+          } catch {
+            assistantText = await createBrowserChatCompletion(browserConfig, chatMessages);
+          }
+          if (traces.length > 0) {
+            applyHeadlessTraces(sessionId, traces);
+          }
+
+          addMessage(sessionId, {
             id: `msg-assistant-${Date.now()}`,
             sessionId,
             role: 'assistant',
-            content: [{ type: 'text', text: `Mock response to: "${prompt}"` }],
+            content: [{ type: 'text', text: assistantText }],
             timestamp: Date.now(),
-          };
-          addMessage(sessionId, assistantMessage);
-          
+          });
+
           updateSession(sessionId, { status: 'idle' });
           clearActiveTurn(sessionId, mockStepId);
           clearPendingTurns(sessionId);
           setLoading(false);
         } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          addMessage(sessionId, {
+            id: `msg-assistant-${Date.now()}`,
+            sessionId,
+            role: 'assistant',
+            content: [{ type: 'text', text: `Error: ${message}` }],
+            timestamp: Date.now(),
+          });
+          updateSession(sessionId, { status: 'error' });
+          if (mockStepId) {
+            clearActiveTurn(sessionId, mockStepId);
+          } else {
+            clearActiveTurn(sessionId);
+          }
+          clearPendingTurns(sessionId);
+          setLoading(false);
           throw e;
         }
         return;
@@ -373,7 +487,7 @@ export function useIPC() {
       });
       // Loading will be reset when we receive session.status event
     },
-    [send, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn]
+    [send, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces]
   );
 
   const stopSession = useCallback(
@@ -460,23 +574,61 @@ export function useIPC() {
 
   const selectFolder = useCallback(async (): Promise<string | null> => {
     if (!isElectron) {
-      return '/mock/folder/path';
+      const value = window.prompt('Enter working directory path (local path or s3:// URI):');
+      return value?.trim() || null;
     }
     return invoke<string | null>({ type: 'folder.select', payload: {} });
   }, [invoke]);
 
   const getWorkingDir = useCallback(async (): Promise<string | null> => {
     if (!isElectron) {
-      return '/mock/working/dir';
+      try {
+        const result = await headlessGetWorkingDir();
+        return result.workingDir || null;
+      } catch {
+        return null;
+      }
     }
     return invoke<string | null>({ type: 'workdir.get', payload: {} });
   }, [invoke]);
 
   const changeWorkingDir = useCallback(async (sessionId?: string): Promise<{ success: boolean; path: string; error?: string }> => {
     if (!isElectron) {
-      return { success: true, path: '/mock/working/dir' };
+      const path = window.prompt('Enter working directory path (local path or s3:// URI):');
+      if (!path?.trim()) {
+        return { success: false, path: '', error: 'User cancelled' };
+      }
+      try {
+        const result = await headlessSetWorkingDir(path.trim());
+        return { success: true, path: result.path };
+      } catch (error) {
+        return {
+          success: false,
+          path: '',
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
     return invoke<{ success: boolean; path: string; error?: string }>({ type: 'workdir.select', payload: { sessionId } });
+  }, [invoke]);
+
+  const setWorkingDirPath = useCallback(async (path: string, sessionId?: string): Promise<{ success: boolean; path: string; error?: string }> => {
+    if (!isElectron) {
+      try {
+        const result = await headlessSetWorkingDir(path);
+        return { success: true, path: result.path };
+      } catch (error) {
+        return {
+          success: false,
+          path: '',
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+    return invoke<{ success: boolean; path: string; error?: string }>({
+      type: 'workdir.set',
+      payload: { path, sessionId },
+    });
   }, [invoke]);
 
   const getMCPServers = useCallback(async () => {
@@ -485,6 +637,15 @@ export function useIPC() {
     }
     // Use the exposed mcp.getServerStatus method
     return window.electronAPI.mcp.getServerStatus();
+  }, []);
+
+  const getHeadlessTools = useCallback(async () => {
+    if (isElectron) return [];
+    try {
+      return await headlessGetTools();
+    } catch {
+      return [];
+    }
   }, []);
 
   return {
@@ -502,7 +663,9 @@ export function useIPC() {
     selectFolder,
     getWorkingDir,
     changeWorkingDir,
+    setWorkingDirPath,
     getMCPServers,
+    getHeadlessTools,
     isElectron,
   };
 }

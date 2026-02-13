@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Key, Server, Cpu, CheckCircle, AlertCircle, Loader2, Edit3, Plug } from 'lucide-react';
 import type { AppConfig, ProviderPresets, ApiTestResult } from '../types';
+import { FALLBACK_PRESETS, testApiConnectionBrowser } from '../utils/browser-config';
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -12,53 +13,6 @@ interface ConfigModalProps {
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
-
-const FALLBACK_PRESETS: ProviderPresets = {
-  openrouter: {
-    name: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api',
-    models: [
-      { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-      { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
-      { id: 'openai/gpt-4o', name: 'GPT-4o' },
-    ],
-    keyPlaceholder: 'sk-or-v1-...',
-    keyHint: 'Get key from openrouter.ai/keys',
-  },
-  anthropic: {
-    name: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    models: [
-      { id: 'claude-sonnet-4-5', name: 'claude-sonnet-4-5' },
-      { id: 'claude-opus-4-5', name: 'claude-opus-4-5' },
-      { id: 'claude-haiku-4-5', name: 'claude-haiku-4-5' },
-    ],
-    keyPlaceholder: 'sk-ant-...',
-    keyHint: 'Get key from console.anthropic.com',
-  },
-  openai: {
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    models: [
-      { id: 'gpt-5.2', name: 'gpt-5.2' },
-      { id: 'gpt-5.2-codex', name: 'gpt-5.2-codex' },
-      { id: 'gpt-5.2-mini', name: 'gpt-5.2-mini' },
-    ],
-    keyPlaceholder: 'sk-...',
-    keyHint: 'Get key from platform.openai.com',
-  },
-  custom: {
-    name: 'Custom Endpoint',
-    baseUrl: 'https://api.anthropic.com',
-    models: [
-      { id: 'claude-sonnet-4-5', name: 'claude-sonnet-4-5' },
-      { id: 'gpt-4o', name: 'gpt-4o' },
-      { id: 'gpt-4o-mini', name: 'gpt-4o-mini' },
-    ],
-    keyPlaceholder: 'sk-xxx',
-    keyHint: 'Enter your API key',
-  },
-};
 
 const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'custom', string> = {
   openrouter: 'OpenRouter',
@@ -205,14 +159,17 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         ? baseUrl.trim()
         : (presetBaseUrl || baseUrl).trim();
 
-      const result = await window.electronAPI.config.test({
+      const request = {
         provider,
         apiKey: apiKey.trim(),
         baseUrl: resolvedBaseUrl || undefined,
         customProtocol,
         model: finalModel,
         useLiveRequest: useLiveTest,
-      });
+      };
+      const result = isElectron
+        ? await window.electronAPI.config.test(request)
+        : await testApiConnectionBrowser(request);
       setTestResult(result);
     } catch (err) {
       setTestResult({
