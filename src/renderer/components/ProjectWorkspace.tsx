@@ -8,6 +8,7 @@ import {
   headlessGetProjects,
   headlessGetRuns,
   headlessImportUrl,
+  headlessImportFile,
   headlessRagQuery,
   headlessSetActiveProject,
   type HeadlessCollection,
@@ -16,7 +17,7 @@ import {
   type HeadlessRagResult,
   type HeadlessRun,
 } from '../utils/headless-api';
-import { Database, FolderOpen, Plus, Search, FileText, Link2, Activity, RefreshCw } from 'lucide-react';
+import { Database, FolderOpen, Plus, Search, FileText, Link2, Activity, RefreshCw, Upload } from 'lucide-react';
 import { useAppStore } from '../store';
 
 interface ProjectWorkspaceProps {
@@ -41,6 +42,7 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceContent, setSourceContent] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +205,28 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
     }
   };
 
+  const handleImportFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activeProjectId) return;
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    setError(null);
+    setUploading(true);
+    try {
+      const imported = [];
+      for (const file of files) {
+        const doc = await headlessImportFile(activeProjectId, file, selectedCollectionId || undefined);
+        imported.push(doc);
+      }
+      setDocuments((prev) => [...imported, ...prev]);
+      if (imported[0]) setSelectedDocumentId(imported[0].id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+      event.target.value = '';
+    }
+  };
+
   const handleRagSearch = async () => {
     if (!activeProjectId) return;
     const query = ragQuery.trim();
@@ -308,6 +332,16 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
               <Link2 className="w-4 h-4" />
               <span>Import URL</span>
             </button>
+            <label className="btn btn-secondary w-full cursor-pointer">
+              <Upload className="w-4 h-4" />
+              <span>{uploading ? 'Uploading...' : 'Upload Files'}</span>
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => void handleImportFiles(event)}
+              />
+            </label>
           </div>
         </div>
 
@@ -341,7 +375,21 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
                 onClick={() => setSelectedDocumentId(doc.id)}
               >
                 <div className="text-sm font-medium truncate">{doc.title}</div>
-                <div className="text-xs text-text-muted truncate">{doc.sourceUri || doc.sourceType}</div>
+                <div className="text-xs text-text-muted truncate">
+                  {doc.sourceUri && /^https?:\/\//i.test(doc.sourceUri) ? (
+                    <a
+                      href={doc.sourceUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="underline hover:text-accent"
+                    >
+                      {doc.sourceUri}
+                    </a>
+                  ) : (
+                    doc.sourceUri || doc.sourceType
+                  )}
+                </div>
               </button>
             ))}
           </div>
@@ -350,7 +398,15 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
             {selectedDocument ? (
               <>
                 <div className="text-sm font-semibold mb-1">{selectedDocument.title}</div>
-                <div className="text-xs text-text-muted mb-2">{selectedDocument.sourceUri || selectedDocument.sourceType}</div>
+                <div className="text-xs text-text-muted mb-2">
+                  {selectedDocument.sourceUri && /^https?:\/\//i.test(selectedDocument.sourceUri) ? (
+                    <a href={selectedDocument.sourceUri} target="_blank" rel="noreferrer" className="underline hover:text-accent">
+                      {selectedDocument.sourceUri}
+                    </a>
+                  ) : (
+                    selectedDocument.sourceUri || selectedDocument.sourceType
+                  )}
+                </div>
                 <div className="text-sm whitespace-pre-wrap line-clamp-8">{selectedDocument.content || 'No content'}</div>
               </>
             ) : (
@@ -400,7 +456,15 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
                   <div className="text-sm font-semibold truncate">{item.title}</div>
                   <span className="text-xs px-2 py-0.5 rounded bg-accent-muted text-accent">score {item.score}</span>
                 </div>
-                <div className="text-xs text-text-muted truncate mb-2">{item.sourceUri || 'local source'}</div>
+                <div className="text-xs text-text-muted truncate mb-2">
+                  {item.sourceUri && /^https?:\/\//i.test(item.sourceUri) ? (
+                    <a href={item.sourceUri} target="_blank" rel="noreferrer" className="underline hover:text-accent">
+                      {item.sourceUri}
+                    </a>
+                  ) : (
+                    item.sourceUri || 'local source'
+                  )}
+                </div>
                 <div className="text-sm">{item.snippet || 'No snippet'}</div>
               </div>
             ))

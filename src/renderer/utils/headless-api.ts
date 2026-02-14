@@ -231,6 +231,35 @@ export async function headlessImportUrl(projectId: string, url: string, collecti
   return response.document;
 }
 
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+export async function headlessImportFile(projectId: string, file: File, collectionId?: string): Promise<HeadlessDocument> {
+  const contentBase64 = await fileToBase64(file);
+  const response = await requestJson<{ document: HeadlessDocument }>(
+    `/projects/${encodeURIComponent(projectId)}/import/file`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        contentBase64,
+        collectionId,
+      }),
+    },
+  );
+  return response.document;
+}
+
 export async function headlessRagQuery(
   projectId: string,
   query: string,

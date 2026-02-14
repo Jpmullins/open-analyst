@@ -246,7 +246,7 @@ function parseJsonBody(req) {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      if (data.length > 5 * 1024 * 1024) {
+      if (data.length > 50 * 1024 * 1024) {
         reject(new Error('Payload too large'));
       }
     });
@@ -417,6 +417,30 @@ function inferExtension(contentType) {
   if (value.includes('markdown')) return '.md';
   if (value.includes('plain')) return '.txt';
   return '.bin';
+}
+
+function inferTextFromBuffer(buffer, mimeType, filename = '') {
+  const type = String(mimeType || '').toLowerCase();
+  const lowerName = String(filename || '').toLowerCase();
+  if (
+    type.includes('text/') ||
+    type.includes('json') ||
+    type.includes('xml') ||
+    type.includes('yaml') ||
+    type.includes('csv') ||
+    lowerName.endsWith('.txt') ||
+    lowerName.endsWith('.md') ||
+    lowerName.endsWith('.json') ||
+    lowerName.endsWith('.csv') ||
+    lowerName.endsWith('.xml') ||
+    lowerName.endsWith('.yml') ||
+    lowerName.endsWith('.yaml') ||
+    lowerName.endsWith('.html') ||
+    lowerName.endsWith('.htm')
+  ) {
+    return buffer.toString('utf8');
+  }
+  return '';
 }
 
 async function captureIntoProject(context, input) {
@@ -806,6 +830,35 @@ async function toolDeepResearch(root, args, context = {}) {
   return finalReport;
 }
 
+async function toolCollectionOverview(_root, args, context = {}) {
+  const projectId = context.projectId;
+  if (!projectId) throw new Error('project context is required');
+  const requestedCollectionId = String(args.collectionId || context.collectionId || '').trim();
+  const collections = projectStore.listCollections(projectId);
+  const selectedCollection = requestedCollectionId
+    ? collections.find((collection) => collection.id === requestedCollectionId) || null
+    : null;
+  const docs = projectStore.listDocuments(projectId, requestedCollectionId || undefined);
+  const topDocs = docs.slice(0, 20);
+
+  const lines = [];
+  lines.push(`Project collections: ${collections.length}`);
+  lines.push(`Target collection: ${selectedCollection ? `${selectedCollection.name} (${selectedCollection.id})` : requestedCollectionId ? requestedCollectionId : 'All Collections'}`);
+  lines.push(`Document count: ${docs.length}`);
+  lines.push('');
+  lines.push('Documents:');
+  for (const doc of topDocs) {
+    const snippet = String(doc.content || '').replace(/\s+/g, ' ').slice(0, 220);
+    lines.push(`- ${doc.title || 'Untitled'} | ${doc.sourceUri || doc.sourceType || 'local source'}`);
+    if (snippet) lines.push(`  snippet: ${snippet}${snippet.length >= 220 ? '...' : ''}`);
+  }
+  if (docs.length > topDocs.length) {
+    lines.push(`...and ${docs.length - topDocs.length} more documents.`);
+  }
+
+  return lines.join('\n');
+}
+
 const TOOL_DEFS = [
   {
     type: 'function',
@@ -987,6 +1040,20 @@ const TOOL_DEFS = [
   {
     type: 'function',
     function: {
+      name: 'collection_overview',
+      description: 'List what is in the active collection (or project) and summarize source contents.',
+      parameters: {
+        type: 'object',
+        properties: {
+          collectionId: { type: 'string' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'execute_command',
       description: 'Run a shell command in the working directory',
       parameters: {
@@ -1014,6 +1081,7 @@ const TOOL_HANDLERS = {
   hf_daily_papers: toolHfDailyPapers,
   hf_paper: toolHfPaperByArxiv,
   deep_research: toolDeepResearch,
+  collection_overview: toolCollectionOverview,
   execute_command: toolExecuteCommand,
 };
 
@@ -1027,6 +1095,11 @@ function listAvailableTools() {
 function looksLikeWebSearchIntent(text) {
   const value = String(text || '').toLowerCase();
   return /search|look up|lookup|find|latest|news|internet|web/.test(value);
+}
+
+function looksLikeCollectionIntent(text) {
+  const value = String(text || '').toLowerCase();
+  return /current collection|what is in.*collection|what's in.*collection|summarize.*collection|list.*collection|collection contents?/.test(value);
 }
 
 async function runAgentChat(config, messages, options = {}) {
@@ -1116,6 +1189,31 @@ async function runAgentChat(config, messages, options = {}) {
     chatMessages.push(message);
     const toolCalls = message.tool_calls || [];
     if (!toolCalls.length) {
+      if (turn === 0 && looksLikeCollectionIntent(lastUserText) && toolContext.projectId) {
+        try {
+          const result = await toolCollectionOverview(workingDir, { collectionId: toolContext.collectionId }, toolContext);
+          traces.push({
+            id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'tool_result',
+            status: 'completed',
+            title: 'collection_overview',
+            toolName: 'collection_overview',
+            toolInput: { collectionId: toolContext.collectionId || '' },
+            toolOutput: result,
+          });
+          return { text: result, traces, toolCalls: [] };
+        } catch (err) {
+          traces.push({
+            id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'tool_result',
+            status: 'error',
+            title: 'collection_overview',
+            toolName: 'collection_overview',
+            toolInput: { collectionId: toolContext.collectionId || '' },
+            toolOutput: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
       if (turn === 0 && deepResearchMode && lastUserText.trim()) {
         try {
           const question = lastUserText.length > 1200 ? lastUserText.slice(0, 1200) : lastUserText;
@@ -1733,6 +1831,49 @@ const server = http.createServer(async (req, res) => {
           sourceUri: url,
           content,
           metadata: { contentType, status: fetchRes.status },
+        });
+        sendJson(res, 201, { document });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts[2] === 'import' && pathParts[3] === 'file') {
+        const body = await parseJsonBody(req);
+        const filename = String(body.filename || 'uploaded-file').trim();
+        const mimeType = String(body.mimeType || 'application/octet-stream').trim();
+        const base64 = String(body.contentBase64 || '').trim();
+        if (!base64) {
+          sendJson(res, 400, { error: 'contentBase64 is required' });
+          return;
+        }
+        const buffer = Buffer.from(base64, 'base64');
+        const captureDir = ensureCaptureDir(projectId);
+        const extension = path.extname(filename) || inferExtension(mimeType);
+        const storedName = `${sanitizeFilename(path.basename(filename, path.extname(filename)))}-${Date.now()}${extension}`;
+        const capturePath = path.join(captureDir, storedName);
+        fs.writeFileSync(capturePath, buffer);
+
+        let content = inferTextFromBuffer(buffer, mimeType, filename);
+        if (!content && (mimeType.includes('pdf') || filename.toLowerCase().endsWith('.pdf'))) {
+          try {
+            const parsed = await pdfParse(buffer);
+            content = String(parsed.text || '').replace(/\s+/g, ' ').trim();
+          } catch {
+            content = '';
+          }
+        }
+        const document = projectStore.createDocument(projectId, {
+          collectionId: body.collectionId,
+          title: body.title || filename,
+          sourceType: 'file',
+          sourceUri: `file://${capturePath}`,
+          content: content || `[Binary file stored at ${capturePath}]`,
+          metadata: {
+            filename,
+            mimeType,
+            bytes: buffer.length,
+            capturePath,
+            extractedTextLength: content.length,
+          },
         });
         sendJson(res, 201, { document });
         return;
