@@ -158,12 +158,13 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
       key={key}
       type="button"
       onClick={() => {
-        if (typeof window !== 'undefined' && window.electronAPI?.showItemInFolder) {
-          void window.electronAPI.showItemInFolder(resolveFilePath(value));
+        const resolved = resolveFilePath(value);
+        if (navigator?.clipboard?.writeText) {
+          void navigator.clipboard.writeText(resolved);
         }
       }}
       className={getFileLinkButtonClassName()}
-      title="Show in folder"
+      title="Copy file path"
     >
       {value}
     </button>
@@ -225,10 +226,8 @@ function ContentBlockView({ block, isUser, isStreaming, allBlocks, message }: Co
                       if (!href) {
                         return;
                       }
-                      if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
-                        event.preventDefault();
-                        void window.electronAPI.openExternal(href);
-                      }
+                      event.preventDefault();
+                      window.open(href, '_blank', 'noopener,noreferrer');
                     }}
                     className="text-accent hover:text-accent-hover"
                   >

@@ -2,6 +2,91 @@ import { create } from 'zustand';
 import type { Session, Message, TraceStep, PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '../types';
 import { applySessionUpdate } from '../utils/session-update';
 
+interface ProjectSummary {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface SessionPlanSnapshot {
+  sessionId: string;
+  runId?: string;
+  projectId?: string;
+  phases: Array<{
+    key: 'plan' | 'retrieve' | 'execute' | 'synthesize' | 'validate';
+    label: string;
+    status: 'pending' | 'running' | 'completed' | 'error';
+  }>;
+  updatedAt: number;
+}
+
+const PROJECTS_STORAGE_KEY = 'open-analyst.projects.state.v1';
+
+function loadProjectState(): {
+  projects: ProjectSummary[];
+  activeProjectId: string | null;
+  sessionProjectMap: Record<string, string>;
+  sessionRunMap: Record<string, string>;
+  sessionPlanMap: Record<string, SessionPlanSnapshot>;
+  activeCollectionByProject: Record<string, string>;
+} {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
+  }
+  try {
+    const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
+    if (!raw) return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
+    const parsed = JSON.parse(raw) as {
+      projects?: ProjectSummary[];
+      activeProjectId?: string | null;
+      sessionProjectMap?: Record<string, string>;
+      sessionRunMap?: Record<string, string>;
+      sessionPlanMap?: Record<string, SessionPlanSnapshot>;
+      activeCollectionByProject?: Record<string, string>;
+    };
+    return {
+      projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+      activeProjectId: typeof parsed.activeProjectId === 'string' ? parsed.activeProjectId : null,
+      sessionProjectMap:
+        parsed.sessionProjectMap && typeof parsed.sessionProjectMap === 'object'
+          ? parsed.sessionProjectMap
+          : {},
+      sessionRunMap:
+        parsed.sessionRunMap && typeof parsed.sessionRunMap === 'object'
+          ? parsed.sessionRunMap
+          : {},
+      sessionPlanMap:
+        parsed.sessionPlanMap && typeof parsed.sessionPlanMap === 'object'
+          ? parsed.sessionPlanMap
+          : {},
+      activeCollectionByProject:
+        parsed.activeCollectionByProject && typeof parsed.activeCollectionByProject === 'object'
+          ? parsed.activeCollectionByProject
+          : {},
+    };
+  } catch {
+    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
+  }
+}
+
+function persistProjectState(next: {
+  projects: ProjectSummary[];
+  activeProjectId: string | null;
+  sessionProjectMap: Record<string, string>;
+  sessionRunMap: Record<string, string>;
+  sessionPlanMap: Record<string, SessionPlanSnapshot>;
+  activeCollectionByProject: Record<string, string>;
+}) {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore persistence errors
+  }
+}
+
 interface AppState {
   // Sessions
   sessions: Session[];
@@ -37,6 +122,13 @@ interface AppState {
   
   // Working directory
   workingDir: string | null;
+
+  // Project model
+  projects: ProjectSummary[];
+  activeProjectId: string | null;
+  sessionProjectMap: Record<string, string>;
+  sessionRunMap: Record<string, string>;
+  activeCollectionByProject: Record<string, string>;
   
   // Sandbox setup
   sandboxSetupProgress: SandboxSetupProgress | null;
@@ -83,6 +175,16 @@ interface AppState {
   
   // Working directory actions
   setWorkingDir: (path: string | null) => void;
+
+  // Project actions
+  setProjects: (projects: ProjectSummary[]) => void;
+  upsertProject: (project: ProjectSummary) => void;
+  removeProject: (projectId: string) => void;
+  setActiveProjectId: (projectId: string | null) => void;
+  linkSessionToProject: (sessionId: string, projectId: string) => void;
+  linkSessionToRun: (sessionId: string, runId: string) => void;
+  setSessionPlanSnapshot: (sessionId: string, snapshot: SessionPlanSnapshot) => void;
+  setProjectActiveCollection: (projectId: string, collectionId: string) => void;
   
   // Sandbox setup actions
   setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
@@ -120,6 +222,8 @@ const defaultSettings: Settings = {
   maxContextTokens: 180000,
 };
 
+const initialProjectState = loadProjectState();
+
 export const useAppStore = create<AppState>((set) => ({
   // Initial state
   sessions: [],
@@ -139,6 +243,12 @@ export const useAppStore = create<AppState>((set) => ({
   isConfigured: false,
   showConfigModal: false,
   workingDir: null,
+  projects: initialProjectState.projects,
+  activeProjectId: initialProjectState.activeProjectId,
+  sessionProjectMap: initialProjectState.sessionProjectMap,
+  sessionRunMap: initialProjectState.sessionRunMap,
+  sessionPlanMap: initialProjectState.sessionPlanMap,
+  activeCollectionByProject: initialProjectState.activeCollectionByProject,
   sandboxSetupProgress: null,
   isSandboxSetupComplete: false,
   sandboxSyncStatus: null,
@@ -168,6 +278,17 @@ export const useAppStore = create<AppState>((set) => ({
       const { [sessionId]: __pending, ...restPendingTurns } = state.pendingTurnsBySession;
       const { [sessionId]: __active, ...restActiveTurns } = state.activeTurnsBySession;
       const { [sessionId]: __traces, ...restTraces } = state.traceStepsBySession;
+      const { [sessionId]: __sessionProject, ...restSessionProjectMap } = state.sessionProjectMap;
+      const { [sessionId]: __sessionRun, ...restSessionRunMap } = state.sessionRunMap;
+      const { [sessionId]: __sessionPlan, ...restSessionPlanMap } = state.sessionPlanMap;
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap: restSessionProjectMap,
+        sessionRunMap: restSessionRunMap,
+        sessionPlanMap: restSessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
       return {
         sessions: state.sessions.filter((s) => s.id !== sessionId),
         messagesBySession: restMessages,
@@ -175,6 +296,9 @@ export const useAppStore = create<AppState>((set) => ({
         pendingTurnsBySession: restPendingTurns,
         activeTurnsBySession: restActiveTurns,
         traceStepsBySession: restTraces,
+        sessionProjectMap: restSessionProjectMap,
+        sessionRunMap: restSessionRunMap,
+        sessionPlanMap: restSessionPlanMap,
         activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId,
       };
     }),
@@ -416,6 +540,137 @@ export const useAppStore = create<AppState>((set) => ({
   
   // Working directory actions
   setWorkingDir: (path) => set({ workingDir: path }),
+
+  setProjects: (projects) =>
+    set((state) => {
+      const nextActive =
+        state.activeProjectId && projects.some((project) => project.id === state.activeProjectId)
+          ? state.activeProjectId
+          : projects[0]?.id || null;
+      persistProjectState({
+        projects,
+        activeProjectId: nextActive,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { projects, activeProjectId: nextActive };
+    }),
+
+  upsertProject: (project) =>
+    set((state) => {
+      const exists = state.projects.some((item) => item.id === project.id);
+      const projects = exists
+        ? state.projects.map((item) => (item.id === project.id ? { ...item, ...project } : item))
+        : [project, ...state.projects];
+      const activeProjectId = state.activeProjectId || project.id;
+      persistProjectState({
+        projects,
+        activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { projects, activeProjectId };
+    }),
+
+  removeProject: (projectId) =>
+    set((state) => {
+      const projects = state.projects.filter((project) => project.id !== projectId);
+      const activeProjectId = state.activeProjectId === projectId ? projects[0]?.id || null : state.activeProjectId;
+      persistProjectState({
+        projects,
+        activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { projects, activeProjectId };
+    }),
+
+  setActiveProjectId: (projectId) =>
+    set((state) => {
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: projectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { activeProjectId: projectId };
+    }),
+
+  linkSessionToProject: (sessionId, projectId) =>
+    set((state) => {
+      const sessionProjectMap = {
+        ...state.sessionProjectMap,
+        [sessionId]: projectId,
+      };
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { sessionProjectMap };
+    }),
+
+  linkSessionToRun: (sessionId, runId) =>
+    set((state) => {
+      const sessionRunMap = {
+        ...state.sessionRunMap,
+        [sessionId]: runId,
+      };
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { sessionRunMap };
+    }),
+
+  setSessionPlanSnapshot: (sessionId, snapshot) =>
+    set((state) => {
+      const sessionPlanMap = {
+        ...state.sessionPlanMap,
+        [sessionId]: snapshot,
+      };
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
+      });
+      return { sessionPlanMap };
+    }),
+
+  setProjectActiveCollection: (projectId, collectionId) =>
+    set((state) => {
+      const activeCollectionByProject = {
+        ...state.activeCollectionByProject,
+        [projectId]: collectionId,
+      };
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject,
+      });
+      return { activeCollectionByProject };
+    }),
   
   // Sandbox setup actions
   setSandboxSetupProgress: (progress) => set({ sandboxSetupProgress: progress }),
