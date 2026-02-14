@@ -63,7 +63,7 @@ export async function headlessChat(
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
   prompt: string,
   projectId?: string,
-  options?: { collectionId?: string; collectionName?: string },
+  options?: { collectionId?: string; collectionName?: string; deepResearch?: boolean },
 ): Promise<{ text: string; traces: HeadlessTraceStep[]; runId?: string; projectId?: string }> {
   const result = await requestJson<{ ok: boolean; text: string; traces?: HeadlessTraceStep[]; runId?: string; projectId?: string }>('/chat', {
     method: 'POST',
@@ -73,6 +73,7 @@ export async function headlessChat(
       projectId,
       collectionId: options?.collectionId,
       collectionName: options?.collectionName,
+      deepResearch: Boolean(options?.deepResearch),
     }),
   });
   return {

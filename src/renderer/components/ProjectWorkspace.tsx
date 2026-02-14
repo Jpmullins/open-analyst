@@ -97,6 +97,14 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
     void initialize();
   }, [initialize]);
 
+  useEffect(() => {
+    if (!activeProjectId) return;
+    const timer = setInterval(() => {
+      void refreshProjectData(activeProjectId);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [activeProjectId, refreshProjectData]);
+
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) || null,
     [projects, activeProjectId],

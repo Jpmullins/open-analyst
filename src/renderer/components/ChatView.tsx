@@ -12,6 +12,7 @@ import {
   Loader2,
   Plug,
   X,
+  FlaskConical,
 } from 'lucide-react';
 
 export function ChatView() {
@@ -33,6 +34,7 @@ export function ChatView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
   const [showConnectorLabel, setShowConnectorLabel] = useState(true);
+  const [deepResearchBySession, setDeepResearchBySession] = useState<Record<string, boolean>>({});
   const [projectCollections, setProjectCollections] = useState<HeadlessCollection[]>([]);
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -55,6 +57,7 @@ export function ChatView() {
   const messages = activeSessionId ? messagesBySession[activeSessionId] || [] : [];
   const pendingTurns = activeSessionId ? pendingTurnsBySession[activeSessionId] || [] : [];
   const partialMessage = activeSessionId ? partialMessagesBySession[activeSessionId] || '' : '';
+  const deepResearchEnabled = activeSessionId ? Boolean(deepResearchBySession[activeSessionId]) : false;
   const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
   const hasActiveTurn = Boolean(activeTurn);
   const pendingCount = pendingTurns.length;
@@ -537,7 +540,7 @@ export function ChatView() {
       }
 
       // Send message with content blocks
-      await continueSession(activeSessionId, contentBlocks);
+      await continueSession(activeSessionId, contentBlocks, { deepResearch: deepResearchEnabled });
 
       // Clean up
       setPrompt('');
@@ -739,6 +742,24 @@ export function ChatView() {
                 <span className="px-2 py-1 text-xs text-text-muted">
                   {appConfig?.model || 'No model'}
                 </span>
+                {activeSessionId && (
+                  <button
+                    type="button"
+                    onClick={() => setDeepResearchBySession((prev) => ({
+                      ...prev,
+                      [activeSessionId]: !deepResearchEnabled,
+                    }))}
+                    className={`text-xs px-2 py-1 rounded border flex items-center gap-1 ${
+                      deepResearchEnabled
+                        ? 'bg-accent/10 border-accent/40 text-accent'
+                        : 'bg-surface-muted border-border text-text-muted'
+                    }`}
+                    title="Enable deeper multi-step web research for this task"
+                  >
+                    <FlaskConical className="w-3.5 h-3.5" />
+                    <span>Deep Research</span>
+                  </button>
+                )}
                 {activeProjectId && projectCollections.length > 0 && (
                   <select
                     className="text-xs bg-surface-muted border border-border rounded px-2 py-1 max-w-[180px]"

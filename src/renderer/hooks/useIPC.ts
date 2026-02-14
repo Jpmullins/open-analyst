@@ -67,7 +67,7 @@ export function useIPC() {
   }, [addTraceStep]);
 
   const startSession = useCallback(
-    async (title: string, promptOrContent: string | ContentBlock[], cwd?: string) => {
+    async (title: string, promptOrContent: string | ContentBlock[], cwd?: string, options?: { deepResearch?: boolean }) => {
       setLoading(true);
       let sessionId = '';
       let mockStepId = '';
@@ -130,6 +130,7 @@ export function useIPC() {
 
         const result = await headlessChat(chatMessages, prompt, projectId, {
           collectionId: selectedCollectionId,
+          deepResearch: Boolean(options?.deepResearch),
         });
 
         if (result.runId) {
@@ -183,11 +184,12 @@ export function useIPC() {
       linkSessionToRun,
       setLoading,
       updateSession,
+      // options is call-site argument; hook deps unaffected
     ],
   );
 
   const continueSession = useCallback(
-    async (sessionId: string, promptOrContent: string | ContentBlock[]) => {
+    async (sessionId: string, promptOrContent: string | ContentBlock[], options?: { deepResearch?: boolean }) => {
       setLoading(true);
 
       const content: ContentBlock[] = typeof promptOrContent === 'string'
@@ -234,6 +236,7 @@ export function useIPC() {
 
         const result = await headlessChat(chatMessages, prompt, projectId, {
           collectionId: selectedCollectionId,
+          deepResearch: Boolean(options?.deepResearch),
         });
 
         if (result.runId) {

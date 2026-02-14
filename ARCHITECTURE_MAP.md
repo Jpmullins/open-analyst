@@ -160,6 +160,7 @@ UI state model (client):
 ### E) Tool-Using Agent
 
 Tool set:
+- `deep_research`
 - `list_directory`
 - `read_file`
 - `write_file`
@@ -176,6 +177,7 @@ Tool set:
 Tool behaviors:
 - Workspace-safe path resolution for file tools
 - Web/PDF/text capture support
+- Multi-step deep research report generation with cited sources
 - Automatic source capture into project collection context
 - arXiv + Hugging Face paper ingestion
 

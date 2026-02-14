@@ -51,6 +51,7 @@ npm run build
 - Project-first workspace (not task-only)
 - Collections and source/document management
 - Agentic tool execution during chat
+- Deep research tool for multi-step source discovery and synthesis
 - Deep search + retrieval over project documents
 - Source capture and indexing from web/PDF/research APIs
 - MCP server configuration

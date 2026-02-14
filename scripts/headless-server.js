@@ -153,7 +153,7 @@ function defaultSkills() {
       description: 'Web search/fetch/arXiv/HF capture workflow',
       type: 'builtin',
       enabled: true,
-      config: { tools: ['web_search', 'web_fetch', 'arxiv_search', 'hf_daily_papers', 'hf_paper'] },
+      config: { tools: ['deep_research', 'web_search', 'web_fetch', 'arxiv_search', 'hf_daily_papers', 'hf_paper'] },
       createdAt: ts,
     },
     {
@@ -207,6 +207,17 @@ function getMcpPresets() {
       env: {},
     },
   };
+}
+
+function parseSearchResultUrls(searchOutput) {
+  const text = String(searchOutput || '');
+  const urls = new Set();
+  const regex = /\((https?:\/\/[^)\s]+)\)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    urls.add(match[1]);
+  }
+  return Array.from(urls);
 }
 
 function sendJson(res, status, body) {
@@ -708,6 +719,93 @@ async function toolHfPaperByArxiv(_root, args, context = {}) {
   ].join('\n');
 }
 
+async function toolDeepResearch(root, args, context = {}) {
+  const question = String(args.question || args.query || '').trim();
+  if (!question) throw new Error('question is required');
+  const breadth = Math.min(8, Math.max(2, Number(args.breadth || 4)));
+  const fetchLimit = Math.min(8, Math.max(2, Number(args.fetch_limit || 4)));
+  const queries = [];
+  queries.push(question);
+  for (const part of question.split(/\b(?:and|or|then|vs|versus)\b|[,;]+/gi).map((item) => item.trim()).filter(Boolean)) {
+    if (part && !queries.includes(part)) queries.push(part);
+    if (queries.length >= breadth) break;
+  }
+
+  const sources = [];
+  const notes = [];
+  for (const q of queries.slice(0, breadth)) {
+    let searchOutput = '';
+    try {
+      searchOutput = await toolWebSearch(root, { query: q }, context);
+      notes.push(`Search query: ${q}`);
+    } catch (err) {
+      notes.push(`Search query failed: ${q} (${err instanceof Error ? err.message : String(err)})`);
+      continue;
+    }
+    const urls = parseSearchResultUrls(searchOutput).slice(0, fetchLimit);
+    for (const url of urls) {
+      try {
+        const fetched = await toolWebFetch(root, { url, collectionName: args.collectionName }, context);
+        sources.push({ query: q, url, fetched });
+      } catch (err) {
+        notes.push(`Fetch failed: ${url} (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+  }
+
+  const citationList = sources.map((item, index) => `[${index + 1}] ${item.url}`).join('\n');
+  const synthesisPrompt = [
+    'You are producing a concise deep research report with citations.',
+    `Question: ${question}`,
+    'Research notes:',
+    notes.join('\n') || 'No notes.',
+    'Fetched source outputs:',
+    sources.map((item, index) => `Source [${index + 1}] query="${item.query}"\n${String(item.fetched).slice(0, 5000)}`).join('\n\n---\n\n') || 'No fetched sources.',
+    'Write: summary, key findings, contradictions/uncertainty, and practical recommendations.',
+    'Cite claims inline using [n] where n maps to source list below.',
+    `Source list:\n${citationList || 'No sources'}`,
+  ].join('\n\n');
+
+  const client = new OpenAI({
+    apiKey: loadConfig().apiKey,
+    baseURL: loadConfig().baseUrl || undefined,
+  });
+  const completion = await client.chat.completions.create({
+    model: loadConfig().model || 'gpt-4o',
+    messages: [
+      { role: 'system', content: 'Return markdown only.' },
+      { role: 'user', content: synthesisPrompt },
+    ],
+  });
+  const report = String(completion.choices?.[0]?.message?.content || '').trim();
+  const finalReport = [
+    `# Deep Research Report`,
+    `Question: ${question}`,
+    '',
+    report || 'No report generated.',
+    '',
+    '## Sources',
+    citationList || 'No sources captured.',
+  ].join('\n');
+
+  await captureIntoProject(context, {
+    collectionId: context.collectionId,
+    collectionName: args.collectionName || context.defaultCollectionName || 'Deep Research',
+    title: `Deep Research: ${question.slice(0, 120)}`,
+    sourceType: 'deep-research-report',
+    sourceUri: `deep-research://${Date.now()}`,
+    content: finalReport,
+    metadata: {
+      question,
+      queryCount: queries.length,
+      sourceCount: sources.length,
+      notes,
+    },
+  });
+
+  return finalReport;
+}
+
 const TOOL_DEFS = [
   {
     type: 'function',
@@ -872,6 +970,23 @@ const TOOL_DEFS = [
   {
     type: 'function',
     function: {
+      name: 'deep_research',
+      description: 'Perform multi-step deep research: decompose query, search/fetch multiple sources, synthesize cited report, and store it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          breadth: { type: 'number' },
+          fetch_limit: { type: 'number' },
+          collectionName: { type: 'string' },
+        },
+        required: ['question'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'execute_command',
       description: 'Run a shell command in the working directory',
       parameters: {
@@ -898,6 +1013,7 @@ const TOOL_HANDLERS = {
   arxiv_search: toolArxivSearch,
   hf_daily_papers: toolHfDailyPapers,
   hf_paper: toolHfPaperByArxiv,
+  deep_research: toolDeepResearch,
   execute_command: toolExecuteCommand,
 };
 
@@ -921,6 +1037,7 @@ async function runAgentChat(config, messages, options = {}) {
     collectionId: options.collectionId || '',
     defaultCollectionName: options.collectionName || 'Task Sources',
   };
+  const deepResearchMode = options.deepResearch === true;
 
   if (!config.apiKey) {
     throw new Error('API key is not configured');
@@ -947,12 +1064,40 @@ async function runAgentChat(config, messages, options = {}) {
         `You are Open Analyst running in a headless persistent environment.\n` +
         `Current working directory: ${workingDir}\n` +
         `Use tools when user asks to read/write/edit files or run commands.\n` +
-        `Prefer relative paths from working directory.`,
+        `Prefer relative paths from working directory.\n` +
+        (deepResearchMode
+          ? 'Deep research mode is ON. Prefer using the `deep_research` tool for complex research questions and provide citation-backed answers.'
+          : ''),
     },
     ...messages,
   ];
   const lastUserMessage = [...messages].reverse().find((m) => m?.role === 'user');
   const lastUserText = String(lastUserMessage?.content || '');
+
+  if (toolContext.projectId && lastUserText.trim()) {
+    try {
+      const rag = projectStore.queryDocuments(toolContext.projectId, lastUserText, { limit: 6 });
+      if (Array.isArray(rag.results) && rag.results.length > 0) {
+        const contextBlock = rag.results.map((result, index) => (
+          `[R${index + 1}] ${result.title}\nSource: ${result.sourceUri}\nSnippet: ${result.snippet}`
+        )).join('\n\n');
+        chatMessages.push({
+          role: 'system',
+          content:
+            'Use project retrieval context when helpful. Cite retrieval snippets as [R#] when using them.\n\n' +
+            contextBlock,
+        });
+        onRunEvent('retrieval_context_added', {
+          resultCount: rag.results.length,
+          query: lastUserText,
+        });
+      }
+    } catch (err) {
+      onRunEvent('retrieval_context_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn += 1) {
     onRunEvent('model_turn_started', { turn });
@@ -971,6 +1116,47 @@ async function runAgentChat(config, messages, options = {}) {
     chatMessages.push(message);
     const toolCalls = message.tool_calls || [];
     if (!toolCalls.length) {
+      if (turn === 0 && deepResearchMode && lastUserText.trim()) {
+        try {
+          const question = lastUserText.length > 1200 ? lastUserText.slice(0, 1200) : lastUserText;
+          traces.push({
+            id: `tool-call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'tool_call',
+            status: 'running',
+            title: 'deep_research',
+            toolName: 'deep_research',
+            toolInput: { question },
+          });
+          onRunEvent('tool_call_started', { toolName: 'deep_research', toolInput: { question } });
+          const result = await toolDeepResearch(workingDir, { question }, toolContext);
+          traces.push({
+            id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'tool_result',
+            status: 'completed',
+            title: 'deep_research',
+            toolName: 'deep_research',
+            toolInput: { question },
+            toolOutput: String(result),
+          });
+          onRunEvent('tool_call_finished', { toolName: 'deep_research', ok: true });
+          return {
+            text: String(result),
+            traces,
+            toolCalls: [],
+          };
+        } catch (err) {
+          traces.push({
+            id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'tool_result',
+            status: 'error',
+            title: 'deep_research',
+            toolName: 'deep_research',
+            toolInput: { question: lastUserText },
+            toolOutput: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          onRunEvent('tool_call_finished', { toolName: 'deep_research', ok: false });
+        }
+      }
       if (turn === 0 && looksLikeWebSearchIntent(lastUserText)) {
         try {
           const query = lastUserText.length > 400 ? lastUserText.slice(0, 400) : lastUserText;
@@ -1591,6 +1777,7 @@ const server = http.createServer(async (req, res) => {
       const projectId = String(body.projectId || cfg.activeProjectId || '').trim();
       const collectionId = String(body.collectionId || '').trim();
       const collectionName = String(body.collectionName || '').trim();
+      const deepResearch = body.deepResearch === true;
       if (!projectId) {
         sendJson(res, 400, { error: 'No active project configured. Create/select a project first.' });
         return;
@@ -1612,6 +1799,7 @@ const server = http.createServer(async (req, res) => {
           projectId,
           collectionId: collectionId || undefined,
           collectionName: collectionName || 'Task Sources',
+          deepResearch,
           onRunEvent: (eventType, payload) => {
             projectStore.appendRunEvent(projectId, run.id, eventType, payload);
           },

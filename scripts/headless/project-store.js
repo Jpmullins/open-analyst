@@ -320,14 +320,69 @@ function tokenize(value) {
     .filter(Boolean);
 }
 
-function scoreDocument(queryTokens, doc) {
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'by', 'with', 'from',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'that', 'this', 'it', 'as', 'about',
+  'what', 'which', 'who', 'when', 'where', 'why', 'how',
+]);
+
+function normalizeToken(token) {
+  let t = String(token || '').trim().toLowerCase();
+  if (t.length > 4 && t.endsWith('ing')) t = t.slice(0, -3);
+  if (t.length > 3 && t.endsWith('ed')) t = t.slice(0, -2);
+  if (t.length > 3 && t.endsWith('es')) t = t.slice(0, -2);
+  if (t.length > 2 && t.endsWith('s')) t = t.slice(0, -1);
+  return t;
+}
+
+function buildQueryVariants(query) {
+  const raw = String(query || '').trim();
+  if (!raw) return [];
+  const variants = new Set([raw]);
+  const splitters = /\b(?:and|or|then|vs|versus)\b|[,;]+/gi;
+  const parts = raw.split(splitters).map((part) => part.trim()).filter(Boolean);
+  for (const part of parts) variants.add(part);
+  if (parts.length > 1) {
+    variants.add(parts.join(' '));
+  }
+  return Array.from(variants).slice(0, 6);
+}
+
+function tokenizeQuery(query) {
+  const base = tokenize(query).map(normalizeToken).filter((token) => token && !STOPWORDS.has(token));
+  return Array.from(new Set(base)).slice(0, 32);
+}
+
+function buildDocStats(docs) {
+  const df = new Map();
+  const tokenizedDocs = docs.map((doc) => {
+    const tokens = tokenize(`${doc.title || ''} ${doc.content || ''}`).map(normalizeToken).filter(Boolean);
+    const unique = new Set(tokens);
+    for (const token of unique) {
+      df.set(token, (df.get(token) || 0) + 1);
+    }
+    return { doc, tokens, text: `${doc.title || ''} ${doc.content || ''}`.toLowerCase() };
+  });
+  return { df, tokenizedDocs };
+}
+
+function scoreDocument(query, queryTokens, statsEntry, df, docCount) {
   if (!queryTokens.length) return 0;
-  const text = `${doc.title || ''} ${doc.content || ''}`.toLowerCase();
+  const tf = new Map();
+  for (const token of statsEntry.tokens) {
+    tf.set(token, (tf.get(token) || 0) + 1);
+  }
   let score = 0;
   for (const token of queryTokens) {
-    const re = new RegExp(`\\b${token.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'g');
-    const matches = text.match(re);
-    if (matches) score += matches.length;
+    const termFreq = tf.get(token) || 0;
+    if (!termFreq) continue;
+    const docFreq = df.get(token) || 1;
+    const idf = Math.log(1 + (docCount / docFreq));
+    score += termFreq * idf;
+  }
+  const loweredQuery = String(query || '').toLowerCase();
+  if (loweredQuery && statsEntry.text.includes(loweredQuery)) {
+    score += 3;
   }
   return score;
 }
@@ -348,28 +403,39 @@ function extractSnippet(content, queryTokens) {
 }
 
 function queryDocuments(projectId, query, options = {}) {
-  const limit = Number(options.limit || 5);
+  const limit = Math.min(20, Math.max(1, Number(options.limit || 8)));
   const docs = listDocuments(projectId, options.collectionId);
-  const queryTokens = tokenize(query);
-  const scored = docs
-    .map((doc) => ({
-      doc,
-      score: scoreDocument(queryTokens, doc),
-    }))
-    .filter((entry) => entry.score > 0)
+  const variants = buildQueryVariants(query);
+  const stats = buildDocStats(docs);
+  const aggregated = new Map();
+
+  for (const variant of variants) {
+    const queryTokens = tokenizeQuery(variant);
+    for (const entry of stats.tokenizedDocs) {
+      const score = scoreDocument(variant, queryTokens, entry, stats.df, docs.length);
+      if (score <= 0) continue;
+      const existing = aggregated.get(entry.doc.id) || { doc: entry.doc, score: 0, snippetTokens: [] };
+      existing.score = Math.max(existing.score, score);
+      existing.snippetTokens = queryTokens;
+      aggregated.set(entry.doc.id, existing);
+    }
+  }
+
+  const scored = Array.from(aggregated.values())
     .sort((a, b) => b.score - a.score)
-    .slice(0, Math.max(1, limit))
-    .map(({ doc, score }) => ({
+    .slice(0, limit)
+    .map(({ doc, score, snippetTokens }) => ({
       id: doc.id,
       title: doc.title,
       sourceUri: doc.sourceUri,
-      score,
-      snippet: extractSnippet(doc.content, queryTokens),
+      score: Number(score.toFixed(3)),
+      snippet: extractSnippet(doc.content, snippetTokens),
       metadata: doc.metadata || {},
     }));
 
   return {
     query,
+    queryVariants: variants,
     totalCandidates: docs.length,
     results: scored,
   };
