@@ -8,6 +8,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const { glob } = require('glob');
 const OpenAI = require('openai').default;
+const projectStore = require('./headless/project-store');
 
 const execAsync = promisify(exec);
 const PORT = Number(process.env.OPEN_ANALYST_HEADLESS_PORT || 8787);
@@ -26,6 +27,7 @@ const DEFAULT_CONFIG = {
   workingDir: process.cwd(),
   workingDirType: 'local', // local | s3
   s3Uri: '',
+  activeProjectId: '',
 };
 
 function ensureConfigDir() {
@@ -36,15 +38,18 @@ function ensureConfigDir() {
 
 function loadConfig() {
   ensureConfigDir();
+  const activeProject = projectStore.getActiveProject();
+  const activeProjectId = activeProject ? activeProject.id : '';
   if (!fs.existsSync(CONFIG_PATH)) {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
-    return { ...DEFAULT_CONFIG };
+    const initial = { ...DEFAULT_CONFIG, activeProjectId };
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(initial, null, 2), 'utf8');
+    return initial;
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    return { ...DEFAULT_CONFIG, ...parsed };
+    return { ...DEFAULT_CONFIG, activeProjectId, ...parsed };
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, activeProjectId };
   }
 }
 
@@ -59,9 +64,19 @@ function sendJson(res, status, body) {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   });
   res.end(payload);
+}
+
+function sendText(res, status, text) {
+  res.writeHead(status, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+  });
+  res.end(text);
 }
 
 function parseJsonBody(req) {
@@ -83,6 +98,14 @@ function parseJsonBody(req) {
     });
     req.on('error', reject);
   });
+}
+
+function getRequestUrl(req) {
+  return new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+}
+
+function parsePath(pathname) {
+  return pathname.split('/').filter(Boolean);
 }
 
 function resolveInRoot(root, p) {
@@ -449,8 +472,9 @@ function looksLikeWebSearchIntent(text) {
   return /search|look up|lookup|find|latest|news|internet|web/.test(value);
 }
 
-async function runAgentChat(config, messages) {
+async function runAgentChat(config, messages, options = {}) {
   const traces = [];
+  const onRunEvent = typeof options.onRunEvent === 'function' ? options.onRunEvent : () => {};
 
   if (!config.apiKey) {
     throw new Error('API key is not configured');
@@ -485,6 +509,7 @@ async function runAgentChat(config, messages) {
   const lastUserText = String(lastUserMessage?.content || '');
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn += 1) {
+    onRunEvent('model_turn_started', { turn });
     const completion = await client.chat.completions.create({
       model: config.model || 'gpt-4o',
       messages: chatMessages,
@@ -538,6 +563,7 @@ async function runAgentChat(config, messages) {
           });
         }
       }
+      onRunEvent('assistant_response', { turn, hasToolCalls: false });
       return { text: message.content || '', toolCalls: [] };
     }
 
@@ -559,6 +585,10 @@ async function runAgentChat(config, messages) {
         toolName: name || 'tool',
         toolInput: parsedArgs,
       });
+      onRunEvent('tool_call_started', {
+        toolName: name || 'tool',
+        toolInput: parsedArgs,
+      });
       let result;
       try {
         if (!handler) throw new Error(`Unsupported tool: ${name}`);
@@ -575,6 +605,10 @@ async function runAgentChat(config, messages) {
         toolInput: parsedArgs,
         toolOutput: String(result),
       });
+      onRunEvent('tool_call_finished', {
+        toolName: name || 'tool',
+        ok: !String(result).startsWith('Tool error:'),
+      });
 
       chatMessages.push({
         role: 'tool',
@@ -584,6 +618,7 @@ async function runAgentChat(config, messages) {
     }
   }
 
+  onRunEvent('max_turns_reached', { maxTurns: MAX_TOOL_TURNS });
   return {
     text: 'Stopped after maximum tool iterations.',
     traces,
@@ -592,29 +627,33 @@ async function runAgentChat(config, messages) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const requestUrl = getRequestUrl(req);
+  const pathname = requestUrl.pathname;
+  const pathParts = parsePath(pathname);
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     });
     res.end();
     return;
   }
 
   try {
-    if (req.method === 'GET' && req.url === '/health') {
+    if (req.method === 'GET' && pathname === '/health') {
       sendJson(res, 200, { ok: true, service: 'open-analyst-headless' });
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/config') {
+    if (req.method === 'GET' && pathname === '/config') {
       const cfg = loadConfig();
       sendJson(res, 200, { ...cfg, apiKey: cfg.apiKey ? '***' : '' });
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/config') {
+    if (req.method === 'POST' && pathname === '/config') {
       const body = await parseJsonBody(req);
       const cfg = { ...loadConfig(), ...body };
       saveConfig(cfg);
@@ -622,7 +661,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/workdir') {
+    if (req.method === 'GET' && pathname === '/workdir') {
       const cfg = loadConfig();
       sendJson(res, 200, {
         workingDir: cfg.workingDir,
@@ -632,12 +671,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'GET' && req.url === '/tools') {
+    if (req.method === 'GET' && pathname === '/tools') {
       sendJson(res, 200, { tools: listAvailableTools() });
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/workdir') {
+    if (req.method === 'POST' && pathname === '/workdir') {
       const body = await parseJsonBody(req);
       const cfg = loadConfig();
       const inputPath = String(body.path || '').trim();
@@ -665,16 +704,217 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/chat') {
+    if (req.method === 'GET' && pathname === '/projects') {
+      sendJson(res, 200, {
+        activeProject: projectStore.getActiveProject(),
+        projects: projectStore.listProjects(),
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/projects') {
+      const body = await parseJsonBody(req);
+      const project = projectStore.createProject({
+        name: body.name,
+        description: body.description,
+        datastores: body.datastores,
+      });
+      const cfg = loadConfig();
+      cfg.activeProjectId = project.id;
+      saveConfig(cfg);
+      sendJson(res, 201, { project, activeProjectId: project.id });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/projects/active') {
+      const body = await parseJsonBody(req);
+      const projectId = String(body.projectId || '').trim();
+      if (!projectId) {
+        sendJson(res, 400, { error: 'projectId is required' });
+        return;
+      }
+      projectStore.setActiveProject(projectId);
+      const cfg = loadConfig();
+      cfg.activeProjectId = projectId;
+      saveConfig(cfg);
+      sendJson(res, 200, { success: true, activeProjectId: projectId });
+      return;
+    }
+
+    if (pathParts[0] === 'projects' && pathParts[1]) {
+      const projectId = pathParts[1];
+      if (req.method === 'GET' && pathParts.length === 2) {
+        const project = projectStore.getProject(projectId);
+        if (!project) {
+          sendJson(res, 404, { error: `Project not found: ${projectId}` });
+          return;
+        }
+        sendJson(res, 200, { project });
+        return;
+      }
+
+      if (req.method === 'PATCH' && pathParts.length === 2) {
+        const body = await parseJsonBody(req);
+        const project = projectStore.updateProject(projectId, body);
+        sendJson(res, 200, { project });
+        return;
+      }
+
+      if (req.method === 'DELETE' && pathParts.length === 2) {
+        const deleted = projectStore.deleteProject(projectId);
+        const activeProject = projectStore.getActiveProject();
+        const cfg = loadConfig();
+        cfg.activeProjectId = activeProject ? activeProject.id : '';
+        saveConfig(cfg);
+        sendJson(res, 200, { ...deleted, activeProjectId: cfg.activeProjectId });
+        return;
+      }
+
+      if (req.method === 'GET' && pathParts[2] === 'collections' && pathParts.length === 3) {
+        const collections = projectStore.listCollections(projectId);
+        sendJson(res, 200, { collections });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts[2] === 'collections' && pathParts.length === 3) {
+        const body = await parseJsonBody(req);
+        const collection = projectStore.createCollection(projectId, {
+          name: body.name,
+          description: body.description,
+        });
+        sendJson(res, 201, { collection });
+        return;
+      }
+
+      if (req.method === 'GET' && pathParts[2] === 'documents' && pathParts.length === 3) {
+        const collectionId = requestUrl.searchParams.get('collectionId') || '';
+        const documents = projectStore.listDocuments(projectId, collectionId || undefined);
+        sendJson(res, 200, { documents });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts[2] === 'documents' && pathParts.length === 3) {
+        const body = await parseJsonBody(req);
+        const document = projectStore.createDocument(projectId, {
+          collectionId: body.collectionId,
+          title: body.title,
+          sourceType: body.sourceType,
+          sourceUri: body.sourceUri,
+          content: body.content,
+          metadata: body.metadata,
+        });
+        sendJson(res, 201, { document });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts[2] === 'import' && pathParts[3] === 'url') {
+        const body = await parseJsonBody(req);
+        const url = validateHttpUrl(body.url);
+        const fetchRes = await fetch(url, {
+          method: 'GET',
+          headers: { 'User-Agent': 'open-analyst-headless' },
+        });
+        const contentType = fetchRes.headers.get('content-type') || 'unknown';
+        const content = await fetchRes.text();
+        const title = String(body.title || url);
+        const document = projectStore.createDocument(projectId, {
+          collectionId: body.collectionId,
+          title,
+          sourceType: 'url',
+          sourceUri: url,
+          content,
+          metadata: { contentType, status: fetchRes.status },
+        });
+        sendJson(res, 201, { document });
+        return;
+      }
+
+      if (req.method === 'POST' && pathParts[2] === 'rag' && pathParts[3] === 'query') {
+        const body = await parseJsonBody(req);
+        const query = String(body.query || '').trim();
+        if (!query) {
+          sendJson(res, 400, { error: 'query is required' });
+          return;
+        }
+        const result = projectStore.queryDocuments(projectId, query, {
+          limit: body.limit,
+          collectionId: body.collectionId,
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === 'GET' && pathParts[2] === 'runs' && pathParts.length === 3) {
+        sendJson(res, 200, { runs: projectStore.listRuns(projectId) });
+        return;
+      }
+
+      if (req.method === 'GET' && pathParts[2] === 'runs' && pathParts[3]) {
+        const run = projectStore.getRun(projectId, pathParts[3]);
+        if (!run) {
+          sendJson(res, 404, { error: `Run not found: ${pathParts[3]}` });
+          return;
+        }
+        sendJson(res, 200, { run });
+        return;
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/chat') {
       const body = await parseJsonBody(req);
       const cfg = loadConfig();
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const prompt = String(body.prompt || '').trim();
+      const projectId = String(body.projectId || cfg.activeProjectId || '').trim();
+      if (!projectId) {
+        sendJson(res, 400, { error: 'No active project configured. Create/select a project first.' });
+        return;
+      }
       const chatMessages = messages.length
         ? messages
         : [{ role: 'user', content: prompt }];
-      const result = await runAgentChat(cfg, chatMessages);
-      sendJson(res, 200, { ok: true, text: result.text, traces: result.traces || [] });
+      const run = projectStore.createRun(projectId, {
+        type: 'chat',
+        status: 'running',
+        prompt,
+      });
+      projectStore.appendRunEvent(projectId, run.id, 'chat_requested', {
+        messageCount: chatMessages.length,
+      });
+      let result;
+      try {
+        result = await runAgentChat(cfg, chatMessages, {
+          onRunEvent: (eventType, payload) => {
+            projectStore.appendRunEvent(projectId, run.id, eventType, payload);
+          },
+        });
+        projectStore.updateRun(projectId, run.id, {
+          status: 'completed',
+          output: result.text || '',
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        projectStore.appendRunEvent(projectId, run.id, 'chat_failed', { error: msg });
+        projectStore.updateRun(projectId, run.id, {
+          status: 'failed',
+          output: msg,
+        });
+        throw err;
+      }
+      projectStore.appendRunEvent(projectId, run.id, 'chat_completed', {
+        traceCount: Array.isArray(result.traces) ? result.traces.length : 0,
+      });
+      sendJson(res, 200, { ok: true, text: result.text, traces: result.traces || [], runId: run.id, projectId });
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/debug/store') {
+      const storePath = projectStore.STORE_PATH;
+      if (!fs.existsSync(storePath)) {
+        sendText(res, 200, '{}');
+        return;
+      }
+      sendText(res, 200, fs.readFileSync(storePath, 'utf8'));
       return;
     }
 

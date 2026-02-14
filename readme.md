@@ -4,14 +4,14 @@
 
 # Open Analyst
 
-Open Analyst is an internal analyst-assistant desktop application.
+Open Analyst is an internal analyst-assistant web application with a remote headless runtime.
 
 It is designed for secure, UI-first analytical workflows: ingesting data, running agent/tool workflows, managing local project context, and generating analyst-ready outputs.
 
 ## Current Scope
 
-- Desktop app runtime built on Electron + React
-- Local workspace-centric execution model
+- Web UI runtime built on React + Vite
+- Remote/container workspace-centric execution model
 - Agent workflows with tool execution and MCP connector support
 - Skills support for common document/data tasks (PPTX, DOCX, XLSX, PDF)
 - Sandbox options (WSL2 on Windows, Lima on macOS, native fallback on Linux)
@@ -29,7 +29,6 @@ It is designed for secure, UI-first analytical workflows: ingesting data, runnin
 git clone https://github.com/ARLIS/open-analyst.git
 cd open-analyst
 npm install
-npm run rebuild
 npm run dev
 ```
 
@@ -42,10 +41,10 @@ Then:
 
 ## Container Mode (Docker/K8s)
 
-For headless environments, run renderer + headless agent service:
+Run renderer + headless agent service:
 
 ```bash
-npm run dev:container:stack
+npm run dev:stack
 ```
 
 This starts:
@@ -54,28 +53,18 @@ This starts:
 
 If you prefer separate processes (recommended for production):
 
-```bash
-npm run serve:headless
-npm run dev:container
-```
-
-If you also want the full prebuild pipeline (Node bundles + MCP bundles):
-
-```bash
-npm run dev:container:full
-```
+`npm run serve:headless` and `npm run dev:web` can also be run separately.
 
 For CI/container image builds:
 
-```bash
-npm run build:container
-```
+`npm run build` (or `npm run build:container`) builds the web UI.
 
 Notes:
-1. Container mode uses the headless API (`:8787`) instead of Electron IPC.
+1. Runtime uses the headless API (`:8787`) for tool execution and persistence.
 2. Working directory can be local filesystem path or `s3://...` URI.
 3. Current headless execution supports local filesystem tools; `s3://` is persisted as config but tool execution against S3 is not yet implemented.
-4. Full desktop runtime still requires Electron (or an X/Wayland-capable runtime like Xvfb).
+4. Project-oriented APIs are available in headless mode (`/projects`, `/projects/:id/collections`, `/projects/:id/documents`, `/projects/:id/rag/query`, `/projects/:id/runs`).
+5. Electron is no longer required or supported.
 
 ## Build
 
@@ -83,18 +72,17 @@ Notes:
 npm run build
 ```
 
-This currently builds app artifacts (no installer packaging).
+This builds web artifacts for container/remote deployment.
 
 ## Architecture Overview
 
 ```text
 open-analyst/
-├── src/main/         # Electron main process (IPC, sessions, tools, sandbox)
-├── src/preload/      # Preload bridge
+├── scripts/          # Headless API service + runtime helpers
 ├── src/renderer/     # React UI
 ├── .claude/skills/   # Built-in skills
 ├── resources/        # Static assets
-└── scripts/          # Build/setup helpers
+└── tests/            # Validation and regression tests
 ```
 
 ## Refactor Direction

@@ -2,20 +2,41 @@
 
 ## Summary
 
-This codebase now supports two runtime modes:
+This codebase now runs in a single remote runtime mode:
 
-1. **Desktop mode (Electron)**  
-   - Existing Electron main/preload/renderer flow.
-   - Full IPC-backed behavior.
-
-2. **Container/headless mode (EC2, Docker, K8s)**  
-   - Renderer runs without Electron.
-   - New headless API service provides real agent/tool execution.
+1. **Container/headless mode (EC2, Docker, K8s)**  
+   - Renderer runs in browser mode.
+   - Headless API service provides agent/tool execution and persistence.
    - Working directory is persistent on the host.
 
 ---
 
 ## What Was Implemented
+
+### 0. Project-oriented runtime foundation (latest)
+
+Added:
+
+- `scripts/headless/project-store.js`
+
+Capabilities:
+
+- Persistent project store at `~/.config/open-analyst/projects-store.json`.
+- Project lifecycle APIs:
+  - `GET /projects`
+  - `POST /projects`
+  - `POST /projects/active`
+  - `GET|PATCH|DELETE /projects/:projectId`
+- Collection/source APIs:
+  - `GET|POST /projects/:projectId/collections`
+  - `GET|POST /projects/:projectId/documents`
+  - `POST /projects/:projectId/import/url`
+- Basic project-scoped retrieval API:
+  - `POST /projects/:projectId/rag/query`
+- Run-log APIs:
+  - `GET /projects/:projectId/runs`
+  - `GET /projects/:projectId/runs/:runId`
+- `/chat` now records run lifecycle events tied to a project.
 
 ### 1. Headless backend service for container mode
 
@@ -82,7 +103,7 @@ Updated:
 New scripts:
 
 - `npm run serve:headless`
-- `npm run dev:container:stack`
+- `npm run dev:stack`
 
 Stack startup:
 
@@ -102,9 +123,9 @@ UI now indicates container mode uses headless API (`:8787`) for tools execution.
 ## Additional Related Work Completed During This Iteration
 
 - Headless-friendly Vite behavior:
-  - `vite.config.ts` now supports disabling Electron plugin in container mode.
+  - `vite.config.ts` is browser-only (Electron-free).
 - Container-focused scripts:
-  - `dev:container`, `dev:container:full`, `build:container`.
+  - `dev:stack`, `dev:web`, `build`, `build:container`.
 - Browser-mode settings/test persistence support:
   - `src/renderer/utils/browser-config.ts`.
 - Fixed failing tests related to file-link/session-title assertions:
@@ -119,7 +140,7 @@ Executed successfully:
 
 - `npm test -- --run`
 - `npm run build:container`
-- `npm run dev:container:stack` (confirmed both services started)
+- `npm run dev:stack` (confirmed both services started)
 - Runtime smoke check for `/tools` and `/chat` in headless mode
 
 Headless API checks:

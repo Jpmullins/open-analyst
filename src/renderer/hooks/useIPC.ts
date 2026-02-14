@@ -8,6 +8,7 @@ import {
 } from '../utils/browser-config';
 import {
   headlessChat,
+  headlessGetProjects,
   headlessGetWorkingDir,
   headlessSetWorkingDir,
   headlessGetTools,
@@ -188,6 +189,11 @@ export function useIPC() {
     clearPendingTurns,
     cancelQueuedMessages,
     addTraceStep,
+    activeProjectId,
+    sessionProjectMap,
+    linkSessionToProject,
+    linkSessionToRun,
+    setActiveProjectId,
   } = useAppStore();
 
   const applyHeadlessTraces = useCallback((sessionId: string, traces: HeadlessTraceStep[]) => {
@@ -271,6 +277,9 @@ export function useIPC() {
           };
 
           addSession(session);
+          if (activeProjectId) {
+            linkSessionToProject(sessionId, activeProjectId);
+          }
           useAppStore.getState().setActiveSession(sessionId);
 
           const userMessage: Message = {
@@ -293,7 +302,10 @@ export function useIPC() {
           let assistantText = '';
           let traces: HeadlessTraceStep[] = [];
           try {
-            const result = await headlessChat(chatMessages, prompt);
+            const result = await headlessChat(chatMessages, prompt, activeProjectId || undefined);
+            if ((result as any).runId && sessionId) {
+              linkSessionToRun(sessionId, (result as any).runId);
+            }
             assistantText = result.text;
             traces = result.traces;
           } catch {
@@ -376,7 +388,7 @@ export function useIPC() {
         throw e;
       }
     },
-    [invoke, addSession, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces]
+    [invoke, addSession, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces, activeProjectId, linkSessionToProject]
   );
 
   // Continue an existing session
@@ -426,7 +438,11 @@ export function useIPC() {
           let assistantText = '';
           let traces: HeadlessTraceStep[] = [];
           try {
-            const result = await headlessChat(chatMessages, prompt);
+            const projectId = sessionProjectMap[sessionId] || activeProjectId || undefined;
+            const result = await headlessChat(chatMessages, prompt, projectId);
+            if ((result as any).runId) {
+              linkSessionToRun(sessionId, (result as any).runId);
+            }
             assistantText = result.text;
             traces = result.traces;
           } catch {
@@ -487,7 +503,7 @@ export function useIPC() {
       });
       // Loading will be reset when we receive session.status event
     },
-    [send, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces]
+    [send, addMessage, updateSession, setLoading, activateNextTurn, clearActiveTurn, clearPendingTurns, applyHeadlessTraces, sessionProjectMap, activeProjectId]
   );
 
   const stopSession = useCallback(
@@ -639,6 +655,16 @@ export function useIPC() {
     return window.electronAPI.mcp.getServerStatus();
   }, []);
 
+  const refreshProjects = useCallback(async () => {
+    try {
+      const payload = await headlessGetProjects();
+      setActiveProjectId(payload.activeProject?.id || null);
+      return payload;
+    } catch {
+      return { activeProject: null, projects: [] };
+    }
+  }, [setActiveProjectId]);
+
   const getHeadlessTools = useCallback(async () => {
     if (isElectron) return [];
     try {
@@ -666,6 +692,7 @@ export function useIPC() {
     setWorkingDirPath,
     getMCPServers,
     getHeadlessTools,
+    refreshProjects,
     isElectron,
   };
 }

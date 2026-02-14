@@ -12,7 +12,7 @@ import { SandboxSetupDialog } from './components/SandboxSetupDialog';
 import { SandboxSyncToast } from './components/SandboxSyncToast';
 import type { AppConfig } from './types';
 import { getBrowserConfig, saveBrowserConfig } from './utils/browser-config';
-import { headlessGetWorkingDir, headlessSaveConfig } from './utils/headless-api';
+import { headlessGetProjects, headlessGetWorkingDir, headlessSaveConfig } from './utils/headless-api';
 
 // Check if running in Electron
 const isElectronEnv = typeof window !== 'undefined' && window.electronAPI !== undefined;
@@ -33,6 +33,8 @@ function App() {
     setAppConfig,
     setSandboxSetupComplete,
     setWorkingDir,
+    setProjects,
+    setActiveProjectId,
   } = useAppStore();
   const { listSessions, isElectron } = useIPC();
   const initialized = useRef(false);
@@ -55,6 +57,12 @@ function App() {
         if (result?.workingDir) {
           setWorkingDir(result.workingDir);
         }
+      })
+      .catch(() => {});
+    headlessGetProjects()
+      .then((payload) => {
+        setProjects(payload.projects);
+        setActiveProjectId(payload.activeProject?.id || null);
       })
       .catch(() => {});
   }, []); // Empty deps - run once

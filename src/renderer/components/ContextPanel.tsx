@@ -1,107 +1,250 @@
-import { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
 import { resolveArtifactPath } from '../utils/artifact-path';
 import { extractFilePathFromToolOutput } from '../utils/tool-output-path';
 import { getArtifactLabel, getArtifactIconComponent, getArtifactSteps } from '../utils/artifact-steps';
-import { useIPC } from '../hooks/useIPC';
+import { headlessGetRun, type HeadlessRun, type HeadlessRunEvent } from '../utils/headless-api';
 import {
-  ChevronDown,
-  ChevronUp,
   ChevronLeft,
   ChevronRight,
-  FileText,
-  FileSpreadsheet,
-  FilePieChart,
-  FileCode2,
-  FileArchive,
-  FileAudio2,
-  FileVideo,
-  Image as ImageIcon,
-  FolderOpen,
-  FolderSync,
-  Globe,
-  File,
-  Check,
+  CheckCircle2,
+  Circle,
   Loader2,
   AlertCircle,
-  Terminal,
-  Search,
-  Eye,
-  Edit,
-  Plug,
   Wrench,
+  Sparkles,
+  Database,
+  Link2,
+  File,
+  FolderOpen,
+  Activity,
+  ExternalLink,
 } from 'lucide-react';
-import type { TraceStep, TraceStepStatus, MCPServerInfo } from '../types';
+import type { TraceStep } from '../types';
+
+interface PhaseStep {
+  key: 'plan' | 'retrieve' | 'execute' | 'synthesize' | 'validate';
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  detail?: string;
+}
+
+function extractUrls(value: unknown): string[] {
+  const text = typeof value === 'string' ? value : JSON.stringify(value || '');
+  const matches = text.match(/https?:\/\/[^\s)"]+/g) || [];
+  return Array.from(new Set(matches)).slice(0, 20);
+}
+
+function hostFromUrl(raw: string): string {
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw;
+  }
+}
+
+function buildPhasePlan(run: HeadlessRun | null, traces: TraceStep[]): PhaseStep[] {
+  const events = Array.isArray(run?.events) ? run!.events : [];
+  const eventTypes = new Set(events.map((event) => event.type));
+
+  const startedTools = events.filter((event) => event.type === 'tool_call_started');
+  const finishedTools = events.filter((event) => event.type === 'tool_call_finished');
+
+  const toolNames = startedTools
+    .map((event) => String((event.payload || {}).toolName || '').toLowerCase())
+    .filter(Boolean);
+
+  const retrieveToolPattern = /(web_search|web_fetch|read|grep|glob|search|query|rag)/i;
+  const retrieveStarted = toolNames.some((name) => retrieveToolPattern.test(name));
+  const retrieveFinished = finishedTools.some((event) => {
+    const name = String((event.payload || {}).toolName || '').toLowerCase();
+    return retrieveToolPattern.test(name);
+  });
+
+  const executeStarted = startedTools.length > 0 || traces.some((trace) => trace.type === 'tool_call');
+  const executeFinished = finishedTools.length > 0 || traces.some((trace) => trace.type === 'tool_result');
+  const executeErrored = finishedTools.some((event) => !Boolean((event.payload || {}).ok));
+
+  const runFailed = run?.status === 'failed';
+  const runCompleted = run?.status === 'completed';
+
+  const phases: PhaseStep[] = [
+    {
+      key: 'plan',
+      label: 'Plan',
+      status: eventTypes.has('chat_requested') || eventTypes.has('model_turn_started') || traces.length > 0
+        ? runFailed && !eventTypes.has('model_turn_started')
+          ? 'error'
+          : 'completed'
+        : 'pending',
+      detail: eventTypes.has('chat_requested') ? 'Task accepted by orchestrator' : 'Awaiting orchestration',
+    },
+    {
+      key: 'retrieve',
+      label: 'Retrieve',
+      status: retrieveFinished ? 'completed' : retrieveStarted ? 'running' : runFailed && retrieveStarted ? 'error' : 'pending',
+      detail: retrieveFinished
+        ? 'Sources collected and scanned'
+        : retrieveStarted
+          ? 'Searching and gathering evidence'
+          : 'No retrieval activity yet',
+    },
+    {
+      key: 'execute',
+      label: 'Execute',
+      status: executeErrored ? 'error' : executeFinished ? 'completed' : executeStarted ? 'running' : 'pending',
+      detail: executeFinished
+        ? `${finishedTools.length || traces.filter((trace) => trace.type === 'tool_result').length} tool steps finished`
+        : executeStarted
+          ? 'Tool execution in progress'
+          : 'Execution not started',
+    },
+    {
+      key: 'synthesize',
+      label: 'Synthesize',
+      status: eventTypes.has('assistant_response') || runCompleted
+        ? 'completed'
+        : runFailed
+          ? 'error'
+          : run
+            ? 'running'
+            : 'pending',
+      detail: eventTypes.has('assistant_response') || runCompleted
+        ? 'Response generated'
+        : runFailed
+          ? 'Failed before response synthesis'
+          : 'Preparing response',
+    },
+    {
+      key: 'validate',
+      label: 'Validate',
+      status: runCompleted && eventTypes.has('chat_completed')
+        ? 'completed'
+        : runFailed
+          ? 'error'
+          : (eventTypes.has('assistant_response') || runCompleted)
+            ? 'running'
+            : 'pending',
+      detail: runCompleted && eventTypes.has('chat_completed')
+        ? 'Final response committed'
+        : runFailed
+          ? 'Validation failed'
+          : 'Final checks pending',
+    },
+  ];
+
+  return phases;
+}
 
 export function ContextPanel() {
-  const { t } = useTranslation();
-  const isElectronEnv = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const {
     activeSessionId,
     sessions,
     traceStepsBySession,
-    activeTurnsBySession,
-    pendingTurnsBySession,
     contextPanelCollapsed,
     toggleContextPanel,
     workingDir,
+    sessionProjectMap,
+    sessionRunMap,
+    setSessionPlanSnapshot,
   } = useAppStore();
-  const { getMCPServers, getHeadlessTools, changeWorkingDir } = useIPC();
-  const [progressOpen, setProgressOpen] = useState(true);
-  const [artifactsOpen, setArtifactsOpen] = useState(true);
-  const [contextOpen, setContextOpen] = useState(true);
-  const [expandedConnector, setExpandedConnector] = useState<string | null>(null);
-  const [mcpServers, setMcpServers] = useState<MCPServerInfo[]>([]);
-  const [headlessTools, setHeadlessTools] = useState<Array<{ name: string; description: string }>>([]);
-  const [copiedPath, setCopiedPath] = useState(false);
-  const [isChangingDir, setIsChangingDir] = useState(false);
 
-  const handleCopyPath = async (path: string) => {
-    try {
-      await navigator.clipboard.writeText(path);
-      setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy path:', err);
-    }
-  };
+  const [run, setRun] = useState<HeadlessRun | null>(null);
 
+  const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) || null : null;
   const steps = activeSessionId ? traceStepsBySession[activeSessionId] || [] : [];
-  const activeTurn = activeSessionId ? activeTurnsBySession[activeSessionId] : null;
-  const pendingCount = activeSessionId ? pendingTurnsBySession[activeSessionId]?.length ?? 0 : 0;
-  const isRunning = Boolean(activeTurn || pendingCount > 0);
-  const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) : null;
   const currentWorkingDir = activeSession?.cwd || workingDir;
   const { artifactSteps, displayArtifactSteps } = getArtifactSteps(steps);
-  const canShowItemInFolder = typeof window !== 'undefined' && !!window.electronAPI?.showItemInFolder;
 
-  // Load MCP servers on mount
+  const activeProjectId = activeSessionId ? sessionProjectMap[activeSessionId] : undefined;
+  const activeRunId = activeSessionId ? sessionRunMap[activeSessionId] : undefined;
+
   useEffect(() => {
-    const loadMCPServers = async () => {
-      try {
-        const servers = await getMCPServers();
-        setMcpServers(servers || []);
-      } catch (error) {
-        console.error('Failed to load MCP servers:', error);
+    let mounted = true;
+
+    const loadRun = async () => {
+      if (!activeProjectId || !activeRunId) {
+        if (mounted) setRun(null);
+        return;
       }
+      const found = await headlessGetRun(activeProjectId, activeRunId);
+      if (mounted) setRun(found);
     };
-    loadMCPServers();
-    // Refresh every 5 seconds
-    const interval = setInterval(loadMCPServers, 5000);
-    return () => clearInterval(interval);
-  }, [getMCPServers]);
+
+    void loadRun();
+    const interval = setInterval(loadRun, 4000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [activeProjectId, activeRunId]);
+
+  const phaseSteps = useMemo(() => buildPhasePlan(run, steps), [run, steps]);
 
   useEffect(() => {
-    if (isElectronEnv) return;
-    const loadTools = async () => {
-      const tools = await getHeadlessTools();
-      setHeadlessTools(tools);
+    if (!activeSessionId) return;
+    setSessionPlanSnapshot(activeSessionId, {
+      sessionId: activeSessionId,
+      runId: activeRunId,
+      projectId: activeProjectId,
+      phases: phaseSteps.map((phase) => ({
+        key: phase.key,
+        label: phase.label,
+        status: phase.status,
+      })),
+      updatedAt: Date.now(),
+    });
+  }, [activeSessionId, activeRunId, activeProjectId, phaseSteps, setSessionPlanSnapshot]);
+
+  const progress = useMemo(() => {
+    const total = phaseSteps.length;
+    if (!total) return 0;
+    const completed = phaseSteps.filter((step) => step.status === 'completed').length;
+    return Math.round((completed / total) * 100);
+  }, [phaseSteps]);
+
+  const runEvents: HeadlessRunEvent[] = Array.isArray(run?.events) ? run!.events : [];
+
+  const resources = useMemo(() => {
+    const tools = new Set<string>();
+    const skills = new Set<string>();
+    const sources = new Set<string>();
+    const collections = new Set<string>();
+
+    for (const step of steps) {
+      if (step.toolName) {
+        tools.add(step.toolName);
+        if (step.toolName.startsWith('mcp__')) {
+          skills.add(step.toolName.replace('mcp__', '').replace(/__/g, ': '));
+        }
+      }
+      extractUrls(step.toolInput).forEach((url) => sources.add(url));
+      extractUrls(step.toolOutput).forEach((url) => sources.add(url));
+
+      const inputText = JSON.stringify(step.toolInput || {}).toLowerCase();
+      if (inputText.includes('collection')) {
+        collections.add('collection referenced in task execution');
+      }
+    }
+
+    for (const event of runEvents) {
+      if (event.type === 'tool_call_started') {
+        const toolName = String((event.payload || {}).toolName || 'tool');
+        tools.add(toolName);
+        if (toolName.startsWith('mcp__')) {
+          skills.add(toolName.replace('mcp__', '').replace(/__/g, ': '));
+        }
+      }
+      extractUrls(event.payload).forEach((url) => sources.add(url));
+    }
+
+    return {
+      tools: Array.from(tools),
+      skills: Array.from(skills),
+      sources: Array.from(sources),
+      collections: Array.from(collections),
     };
-    loadTools();
-    const interval = setInterval(loadTools, 8000);
-    return () => clearInterval(interval);
-  }, [getHeadlessTools, isElectronEnv]);
+  }, [steps, runEvents]);
 
   if (contextPanelCollapsed) {
     return (
@@ -109,7 +252,7 @@ export function ContextPanel() {
         <button
           onClick={toggleContextPanel}
           className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
-          title={t('context.expandPanel')}
+          title="Expand panel"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -123,566 +266,168 @@ export function ContextPanel() {
         <button
           onClick={toggleContextPanel}
           className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
-          title={t('context.collapsePanel')}
+          title="Collapse panel"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
-      {/* Progress Section */}
-      <div className="border-b border-border">
-        <button
-          onClick={() => setProgressOpen(!progressOpen)}
-          className="w-full px-4 py-3 flex items-center justify-between hover:bg-surface-hover transition-colors"
-        >
-          <span className="text-sm font-medium text-text-primary">{t('context.progress')}</span>
-          <div className="flex items-center gap-2">
-            {steps.filter(s => s.status === 'running').length > 0 && (
-              <Loader2 className="w-4 h-4 text-accent animate-spin" />
-            )}
-            {steps.filter(s => s.status === 'running').length === 0 && isRunning && (
-              <Loader2 className="w-4 h-4 text-accent animate-spin" />
-            )}
-            {progressOpen ? (
-              <ChevronUp className="w-4 h-4 text-text-muted" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-text-muted" />
-            )}
-          </div>
-        </button>
-        
-        {progressOpen && (
-          <div className="px-4 pb-4 max-h-80 overflow-y-auto">
-            {steps.length === 0 ? (
-              <p className="text-xs text-text-muted">
-                {pendingCount > 0 ? t('context.queuedMessages', { count: pendingCount }) : t('context.stepsWillShow')}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {getGroupedSteps(steps).map((group) => (
-                  <TraceStepGroupItem key={group.id} group={group} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
-      {/* Artifacts Section */}
-      <div className="border-b border-border">
-        <button
-          onClick={() => setArtifactsOpen(!artifactsOpen)}
-          className="w-full px-4 py-3 flex items-center justify-between hover:bg-surface-hover transition-colors"
-        >
-          <span className="text-sm font-medium text-text-primary">{t('context.artifacts')}</span>
-          {artifactsOpen ? (
-            <ChevronUp className="w-4 h-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-text-muted" />
-          )}
-        </button>
-        
-        {artifactsOpen && (
-          <div className="px-4 pb-4 space-y-1">
-            {/* Extract artifacts from trace steps */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <section className="rounded-xl border border-border bg-surface-muted p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="w-4 h-4 text-accent" />
+              <span>Plan</span>
+            </div>
+            <span className="text-xs text-text-muted">{progress}%</span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-background mb-3 overflow-hidden">
+            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${progress}%` }} />
+          </div>
+          <div className="space-y-2">
+            {phaseSteps.map((phase) => (
+              <div key={phase.key} className="flex items-start gap-2">
+                {phase.status === 'completed' ? (
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 text-success" />
+                ) : phase.status === 'running' ? (
+                  <Loader2 className="w-4 h-4 mt-0.5 text-accent animate-spin" />
+                ) : phase.status === 'error' ? (
+                  <AlertCircle className="w-4 h-4 mt-0.5 text-error" />
+                ) : (
+                  <Circle className="w-4 h-4 mt-0.5 text-text-muted" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm text-text-primary leading-tight">{phase.label}</div>
+                  {phase.detail && <div className="text-xs text-text-muted truncate">{phase.detail}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface-muted p-3 space-y-3">
+          <div className="text-sm font-semibold">Resources Used</div>
+          <ResourceList title="Tools" icon={<Wrench className="w-3.5 h-3.5" />} items={resources.tools} empty="No tools used yet" />
+          <ResourceList title="Skills" icon={<Sparkles className="w-3.5 h-3.5" />} items={resources.skills} empty="No skills used yet" />
+          <ResourceList title="Collections" icon={<Database className="w-3.5 h-3.5" />} items={resources.collections} empty="No collections referenced" />
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface-muted p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold mb-2">
+            <Link2 className="w-4 h-4 text-accent" />
+            <span>Source Evidence</span>
+          </div>
+          <div className="space-y-1">
+            {resources.sources.length === 0 ? (
+              <div className="text-xs text-text-muted">No source evidence captured.</div>
+            ) : (
+              resources.sources.slice(0, 10).map((url) => (
+                <button
+                  key={url}
+                  className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg bg-background border border-border hover:bg-surface-hover"
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
+                      void window.electronAPI.openExternal(url);
+                      return;
+                    }
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                  }}
+                  title={url}
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-text-muted" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium truncate">{hostFromUrl(url)}</div>
+                    <div className="text-[10px] text-text-muted truncate">{url}</div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface-muted p-3">
+          <div className="text-sm font-semibold mb-2">Artifacts</div>
+          <div className="space-y-1">
             {displayArtifactSteps.length === 0 ? (
-              <p className="text-xs text-text-muted">{t('context.noArtifactsYet')}</p>
+              <div className="text-xs text-text-muted">No artifacts yet.</div>
             ) : (
               displayArtifactSteps.map((step, index) => {
-                const artifactInfo = parseArtifactOutput(step.toolOutput);
                 const fallbackPath = extractFilePathFromToolOutput(step.toolOutput);
-                const resolvedFallbackPath = fallbackPath
-                  ? resolveArtifactPath(fallbackPath, currentWorkingDir)
-                  : '';
                 const label = artifactSteps.length > 0
-                  ? getArtifactLabel(artifactInfo?.path || '', artifactInfo?.name)
-                  : (fallbackPath ? getArtifactLabel(fallbackPath) : t('context.fileCreated'));
-                const artifactPath = artifactSteps.length > 0
-                  ? resolveArtifactPath(artifactInfo?.path || '', currentWorkingDir)
-                  : resolvedFallbackPath;
-                const canClick = Boolean(artifactPath && canShowItemInFolder);
+                  ? getArtifactLabel(step.toolOutput || '', undefined)
+                  : (fallbackPath ? getArtifactLabel(fallbackPath) : 'Artifact');
                 const iconComponent = getArtifactIconComponent(label);
-                const IconComponent =
-                  iconComponent === 'presentation' ? FilePieChart
-                  : iconComponent === 'table' ? FileSpreadsheet
-                  : iconComponent === 'document' ? FileText
-                  : iconComponent === 'code' ? FileCode2
-                  : iconComponent === 'image' ? ImageIcon
-                  : iconComponent === 'audio' ? FileAudio2
-                  : iconComponent === 'video' ? FileVideo
-                  : iconComponent === 'archive' ? FileArchive
-                  : iconComponent === 'text' ? File
-                  : File;
-
+                const Icon = iconComponent === 'document' ? File : File;
+                const path = fallbackPath ? resolveArtifactPath(fallbackPath, currentWorkingDir) : '';
                 return (
-                  <div
-                    key={index}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${canClick ? 'cursor-pointer hover:bg-surface-hover' : ''}`}
-                    onClick={() => {
-                      if (!canClick) return;
-                      void window.electronAPI.showItemInFolder(artifactPath);
-                    }}
-                    title={canClick ? artifactPath : undefined}
-                  >
-                    <IconComponent className="w-4 h-4 text-text-muted" />
-                    <span className="text-sm text-text-primary truncate">
-                      {label}
-                    </span>
+                  <div key={`${step.id}-${index}`} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-background border border-border">
+                    <Icon className="w-3.5 h-3.5 text-text-muted" />
+                    <span className="text-sm flex-1 truncate">{label}</span>
+                    {path ? <span className="text-[10px] text-text-muted truncate max-w-[90px]">{path.split(/[/\\]/).pop()}</span> : null}
                   </div>
                 );
               })
             )}
           </div>
-        )}
-      </div>
+        </section>
 
-      {/* Context Section */}
-      <div className="flex-1 overflow-y-auto">
-        <button
-          onClick={() => setContextOpen(!contextOpen)}
-          className="w-full px-4 py-3 flex items-center justify-between hover:bg-surface-hover transition-colors"
-        >
-          <span className="text-sm font-medium text-text-primary">{t('context.context')}</span>
-          {contextOpen ? (
-            <ChevronUp className="w-4 h-4 text-text-muted" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-text-muted" />
-          )}
-        </button>
-        
-        {contextOpen && (
-          <div className="px-4 pb-4 space-y-4">
-            {/* Working Directory */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-text-muted">{t('context.workingDirectory')}</p>
-                <button
-                  onClick={async () => {
-                    setIsChangingDir(true);
-                    try {
-                      await changeWorkingDir(activeSessionId || undefined);
-                    } finally {
-                      setIsChangingDir(false);
-                    }
-                  }}
-                  disabled={isChangingDir}
-                  className="text-xs text-accent hover:text-accent-hover disabled:opacity-50 flex items-center gap-1 transition-colors"
-                  title={t('context.workingDirectory')}
-                >
-                  {isChangingDir ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <FolderSync className="w-3 h-3" />
-                  )}
-                  <span>{t('common.edit')}</span>
-                </button>
-              </div>
-              <div className="space-y-1">
-                {currentWorkingDir ? (
-                  <div 
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                      copiedPath ? 'bg-success/10' : 'bg-surface-muted hover:bg-surface-active'
-                    }`}
-                    title={copiedPath ? t('context.copied') : `${currentWorkingDir}\nClick to copy`}
-                    onClick={() => handleCopyPath(currentWorkingDir)}
-                  >
-                    {copiedPath ? (
-                      <Check className="w-4 h-4 text-success flex-shrink-0" />
-                    ) : (
-                      <FolderOpen className="w-4 h-4 text-accent flex-shrink-0" />
-                    )}
-                    <span className={`text-sm break-all leading-relaxed ${copiedPath ? 'text-success' : 'text-text-primary'}`}>
-                      {copiedPath ? t('context.copied') : formatPath(currentWorkingDir)}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-xs text-text-muted px-2">{t('context.noFolderSelected')}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Tools Used - Only show non-MCP tools */}
-            <div>
-              <p className="text-xs text-text-muted mb-2">{t('context.toolsUsed')}</p>
-              <div className="space-y-1">
-                {getUniqueNonMCPTools(steps).map((tool, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-muted"
-                  >
-                    {getToolIcon(tool)}
-                    <span className="text-sm text-text-primary">{tool}</span>
-                    <span className="text-xs text-text-muted ml-auto">
-                      {steps.filter(s => s.toolName === tool).length}x
-                    </span>
-                  </div>
-                ))}
-                {getUniqueNonMCPTools(steps).length === 0 && (
-                  <p className="text-xs text-text-muted px-2">{t('context.noToolsUsedYet')}</p>
-                )}
-              </div>
-            </div>
-
-            {!isElectronEnv && (
-              <div>
-                <p className="text-xs text-text-muted mb-2">Available Tools</p>
-                <div className="space-y-1">
-                  {headlessTools.map((tool) => (
-                    <div
-                      key={tool.name}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-muted"
-                      title={tool.description}
-                    >
-                      {getToolIcon(tool.name)}
-                      <span className="text-sm text-text-primary truncate">{tool.name}</span>
-                    </div>
-                  ))}
-                  {headlessTools.length === 0 && (
-                    <p className="text-xs text-text-muted px-2">No headless tools detected</p>
-                  )}
+        <section className="rounded-xl border border-border bg-surface-muted p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold mb-2">
+            <Activity className="w-4 h-4 text-accent" />
+            <span>Plan Progress Events</span>
+          </div>
+          <div className="space-y-1 max-h-[220px] overflow-y-auto">
+            {runEvents.length === 0 ? (
+              <div className="text-xs text-text-muted">No run events yet for this task.</div>
+            ) : (
+              [...runEvents].reverse().slice(0, 24).map((event) => (
+                <div key={event.id} className="px-2 py-1.5 rounded-lg bg-background border border-border">
+                  <div className="text-xs font-medium text-text-primary">{event.type}</div>
+                  <div className="text-[10px] text-text-muted truncate">{new Date(event.timestamp).toLocaleTimeString()}</div>
                 </div>
-              </div>
+              ))
             )}
-
-            {/* Connectors - Inside Context */}
-            <div>
-              <p className="text-xs text-text-muted mb-2">{t('context.mcpConnectors')}</p>
-              <div className="space-y-1">
-                {mcpServers.length === 0 ? (
-                  <p className="text-xs text-text-muted px-2">{t('mcp.noConnectors')}</p>
-                ) : (
-                  mcpServers.map((server) => (
-                    <ConnectorItem
-                      key={server.id}
-                      server={server}
-                      steps={steps}
-                      expanded={expandedConnector === server.id}
-                      onToggle={() => setExpandedConnector(expandedConnector === server.id ? null : server.id)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
           </div>
-        )}
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface-muted p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold mb-2">
+            <FolderOpen className="w-4 h-4 text-accent" />
+            <span>Workspace</span>
+          </div>
+          <div className="text-xs text-text-muted break-all">{currentWorkingDir || 'No working directory selected.'}</div>
+          {activeRunId && <div className="text-xs text-text-muted mt-2">run: {activeRunId}</div>}
+        </section>
       </div>
     </div>
   );
 }
 
-function ConnectorItem({ 
-  server, 
-  steps, 
-  expanded, 
-  onToggle 
-}: { 
-  server: MCPServerInfo; 
-  steps: TraceStep[];
-  expanded: boolean;
-  onToggle: () => void;
+function ResourceList({
+  title,
+  icon,
+  items,
+  empty,
+}: {
+  title: string;
+  icon: JSX.Element;
+  items: string[];
+  empty: string;
 }) {
-  const { t } = useTranslation();
-  // Get MCP tools used from this server
-  // Tool names are in format: mcp__ServerName__toolname (with double underscores)
-  // Server name preserves original case and spaces are replaced with underscores
-  const serverNamePattern = server.name.replace(/\s+/g, '_');
-  
-  const mcpToolsUsed = steps
-    .filter(s => s.toolName?.startsWith('mcp__'))
-    .map(s => s.toolName!)
-    .filter((name, index, self) => self.indexOf(name) === index)
-    .filter(name => {
-      // Check if this tool belongs to this server
-      // Format: mcp__ServerName__toolname
-      const match = name.match(/^mcp__(.+?)__(.+)$/);
-      if (match) {
-        const toolServerName = match[1];
-        return toolServerName === serverNamePattern;
-      }
-      return false;
-    });
-
-  const usageCount = steps.filter(s => 
-    s.toolName?.startsWith('mcp__') && mcpToolsUsed.includes(s.toolName)
-  ).length;
-
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      <button
-        onClick={onToggle}
-        className={`w-full px-3 py-2 flex items-center gap-2 transition-colors ${
-          server.connected 
-            ? 'bg-purple-500/10 hover:bg-purple-500/20' 
-            : 'bg-surface-muted hover:bg-surface-hover'
-        }`}
-      >
-        <div className={`w-6 h-6 rounded flex items-center justify-center ${
-          server.connected ? 'bg-purple-500/20' : 'bg-surface-muted'
-        }`}>
-          <Plug className={`w-3.5 h-3.5 ${server.connected ? 'text-purple-500' : 'text-text-muted'}`} />
-        </div>
-        <div className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-text-primary truncate">
-              {server.name}
-            </span>
-            {!server.connected && (
-              <span className="text-xs text-text-muted">({t('mcp.notConnected')})</span>
-            )}
-          </div>
-          {server.connected && (
-            <p className="text-xs text-text-muted">
-              {server.toolCount} tools
-              {usageCount > 0 && ` • ${usageCount} calls`}
-            </p>
-          )}
-        </div>
-        {server.connected && (
-          expanded ? (
-            <ChevronDown className="w-4 h-4 text-text-muted" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-text-muted" />
-          )
-        )}
-      </button>
-
-      {expanded && server.connected && (
-        <div className="px-3 pb-2 space-y-1 bg-surface">
-          {mcpToolsUsed.length > 0 ? (
-            <>
-              <p className="text-xs text-text-muted px-2 py-1">{t('context.toolsUsedLabel')}</p>
-              {mcpToolsUsed.map((toolName, index) => {
-                const count = steps.filter(s => s.toolName === toolName).length;
-                // Extract readable tool name - remove mcp__ServerName__ prefix
-                const match = toolName.match(/^mcp__(.+?)__(.+)$/);
-                const readableName = match ? match[2] : toolName;
-                
-                return (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded bg-purple-500/5 hover:bg-purple-500/10 transition-colors"
-                  >
-                    <Wrench className="w-3.5 h-3.5 text-purple-500" />
-                    <span className="text-xs text-text-primary flex-1">{readableName}</span>
-                    <span className="text-xs text-text-muted">{count}x</span>
-                  </div>
-                );
-              })}
-            </>
-          ) : (
-            <p className="text-xs text-text-muted px-2 py-1">{t('context.noToolsUsedYet')}</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Group consecutive steps with the same tool name
-interface StepGroup {
-  id: string;
-  toolName: string | undefined;
-  displayName: string;
-  steps: TraceStep[];
-  status: TraceStepStatus;
-  hasError: boolean;
-}
-
-function getGroupedSteps(steps: TraceStep[]): StepGroup[] {
-  const groups: StepGroup[] = [];
-  
-  for (const step of steps) {
-    const formatToolName = (toolName?: string) => {
-      if (!toolName) return undefined;
-      const match = toolName.match(/^mcp__(.+?)__(.+)$/);
-      if (match) {
-        return `${match[1]}: ${match[2]}`;
-      }
-      return toolName;
-    };
-    
-    const displayName = formatToolName(step.toolName) || step.title;
-    const lastGroup = groups[groups.length - 1];
-    
-    // Check if we can merge with the last group
-    if (lastGroup && 
-        lastGroup.toolName === step.toolName && 
-        lastGroup.displayName === displayName &&
-        step.type === 'tool_call') {
-      // Merge into existing group
-      lastGroup.steps.push(step);
-      // Update status to the latest step's status
-      lastGroup.status = step.status;
-      if (step.status === 'error') {
-        lastGroup.hasError = true;
-      }
-    } else {
-      // Create new group
-      groups.push({
-        id: step.id,
-        toolName: step.toolName,
-        displayName,
-        steps: [step],
-        status: step.status,
-        hasError: step.status === 'error',
-      });
-    }
-  }
-  
-  return groups;
-}
-
-function TraceStepGroupItem({ group }: { group: StepGroup }) {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const count = group.steps.length;
-
-  const getIcon = () => {
-    if (group.status === 'running') {
-      return <Loader2 className="w-4 h-4 text-accent animate-spin" />;
-    }
-    if (group.hasError) {
-      return <AlertCircle className="w-4 h-4 text-error" />;
-    }
-    if (group.status === 'completed') {
-      return <Check className="w-4 h-4 text-success" />;
-    }
-    return <div className="w-4 h-4 rounded-full border-2 border-border" />;
-  };
-
-  const getBgColor = () => {
-    if (group.status === 'running') return 'bg-accent/10 border-accent/30';
-    if (group.hasError) return 'bg-error/10 border-error/30';
-    if (group.status === 'completed') return 'bg-success/10 border-success/30';
-    return 'bg-surface-muted border-border';
-  };
-
-  const hasDetails = group.steps.some(s => s.toolInput || s.toolOutput);
-
-  return (
-    <div className={`rounded-lg border ${getBgColor()} overflow-hidden`}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-3 py-2 flex items-center gap-2 text-left"
-      >
-        {getIcon()}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-text-primary truncate">
-            {group.displayName}
-            {count > 1 && (
-              <span className="ml-2 text-xs text-text-muted">×{count}</span>
-            )}
-          </p>
-        </div>
-        {hasDetails && (
-          <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        )}
-      </button>
-
-      {expanded && hasDetails && (
-        <div className="px-3 pb-3 space-y-3">
-          {group.steps.map((step, index) => (
-            <div key={step.id} className="space-y-2">
-              {count > 1 && (
-                <p className="text-xs font-medium text-text-muted">{t('context.callNumber', { number: index + 1 })}</p>
-              )}
-          {step.toolInput && (
-            <div>
-                  <p className="text-xs font-medium text-text-muted mb-1">{t('context.input')}</p>
-              <pre className="text-xs bg-surface p-2 rounded overflow-x-auto max-h-32 overflow-y-auto">
-                {JSON.stringify(step.toolInput, null, 2)}
-              </pre>
-            </div>
-          )}
-          {step.toolOutput && (
-            <div>
-                  <p className="text-xs font-medium text-text-muted mb-1">{t('context.output')}</p>
-              <pre className="text-xs bg-surface p-2 rounded overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">
-                {step.toolOutput}
-              </pre>
-            </div>
-          )}
+    <div>
+      <div className="text-xs text-text-muted mb-1 flex items-center gap-1">{icon}<span>{title}</span></div>
+      {items.length === 0 ? (
+        <div className="text-xs text-text-muted">{empty}</div>
+      ) : (
+        <div className="space-y-1">
+          {items.slice(0, 6).map((item) => (
+            <div key={`${title}-${item}`} className="text-xs px-2 py-1 rounded bg-background border border-border truncate" title={item}>
+              {item}
             </div>
           ))}
         </div>
       )}
     </div>
   );
-}
-
-function getUniqueNonMCPTools(steps: TraceStep[]): string[] {
-  const tools = new Set<string>();
-  steps.forEach(step => {
-    // Only include non-MCP tools (MCP tools start with mcp__)
-    if (step.toolName && !step.toolName.startsWith('mcp__')) {
-      tools.add(step.toolName);
-    }
-  });
-  return Array.from(tools);
-}
-
-function parseArtifactOutput(toolOutput?: string): { path?: string; name?: string; type?: string } | null {
-  if (!toolOutput) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(toolOutput);
-    if (parsed && typeof parsed === 'object') {
-      return parsed as { path?: string; name?: string; type?: string };
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-
-// Format long paths to show abbreviated version
-function formatPath(path: string): string {
-  if (!path) return '';
-  
-  // Windows: Replace C:\Users\username with ~
-  const winHome = /^[A-Z]:\\Users\\[^\\]+/i;
-  const winMatch = path.match(winHome);
-  if (winMatch) {
-    return '~' + path.slice(winMatch[0].length).replace(/\\/g, '/');
-  }
-  
-  // macOS/Linux: Replace /Users/username or /home/username with ~
-  const unixHome = /^\/(?:Users|home)\/[^/]+/;
-  const unixMatch = path.match(unixHome);
-  if (unixMatch) {
-    return '~' + path.slice(unixMatch[0].length);
-  }
-  
-  return path;
-}
-
-function getToolIcon(toolName: string) {
-  switch (toolName) {
-    case 'read_file':
-      return <Eye className="w-4 h-4 text-blue-500" />;
-    case 'write_file':
-      return <Edit className="w-4 h-4 text-green-500" />;
-    case 'edit_file':
-      return <Edit className="w-4 h-4 text-orange-500" />;
-    case 'list_directory':
-      return <FolderOpen className="w-4 h-4 text-yellow-500" />;
-    case 'execute_command':
-      return <Terminal className="w-4 h-4 text-purple-500" />;
-    case 'glob':
-      return <Search className="w-4 h-4 text-orange-500" />;
-    case 'grep':
-      return <Search className="w-4 h-4 text-orange-500" />;
-    case 'search_files':
-      return <Search className="w-4 h-4 text-orange-500" />;
-    case 'WebFetch':
-    case 'webFetch':
-    case 'web_fetch':
-    case 'WebSearch':
-    case 'webSearch':
-    case 'web_search':
-      return <Globe className="w-4 h-4 text-blue-500" />;
-    default:
-      return <File className="w-4 h-4 text-text-muted" />;
-  }
 }
