@@ -17,6 +17,7 @@ import {
   type HeadlessRun,
 } from '../utils/headless-api';
 import { Database, FolderOpen, Plus, Search, FileText, Link2, Activity, RefreshCw } from 'lucide-react';
+import { useAppStore } from '../store';
 
 interface ProjectWorkspaceProps {
   onActiveProjectChange?: (projectId: string | null) => void;
@@ -25,6 +26,8 @@ interface ProjectWorkspaceProps {
 }
 
 export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null, showProjectColumn = true }: ProjectWorkspaceProps) {
+  const activeCollectionByProject = useAppStore((state) => state.activeCollectionByProject);
+  const setProjectActiveCollection = useAppStore((state) => state.setProjectActiveCollection);
   const [projects, setProjects] = useState<HeadlessProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [collections, setCollections] = useState<HeadlessCollection[]>([]);
@@ -64,10 +67,16 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
     setCollections(nextCollections);
     setDocuments(nextDocuments);
     setRuns(nextRuns);
+    const remembered = activeCollectionByProject[projectId] || '';
+    if (remembered && nextCollections.some((item) => item.id === remembered)) {
+      setSelectedCollectionId(remembered);
+      return;
+    }
     if (!selectedCollectionId && nextCollections.length > 0) {
       setSelectedCollectionId(nextCollections[0].id);
+      setProjectActiveCollection(projectId, nextCollections[0].id);
     }
-  }, [selectedCollectionId]);
+  }, [selectedCollectionId, activeCollectionByProject, setProjectActiveCollection]);
 
   const initialize = useCallback(async () => {
     setLoading(true);
@@ -144,6 +153,7 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
       setCollectionName('');
       setCollections((prev) => [created, ...prev]);
       setSelectedCollectionId(created.id);
+      setProjectActiveCollection(activeProjectId, created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -262,7 +272,13 @@ export function ProjectWorkspace({ onActiveProjectChange, fixedProjectId = null,
             <select
               className="input text-sm py-2"
               value={selectedCollectionId}
-              onChange={(event) => setSelectedCollectionId(event.target.value)}
+              onChange={(event) => {
+                const nextCollectionId = event.target.value;
+                setSelectedCollectionId(nextCollectionId);
+                if (activeProjectId && nextCollectionId) {
+                  setProjectActiveCollection(activeProjectId, nextCollectionId);
+                }
+              }}
             >
               <option value="">All Collections</option>
               {collections.map((collection) => (

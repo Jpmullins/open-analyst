@@ -8,14 +8,10 @@ import { PermissionDialog } from './components/PermissionDialog';
 import { ContextPanel } from './components/ContextPanel';
 import { ConfigModal } from './components/ConfigModal';
 import { Titlebar } from './components/Titlebar';
-import { SandboxSetupDialog } from './components/SandboxSetupDialog';
 import { SandboxSyncToast } from './components/SandboxSyncToast';
 import type { AppConfig } from './types';
 import { getBrowserConfig, saveBrowserConfig } from './utils/browser-config';
 import { headlessGetProjects, headlessGetWorkingDir, headlessSaveConfig } from './utils/headless-api';
-
-// Check if running in Electron
-const isElectronEnv = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
 function App() {
   const { 
@@ -25,18 +21,15 @@ function App() {
     showConfigModal,
     isConfigured,
     appConfig,
-    sandboxSetupProgress,
-    isSandboxSetupComplete,
     sandboxSyncStatus,
     setShowConfigModal,
     setIsConfigured,
     setAppConfig,
-    setSandboxSetupComplete,
     setWorkingDir,
     setProjects,
     setActiveProjectId,
   } = useAppStore();
-  const { listSessions, isElectron } = useIPC();
+  const { listSessions } = useIPC();
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -44,10 +37,7 @@ function App() {
     if (initialized.current) return;
     initialized.current = true;
 
-    if (isElectron) {
-      listSessions();
-      return;
-    }
+    listSessions();
 
     const browserConfig = getBrowserConfig();
     setIsConfigured(Boolean(browserConfig.apiKey));
@@ -78,34 +68,16 @@ function App() {
 
   // Handle config save
   const handleConfigSave = useCallback(async (newConfig: Partial<AppConfig>) => {
-    if (!isElectronEnv) {
-      const saved = saveBrowserConfig(newConfig);
-      headlessSaveConfig(saved).catch(() => {});
-      setIsConfigured(Boolean(saved.apiKey));
-      setAppConfig(saved);
-      return;
-    }
-    
-    const result = await window.electronAPI.config.save(newConfig);
-    if (result.success) {
-      setIsConfigured(true);
-      setAppConfig(result.config);
-    }
+    const saved = saveBrowserConfig(newConfig);
+    headlessSaveConfig(saved).catch(() => {});
+    setIsConfigured(Boolean(saved.apiKey));
+    setAppConfig(saved);
   }, [setIsConfigured, setAppConfig]);
 
   // Handle config modal close
   const handleConfigClose = useCallback(() => {
     setShowConfigModal(false);
   }, [setShowConfigModal]);
-
-  // Handle sandbox setup complete
-  const handleSandboxSetupComplete = useCallback(() => {
-    setSandboxSetupComplete(true);
-  }, [setSandboxSetupComplete]);
-
-  // Determine if we should show the sandbox setup dialog
-  // Show if there's progress and setup is not complete
-  const showSandboxSetup = sandboxSetupProgress && !isSandboxSetupComplete;
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
@@ -137,14 +109,6 @@ function App() {
         initialConfig={appConfig}
         isFirstRun={!isConfigured}
       />
-      
-      {/* Sandbox Setup Dialog */}
-      {showSandboxSetup && (
-        <SandboxSetupDialog 
-          progress={sandboxSetupProgress}
-          onComplete={handleSandboxSetupComplete}
-        />
-      )}
       
       {/* Sandbox Sync Toast */}
       <SandboxSyncToast status={sandboxSyncStatus} />

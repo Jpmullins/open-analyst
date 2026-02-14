@@ -63,10 +63,17 @@ export async function headlessChat(
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
   prompt: string,
   projectId?: string,
+  options?: { collectionId?: string; collectionName?: string },
 ): Promise<{ text: string; traces: HeadlessTraceStep[]; runId?: string; projectId?: string }> {
   const result = await requestJson<{ ok: boolean; text: string; traces?: HeadlessTraceStep[]; runId?: string; projectId?: string }>('/chat', {
     method: 'POST',
-    body: JSON.stringify({ messages, prompt, projectId }),
+    body: JSON.stringify({
+      messages,
+      prompt,
+      projectId,
+      collectionId: options?.collectionId,
+      collectionName: options?.collectionName,
+    }),
   });
   return {
     text: result.text || '',
@@ -258,4 +265,170 @@ export async function headlessGetRun(projectId: string, runId: string): Promise<
   } catch {
     return null;
   }
+}
+
+export interface HeadlessCredential {
+  id: string;
+  name: string;
+  type: 'email' | 'website' | 'api' | 'other';
+  service?: string;
+  username: string;
+  password?: string;
+  url?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HeadlessMcpServer {
+  id: string;
+  name: string;
+  type: 'stdio' | 'sse';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface HeadlessSkill {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'builtin' | 'mcp' | 'custom';
+  enabled: boolean;
+  config?: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface HeadlessLogFile {
+  name: string;
+  path: string;
+  size: number;
+  mtime: string;
+}
+
+export async function headlessGetCredentials(): Promise<HeadlessCredential[]> {
+  const response = await requestJson<{ credentials?: HeadlessCredential[] }>('/credentials');
+  return Array.isArray(response.credentials) ? response.credentials : [];
+}
+
+export async function headlessSaveCredential(input: Omit<HeadlessCredential, 'id' | 'createdAt' | 'updatedAt'>): Promise<HeadlessCredential> {
+  const response = await requestJson<{ credential: HeadlessCredential }>('/credentials', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return response.credential;
+}
+
+export async function headlessUpdateCredential(
+  credentialId: string,
+  input: Partial<Omit<HeadlessCredential, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<HeadlessCredential> {
+  const response = await requestJson<{ credential: HeadlessCredential }>(`/credentials/${encodeURIComponent(credentialId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return response.credential;
+}
+
+export async function headlessDeleteCredential(credentialId: string): Promise<void> {
+  await requestJson(`/credentials/${encodeURIComponent(credentialId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function headlessGetMcpPresets(): Promise<Record<string, unknown>> {
+  const response = await requestJson<{ presets?: Record<string, unknown> }>('/mcp/presets');
+  return response.presets && typeof response.presets === 'object' ? response.presets : {};
+}
+
+export async function headlessGetMcpServers(): Promise<HeadlessMcpServer[]> {
+  const response = await requestJson<{ servers?: HeadlessMcpServer[] }>('/mcp/servers');
+  return Array.isArray(response.servers) ? response.servers : [];
+}
+
+export async function headlessSaveMcpServer(server: HeadlessMcpServer): Promise<HeadlessMcpServer> {
+  const response = await requestJson<{ server: HeadlessMcpServer }>('/mcp/servers', {
+    method: 'POST',
+    body: JSON.stringify(server),
+  });
+  return response.server;
+}
+
+export async function headlessDeleteMcpServer(serverId: string): Promise<void> {
+  await requestJson(`/mcp/servers/${encodeURIComponent(serverId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function headlessGetMcpServerStatus(): Promise<Array<{ id: string; name: string; connected: boolean; toolCount: number }>> {
+  const response = await requestJson<{ statuses?: Array<{ id: string; name: string; connected: boolean; toolCount: number }> }>('/mcp/status');
+  return Array.isArray(response.statuses) ? response.statuses : [];
+}
+
+export async function headlessGetMcpTools(): Promise<Array<{ serverId: string; name: string; description: string }>> {
+  const response = await requestJson<{ tools?: Array<{ serverId: string; name: string; description: string }> }>('/mcp/tools');
+  return Array.isArray(response.tools) ? response.tools : [];
+}
+
+export async function headlessGetSkills(): Promise<HeadlessSkill[]> {
+  const response = await requestJson<{ skills?: HeadlessSkill[] }>('/skills');
+  return Array.isArray(response.skills) ? response.skills : [];
+}
+
+export async function headlessValidateSkillPath(folderPath: string): Promise<{ valid: boolean; errors: string[] }> {
+  return requestJson('/skills/validate', {
+    method: 'POST',
+    body: JSON.stringify({ folderPath }),
+  });
+}
+
+export async function headlessInstallSkill(folderPath: string): Promise<{ success: boolean; skill?: HeadlessSkill }> {
+  return requestJson('/skills/install', {
+    method: 'POST',
+    body: JSON.stringify({ folderPath }),
+  });
+}
+
+export async function headlessDeleteSkill(skillId: string): Promise<void> {
+  await requestJson(`/skills/${encodeURIComponent(skillId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function headlessSetSkillEnabled(skillId: string, enabled: boolean): Promise<void> {
+  await requestJson(`/skills/${encodeURIComponent(skillId)}/enabled`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function headlessGetLogs(): Promise<{ files: HeadlessLogFile[]; directory: string }> {
+  const response = await requestJson<{ files?: HeadlessLogFile[]; directory?: string }>('/logs');
+  return {
+    files: Array.isArray(response.files) ? response.files : [],
+    directory: String(response.directory || ''),
+  };
+}
+
+export async function headlessLogsIsEnabled(): Promise<boolean> {
+  const response = await requestJson<{ enabled?: boolean }>('/logs/enabled');
+  return Boolean(response.enabled);
+}
+
+export async function headlessLogsSetEnabled(enabled: boolean): Promise<void> {
+  await requestJson('/logs/enabled', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function headlessLogsExport(): Promise<{ success: boolean; path: string }> {
+  return requestJson('/logs/export', { method: 'POST' });
+}
+
+export async function headlessLogsClear(): Promise<{ success: boolean; deletedCount: number }> {
+  return requestJson('/logs/clear', { method: 'POST' });
 }

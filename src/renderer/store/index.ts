@@ -30,19 +30,21 @@ function loadProjectState(): {
   sessionProjectMap: Record<string, string>;
   sessionRunMap: Record<string, string>;
   sessionPlanMap: Record<string, SessionPlanSnapshot>;
+  activeCollectionByProject: Record<string, string>;
 } {
   if (typeof window === 'undefined' || !window.localStorage) {
-    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {} };
+    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
   }
   try {
     const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (!raw) return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {} };
+    if (!raw) return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
     const parsed = JSON.parse(raw) as {
       projects?: ProjectSummary[];
       activeProjectId?: string | null;
       sessionProjectMap?: Record<string, string>;
       sessionRunMap?: Record<string, string>;
       sessionPlanMap?: Record<string, SessionPlanSnapshot>;
+      activeCollectionByProject?: Record<string, string>;
     };
     return {
       projects: Array.isArray(parsed.projects) ? parsed.projects : [],
@@ -59,9 +61,13 @@ function loadProjectState(): {
         parsed.sessionPlanMap && typeof parsed.sessionPlanMap === 'object'
           ? parsed.sessionPlanMap
           : {},
+      activeCollectionByProject:
+        parsed.activeCollectionByProject && typeof parsed.activeCollectionByProject === 'object'
+          ? parsed.activeCollectionByProject
+          : {},
     };
   } catch {
-    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {} };
+    return { projects: [], activeProjectId: null, sessionProjectMap: {}, sessionRunMap: {}, sessionPlanMap: {}, activeCollectionByProject: {} };
   }
 }
 
@@ -71,6 +77,7 @@ function persistProjectState(next: {
   sessionProjectMap: Record<string, string>;
   sessionRunMap: Record<string, string>;
   sessionPlanMap: Record<string, SessionPlanSnapshot>;
+  activeCollectionByProject: Record<string, string>;
 }) {
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
@@ -121,6 +128,7 @@ interface AppState {
   activeProjectId: string | null;
   sessionProjectMap: Record<string, string>;
   sessionRunMap: Record<string, string>;
+  activeCollectionByProject: Record<string, string>;
   
   // Sandbox setup
   sandboxSetupProgress: SandboxSetupProgress | null;
@@ -176,6 +184,7 @@ interface AppState {
   linkSessionToProject: (sessionId: string, projectId: string) => void;
   linkSessionToRun: (sessionId: string, runId: string) => void;
   setSessionPlanSnapshot: (sessionId: string, snapshot: SessionPlanSnapshot) => void;
+  setProjectActiveCollection: (projectId: string, collectionId: string) => void;
   
   // Sandbox setup actions
   setSandboxSetupProgress: (progress: SandboxSetupProgress | null) => void;
@@ -239,6 +248,7 @@ export const useAppStore = create<AppState>((set) => ({
   sessionProjectMap: initialProjectState.sessionProjectMap,
   sessionRunMap: initialProjectState.sessionRunMap,
   sessionPlanMap: initialProjectState.sessionPlanMap,
+  activeCollectionByProject: initialProjectState.activeCollectionByProject,
   sandboxSetupProgress: null,
   isSandboxSetupComplete: false,
   sandboxSyncStatus: null,
@@ -277,6 +287,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: restSessionProjectMap,
         sessionRunMap: restSessionRunMap,
         sessionPlanMap: restSessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return {
         sessions: state.sessions.filter((s) => s.id !== sessionId),
@@ -542,6 +553,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { projects, activeProjectId: nextActive };
     }),
@@ -559,6 +571,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { projects, activeProjectId };
     }),
@@ -573,6 +586,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { projects, activeProjectId };
     }),
@@ -585,6 +599,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { activeProjectId: projectId };
     }),
@@ -601,6 +616,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { sessionProjectMap };
     }),
@@ -617,6 +633,7 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap,
         sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { sessionRunMap };
     }),
@@ -633,8 +650,26 @@ export const useAppStore = create<AppState>((set) => ({
         sessionProjectMap: state.sessionProjectMap,
         sessionRunMap: state.sessionRunMap,
         sessionPlanMap,
+        activeCollectionByProject: state.activeCollectionByProject,
       });
       return { sessionPlanMap };
+    }),
+
+  setProjectActiveCollection: (projectId, collectionId) =>
+    set((state) => {
+      const activeCollectionByProject = {
+        ...state.activeCollectionByProject,
+        [projectId]: collectionId,
+      };
+      persistProjectState({
+        projects: state.projects,
+        activeProjectId: state.activeProjectId,
+        sessionProjectMap: state.sessionProjectMap,
+        sessionRunMap: state.sessionRunMap,
+        sessionPlanMap: state.sessionPlanMap,
+        activeCollectionByProject,
+      });
+      return { activeCollectionByProject };
     }),
   
   // Sandbox setup actions

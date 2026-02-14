@@ -193,6 +193,28 @@ function createCollection(projectId, input = {}) {
   return collection;
 }
 
+function ensureCollection(projectId, name, description = '') {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('Collection name is required');
+  const store = loadStore();
+  const project = findProjectOrThrow(store, projectId);
+  project.collections = Array.isArray(project.collections) ? project.collections : [];
+  const existing = project.collections.find((item) => item.name.toLowerCase() === trimmed.toLowerCase());
+  if (existing) return existing;
+  const ts = now();
+  const collection = {
+    id: randomUUID(),
+    name: trimmed,
+    description: String(description || '').trim(),
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  project.collections.push(collection);
+  touchProject(project);
+  saveStore(store);
+  return collection;
+}
+
 function listDocuments(projectId, collectionId) {
   const store = loadStore();
   const project = findProjectOrThrow(store, projectId);
@@ -366,6 +388,7 @@ module.exports = {
   deleteProject,
   listCollections,
   createCollection,
+  ensureCollection,
   listDocuments,
   createDocument,
   createRun,

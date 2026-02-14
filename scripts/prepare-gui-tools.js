@@ -51,7 +51,7 @@ function detectBinaryArch(filePath) {
 function copyExecutable(src, dest) {
   ensureDir(path.dirname(dest));
   fs.copyFileSync(src, dest);
-  // Ensure executable bit (electron-builder will preserve it)
+  // Ensure executable bit (packaging step preserves it)
   fs.chmodSync(dest, 0o755);
   console.log(`✓ Bundled: ${src} -> ${dest}`);
 }
@@ -158,4 +158,3 @@ function main() {
 }
 
 main();
-

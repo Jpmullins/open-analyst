@@ -6,14 +6,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
-    exclude: ['node_modules', 'dist', 'dist-electron', '.claude'],
+    exclude: ['node_modules', 'dist', '.claude'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
         'dist/',
-        'dist-electron/',
         'src/renderer/',
         '**/*.d.ts',
         '**/*.config.*',
@@ -26,7 +25,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      electron: path.resolve(__dirname, './tests/support/electron-shim.ts'),
     },
   },
 });

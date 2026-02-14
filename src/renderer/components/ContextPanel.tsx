@@ -326,10 +326,6 @@ export function ContextPanel() {
                   key={url}
                   className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg bg-background border border-border hover:bg-surface-hover"
                   onClick={() => {
-                    if (typeof window !== 'undefined' && window.electronAPI?.openExternal) {
-                      void window.electronAPI.openExternal(url);
-                      return;
-                    }
                     window.open(url, '_blank', 'noopener,noreferrer');
                   }}
                   title={url}

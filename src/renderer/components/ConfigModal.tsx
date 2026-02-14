@@ -11,9 +11,6 @@ interface ConfigModalProps {
   isFirstRun?: boolean;
 }
 
-// Check if running in Electron
-const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
-
 const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'custom', string> = {
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
@@ -30,9 +27,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
   const [openaiMode, setOpenaiMode] = useState<'responses' | 'chat'>('responses');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [presets, setPresets] = useState<ProviderPresets | null>(
-    isElectron ? null : FALLBACK_PRESETS
-  );
+  const [presets, setPresets] = useState<ProviderPresets | null>(FALLBACK_PRESETS);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -47,11 +42,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
   useEffect(() => {
     if (!isOpen) return;
     setIsInitialLoad(true);
-    if (isElectron) {
-      loadPresets();
-    } else {
-      setPresets(FALLBACK_PRESETS);
-    }
+    setPresets(FALLBACK_PRESETS);
   }, [isOpen]);
 
   // Apply initial config
@@ -127,16 +118,6 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
     setTestResult(null);
   }, [provider, apiKey, baseUrl, customProtocol, model, customModel, useCustomModel]);
 
-  async function loadPresets() {
-    try {
-      const loadedPresets = await window.electronAPI.config.getPresets();
-      setPresets(loadedPresets);
-    } catch (err) {
-      console.error('Failed to load presets:', err);
-      setPresets(FALLBACK_PRESETS);
-    }
-  }
-
   async function handleTest() {
     if (!apiKey.trim()) {
       setError('API Key is required');
@@ -167,9 +148,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         model: finalModel,
         useLiveRequest: useLiveTest,
       };
-      const result = isElectron
-        ? await window.electronAPI.config.test(request)
-        : await testApiConnectionBrowser(request);
+      const result = await testApiConnectionBrowser(request);
       setTestResult(result);
     } catch (err) {
       setTestResult({

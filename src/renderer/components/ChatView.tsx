@@ -4,6 +4,7 @@ import { useAppStore } from '../store';
 import { useIPC } from '../hooks/useIPC';
 import { MessageCard } from './MessageCard';
 import type { Message, ContentBlock } from '../types';
+import { headlessGetCollections, headlessGetMcpServerStatus, type HeadlessCollection } from '../utils/headless-api';
 import {
   Send,
   Square,
@@ -23,12 +24,16 @@ export function ChatView() {
     activeTurnsBySession,
     pendingTurnsBySession,
     appConfig,
+    activeProjectId,
+    activeCollectionByProject,
+    setProjectActiveCollection,
   } = useAppStore();
-  const { continueSession, stopSession, isElectron } = useIPC();
+  const { continueSession, stopSession } = useIPC();
   const [prompt, setPrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeConnectors, setActiveConnectors] = useState<any[]>([]);
   const [showConnectorLabel, setShowConnectorLabel] = useState(true);
+  const [projectCollections, setProjectCollections] = useState<HeadlessCollection[]>([]);
   const headerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const connectorMeasureRef = useRef<HTMLDivElement>(null);
@@ -131,6 +136,25 @@ export function ChatView() {
     container.addEventListener('scroll', onScroll, { passive: true });
     return () => container.removeEventListener('scroll', onScroll);
   }, []);
+
+  useEffect(() => {
+    const loadCollections = async () => {
+      if (!activeProjectId) {
+        setProjectCollections([]);
+        return;
+      }
+      try {
+        const next = await headlessGetCollections(activeProjectId);
+        setProjectCollections(next);
+        if (!activeCollectionByProject[activeProjectId] && next[0]) {
+          setProjectActiveCollection(activeProjectId, next[0].id);
+        }
+      } catch {
+        setProjectCollections([]);
+      }
+    };
+    void loadCollections();
+  }, [activeProjectId, activeCollectionByProject, setProjectActiveCollection]);
 
   useEffect(() => {
     const messageCount = messages.length;
@@ -339,31 +363,48 @@ export function ChatView() {
   };
 
   const handleFileSelect = async () => {
-    if (!isElectron || !window.electronAPI) {
-      console.log('[ChatView] Not in Electron, file selection not available');
-      return;
-    }
-
     try {
-      const filePaths = await window.electronAPI.selectFiles();
-      if (filePaths.length === 0) return;
-
-      // Get file info for each selected file
-      const newFiles = filePaths.map((filePath) => {
-        const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'unknown';
-        return {
-          name: fileName,
-          path: filePath,
-          size: 0, // Will be set by backend when copying
-          type: 'application/octet-stream',
-        };
-      });
-
-      setAttachedFiles(prev => [...prev, ...newFiles]);
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.multiple = true;
+      picker.onchange = () => {
+        const files = Array.from(picker.files || []);
+        if (!files.length) return;
+        const newFiles = files.map((file) => {
+          const fileName = file.name || 'unknown';
+          return {
+            name: fileName,
+            path: '',
+            size: file.size || 0,
+            type: file.type || 'application/octet-stream',
+          };
+        });
+        setAttachedFiles(prev => [...prev, ...newFiles]);
+      };
+      picker.click();
     } catch (error) {
       console.error('[ChatView] Error selecting files:', error);
     }
   };
+
+  // Load active MCP connectors
+  useEffect(() => {
+    const loadConnectors = async () => {
+      try {
+        const statuses = await headlessGetMcpServerStatus();
+        const active = statuses?.filter((s: any) => s.connected && s.toolCount > 0) || [];
+        setActiveConnectors(active);
+      } catch (err) {
+        console.error('Failed to load MCP connectors:', err);
+      }
+    };
+    void loadConnectors();
+    // Refresh every 5 seconds
+    const interval = setInterval(() => {
+      void loadConnectors();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle drag and drop for images
   const handleDragOver = (e: React.DragEvent) => {
@@ -414,7 +455,7 @@ export function ChatView() {
     if (otherFiles.length > 0) {
       const newFiles = otherFiles.map(file => ({
         name: file.name,
-        path: ('path' in file && typeof file.path === 'string') ? file.path : '', // Electron may provide path property
+        path: '',
         size: file.size,
         type: file.type || 'application/octet-stream',
       }));
@@ -422,25 +463,6 @@ export function ChatView() {
       setAttachedFiles(prev => [...prev, ...newFiles]);
     }
   };
-
-  // Load active MCP connectors
-  useEffect(() => {
-    if (isElectron && typeof window !== 'undefined' && window.electronAPI) {
-      const loadConnectors = async () => {
-        try {
-          const statuses = await window.electronAPI.mcp.getServerStatus();
-          const active = statuses?.filter((s: any) => s.connected && s.toolCount > 0) || [];
-          setActiveConnectors(active);
-        } catch (err) {
-          console.error('Failed to load MCP connectors:', err);
-        }
-      };
-      loadConnectors();
-      // Refresh every 5 seconds
-      const interval = setInterval(loadConnectors, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [isElectron]);
 
   useEffect(() => {
     const titleEl = titleRef.current;
@@ -717,6 +739,20 @@ export function ChatView() {
                 <span className="px-2 py-1 text-xs text-text-muted">
                   {appConfig?.model || 'No model'}
                 </span>
+                {activeProjectId && projectCollections.length > 0 && (
+                  <select
+                    className="text-xs bg-surface-muted border border-border rounded px-2 py-1 max-w-[180px]"
+                    value={activeCollectionByProject[activeProjectId] || projectCollections[0].id}
+                    onChange={(e) => setProjectActiveCollection(activeProjectId, e.target.value)}
+                    title="Active collection for task source capture"
+                  >
+                    {projectCollections.map((collection) => (
+                      <option key={collection.id} value={collection.id}>
+                        {collection.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
 
                 {canStop && (
                   <button
@@ -740,11 +776,9 @@ export function ChatView() {
             <p className="text-xs text-text-muted text-center mt-2">
               Open Analyst is AI-powered and may make mistakes. Please double-check responses.
             </p>
-            {!isElectron && (
-              <p className="text-xs text-amber-600 text-center mt-1">
-                Container mode uses headless API on port 8787 for file/tools execution.
-              </p>
-            )}
+            <p className="text-xs text-amber-600 text-center mt-1">
+              Headless mode uses the API service on port 8787 for tools and execution.
+            </p>
           </form>
         </div>
       </div>
