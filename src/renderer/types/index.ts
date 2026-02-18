@@ -279,10 +279,11 @@ export interface ExecutionContext {
 
 // App Config types
 export interface AppConfig {
-  provider: 'openrouter' | 'anthropic' | 'custom' | 'openai';
+  provider: 'openrouter' | 'anthropic' | 'custom' | 'openai' | 'bedrock';
   apiKey: string;
   baseUrl?: string;
   customProtocol?: 'anthropic' | 'openai';
+  bedrockRegion?: string;
   model: string;
   openaiMode?: 'responses' | 'chat';
   claudeCodePath?: string;
@@ -305,12 +306,14 @@ export interface ProviderPresets {
   anthropic: ProviderPreset;
   custom: ProviderPreset;
   openai: ProviderPreset;
+  bedrock: ProviderPreset;
 }
 
 export interface ApiTestInput {
   provider: AppConfig['provider'];
   apiKey: string;
   baseUrl?: string;
+  bedrockRegion?: string;
   customProtocol?: AppConfig['customProtocol'];
   model?: string;
   useLiveRequest?: boolean;

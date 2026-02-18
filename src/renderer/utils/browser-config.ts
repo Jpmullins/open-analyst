@@ -39,6 +39,17 @@ export const FALLBACK_PRESETS: ProviderPresets = {
     keyPlaceholder: 'sk-...',
     keyHint: 'Get key from platform.openai.com',
   },
+  bedrock: {
+    name: 'Amazon Bedrock',
+    baseUrl: 'https://bedrock-mantle.us-east-1.api.aws/v1',
+    models: [
+      { id: 'openai.gpt-oss-120b-1:0', name: 'openai.gpt-oss-120b-1:0' },
+      { id: 'openai.gpt-oss-20b-1:0', name: 'openai.gpt-oss-20b-1:0' },
+      { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', name: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
+    ],
+    keyPlaceholder: 'bedrock_api_key',
+    keyHint: 'Create API key in Bedrock console and set your AWS region endpoint',
+  },
   custom: {
     name: 'Custom Endpoint',
     baseUrl: 'https://api.anthropic.com',
@@ -59,6 +70,7 @@ const defaultBrowserConfig: AppConfig = {
   apiKey: '',
   baseUrl: FALLBACK_PRESETS.openrouter.baseUrl,
   customProtocol: 'anthropic',
+  bedrockRegion: 'us-east-1',
   model: FALLBACK_PRESETS.openrouter.models[0].id,
   openaiMode: 'responses',
   enableThinking: false,
@@ -67,8 +79,26 @@ const defaultBrowserConfig: AppConfig = {
 };
 
 function normalizeConfig(config: AppConfig): AppConfig {
+  const provider = config.provider || defaultBrowserConfig.provider;
+  const inferredRegion = extractBedrockRegionFromUrl(config.baseUrl || '');
+  const region =
+    (config.bedrockRegion || '')
+      .trim()
+      .toLowerCase() ||
+    inferredRegion ||
+    (provider === 'bedrock' ? 'us-east-1' : (defaultBrowserConfig.bedrockRegion || 'us-east-1'));
+  const providerBaseUrl = FALLBACK_PRESETS[provider]?.baseUrl || '';
+  const bedrockBaseUrl = `https://bedrock-mantle.${region}.api.aws/v1`;
+  const baseUrl =
+    provider === 'custom'
+      ? (config.baseUrl || '')
+      : (provider === 'bedrock'
+        ? normalizeBedrockBaseUrl(config.baseUrl || bedrockBaseUrl, region)
+        : providerBaseUrl);
   return {
     ...config,
+    baseUrl,
+    bedrockRegion: region,
     openaiMode: 'responses',
     isConfigured: Boolean(config.apiKey?.trim()) && Boolean(config.isConfigured),
   };
@@ -88,7 +118,7 @@ export function getBrowserConfig(): AppConfig {
       model: parsed.model || defaultBrowserConfig.model,
       provider: parsed.provider || defaultBrowserConfig.provider,
     };
-    if (merged.provider !== 'custom') {
+    if (merged.provider !== 'custom' && merged.provider !== 'bedrock') {
       merged.baseUrl = FALLBACK_PRESETS[merged.provider].baseUrl;
     }
     if (!merged.apiKey) {
@@ -126,6 +156,23 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
+function normalizeBedrockBaseUrl(url: string, region: string): string {
+  const fallback = `https://bedrock-mantle.${region}.api.aws/v1`;
+  const raw = String(url || '').trim();
+  if (!raw) return fallback;
+  const trimmed = trimTrailingSlash(raw);
+  if (trimmed.endsWith('/v1')) return trimmed;
+  return `${trimmed}/v1`;
+}
+
+function extractBedrockRegionFromUrl(url: string): string | null {
+  const value = String(url || '').trim().toLowerCase();
+  const runtimeMatch = value.match(/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/);
+  if (runtimeMatch?.[1]) return runtimeMatch[1];
+  const mantleMatch = value.match(/bedrock-mantle\.([a-z0-9-]+)\.api\.aws/);
+  return mantleMatch?.[1] || null;
+}
+
 function classifyStatus(status: number): ApiTestResult['errorType'] {
   if (status === 401 || status === 403) return 'unauthorized';
   if (status === 404) return 'not_found';
@@ -144,6 +191,7 @@ export async function testApiConnectionBrowser(
 
   const openAiProtocol =
     input.provider === 'openai' ||
+    input.provider === 'bedrock' ||
     (input.provider === 'custom' && input.customProtocol === 'openai');
 
   let baseUrl =
@@ -158,7 +206,9 @@ export async function testApiConnectionBrowser(
     };
   }
 
-  baseUrl = trimTrailingSlash(baseUrl);
+  baseUrl = input.provider === 'bedrock'
+    ? normalizeBedrockBaseUrl(baseUrl, extractBedrockRegionFromUrl(baseUrl) || 'us-east-1')
+    : trimTrailingSlash(baseUrl);
 
   let url: string;
   let headers: Record<string, string>;
@@ -233,6 +283,7 @@ export async function createBrowserChatCompletion(
 
   const openAiCompatible =
     config.provider === 'openai' ||
+    config.provider === 'bedrock' ||
     config.provider === 'openrouter' ||
     (config.provider === 'custom' && config.customProtocol === 'openai');
 
@@ -243,7 +294,7 @@ export async function createBrowserChatCompletion(
   }
 
   const baseUrl = trimTrailingSlash(
-    (config.provider === 'custom'
+    (config.provider === 'custom' || config.provider === 'bedrock'
       ? config.baseUrl
       : FALLBACK_PRESETS[config.provider].baseUrl) || '',
   );
