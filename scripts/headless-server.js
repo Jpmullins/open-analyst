@@ -31,6 +31,7 @@ const DEFAULT_CONFIG = {
   provider: 'openai',
   apiKey: '',
   baseUrl: 'https://api.openai.com/v1',
+  bedrockRegion: 'us-east-1',
   model: 'gpt-4o',
   openaiMode: 'chat',
   workingDir: process.cwd(),
@@ -38,6 +39,29 @@ const DEFAULT_CONFIG = {
   s3Uri: '',
   activeProjectId: '',
 };
+
+function inferBedrockRegion(baseUrl) {
+  const value = String(baseUrl || '').toLowerCase();
+  const runtimeMatch = value.match(/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/);
+  if (runtimeMatch?.[1]) return runtimeMatch[1];
+  const mantleMatch = value.match(/bedrock-mantle\.([a-z0-9-]+)\.api\.aws/);
+  return mantleMatch?.[1] || 'us-east-1';
+}
+
+function normalizeConfig(input) {
+  const config = { ...DEFAULT_CONFIG, ...input };
+  if (config.provider === 'bedrock') {
+    const region = String(config.bedrockRegion || '').trim().toLowerCase() || inferBedrockRegion(config.baseUrl);
+    config.bedrockRegion = region || 'us-east-1';
+    if (!String(config.baseUrl || '').trim()) {
+      config.baseUrl = `https://bedrock-mantle.${config.bedrockRegion}.api.aws/v1`;
+    } else if (!String(config.baseUrl).trim().endsWith('/v1')) {
+      config.baseUrl = `${String(config.baseUrl).replace(/\/+$/, '')}/v1`;
+    }
+    if (!config.openaiMode) config.openaiMode = 'responses';
+  }
+  return config;
+}
 
 function ensureConfigDir() {
   if (!fs.existsSync(CONFIG_DIR)) {
@@ -50,21 +74,22 @@ function loadConfig() {
   const activeProject = projectStore.getActiveProject();
   const activeProjectId = activeProject ? activeProject.id : '';
   if (!fs.existsSync(CONFIG_PATH)) {
-    const initial = { ...DEFAULT_CONFIG, activeProjectId };
+    const initial = normalizeConfig({ ...DEFAULT_CONFIG, activeProjectId });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(initial, null, 2), 'utf8');
     return initial;
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    return { ...DEFAULT_CONFIG, activeProjectId, ...parsed };
+    return normalizeConfig({ ...DEFAULT_CONFIG, activeProjectId, ...parsed });
   } catch {
-    return { ...DEFAULT_CONFIG, activeProjectId };
+    return normalizeConfig({ ...DEFAULT_CONFIG, activeProjectId });
   }
 }
 
 function saveConfig(config) {
   ensureConfigDir();
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+  const normalized = normalizeConfig(config);
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalized, null, 2), 'utf8');
 }
 
 function ensureLogsDir() {

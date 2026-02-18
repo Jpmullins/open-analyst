@@ -135,13 +135,23 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api' }: SettingsP
 }
 
 function APISettingsTab() {
+  const inferBedrockRegion = (url?: string): string => {
+    const value = String(url || '').toLowerCase();
+    const runtimeMatch = value.match(/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/);
+    if (runtimeMatch?.[1]) return runtimeMatch[1];
+    const mantleMatch = value.match(/bedrock-mantle\.([a-z0-9-]+)\.api\.aws/);
+    return mantleMatch?.[1] || 'us-east-1';
+  };
   const setAppConfig = useAppStore((state) => state.setAppConfig);
   const setIsConfigured = useAppStore((state) => state.setIsConfigured);
   const [config, setConfig] = useState<AppConfig>(() => getBrowserConfig());
-  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'openai' | 'custom'>(config.provider || 'openrouter');
+  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'openai' | 'custom' | 'bedrock'>(config.provider || 'openrouter');
   const [apiKey, setApiKey] = useState(config.apiKey || '');
   const [baseUrl, setBaseUrl] = useState(config.baseUrl || FALLBACK_PRESETS[config.provider || 'openrouter']?.baseUrl || '');
   const [model, setModel] = useState(config.model || '');
+  const [customModel, setCustomModel] = useState('');
+  const [useCustomModel, setUseCustomModel] = useState(false);
+  const [bedrockRegion, setBedrockRegion] = useState(config.bedrockRegion || inferBedrockRegion(config.baseUrl));
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [testing, setTesting] = useState(false);
@@ -150,13 +160,38 @@ function APISettingsTab() {
 
   useEffect(() => {
     const preset = FALLBACK_PRESETS[provider];
-    if (!baseUrl.trim() && preset?.baseUrl) setBaseUrl(preset.baseUrl);
-    if (!model.trim() && preset?.models?.[0]?.id) setModel(preset.models[0].id);
+    if (!preset) return;
+    if (provider === 'custom') {
+      if (!baseUrl.trim()) setBaseUrl(preset.baseUrl);
+    } else if (provider === 'bedrock') {
+      const region = bedrockRegion.trim().toLowerCase() || 'us-east-1';
+      setBaseUrl(`https://bedrock-mantle.${region}.api.aws/v1`);
+    } else {
+      setBaseUrl(preset.baseUrl);
+    }
+    if (preset.models?.[0]?.id) {
+      const current = useCustomModel ? customModel : model;
+      if (!current || !preset.models.some((m) => m.id === current)) {
+        setModel(preset.models[0].id);
+        setUseCustomModel(false);
+      }
+    }
   }, [provider]);
+
+  useEffect(() => {
+    if (provider !== 'bedrock') return;
+    const region = bedrockRegion.trim().toLowerCase() || 'us-east-1';
+    setBaseUrl(`https://bedrock-mantle.${region}.api.aws/v1`);
+  }, [provider, bedrockRegion]);
 
   const saveConfig = async () => {
     if (!apiKey.trim()) {
       setError('API key is required.');
+      return;
+    }
+    const resolvedModel = (useCustomModel ? customModel : model).trim();
+    if (!resolvedModel) {
+      setError('Model is required.');
       return;
     }
     const next: AppConfig = {
@@ -164,13 +199,15 @@ function APISettingsTab() {
       provider,
       apiKey: apiKey.trim(),
       baseUrl: baseUrl.trim(),
-      model: model.trim(),
+      bedrockRegion: bedrockRegion.trim().toLowerCase() || 'us-east-1',
+      model: resolvedModel,
       customProtocol: provider === 'anthropic' ? 'anthropic' : 'openai',
       openaiMode: 'responses',
     };
     setError('');
     await headlessSaveConfig(next);
     saveBrowserConfig(next);
+    setConfig(next);
     setAppConfig(next);
     setIsConfigured(true);
     setSuccess('Saved.');
@@ -182,11 +219,13 @@ function APISettingsTab() {
     setError('');
     setSuccess('');
     try {
+      const resolvedModel = (useCustomModel ? customModel : model).trim();
       const result = await testApiConnectionBrowser({
         provider,
         apiKey,
         baseUrl,
-        model,
+        bedrockRegion: bedrockRegion.trim().toLowerCase() || 'us-east-1',
+        model: resolvedModel,
         customProtocol: provider === 'anthropic' ? 'anthropic' : 'openai',
       });
       if (!result.ok) {
@@ -209,18 +248,44 @@ function APISettingsTab() {
             <option value="openrouter">OpenRouter</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
+            <option value="bedrock">Bedrock</option>
             <option value="custom">Custom</option>
           </select>
         </label>
-        <label className="text-sm">Model
-          <input list="provider-models" className="input mt-1" value={model} onChange={(e) => setModel(e.target.value)} />
-          <datalist id="provider-models">
+        <label className="text-sm">Model (Preset)
+          <select className="input mt-1" value={model} onChange={(e) => { setModel(e.target.value); setUseCustomModel(false); }}>
             {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </datalist>
+          </select>
         </label>
       </div>
+      <label className="text-sm">Custom Model (optional)
+        <input
+          className="input mt-1"
+          value={useCustomModel ? customModel : ''}
+          placeholder="Enter custom model ID"
+          onChange={(e) => {
+            const next = e.target.value;
+            setCustomModel(next);
+            setUseCustomModel(Boolean(next.trim()));
+          }}
+        />
+      </label>
+      {provider === 'bedrock' && (
+        <label className="text-sm">AWS Region
+          <input
+            className="input mt-1"
+            value={bedrockRegion}
+            onChange={(e) => setBedrockRegion(e.target.value)}
+            placeholder="us-east-1"
+          />
+        </label>
+      )}
       <label className="text-sm">Base URL
-        <input className="input mt-1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+        <input
+          className="input mt-1"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+        />
       </label>
       <label className="text-sm">API Key
         <input className="input mt-1" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />

@@ -277,3 +277,54 @@ Success criteria for next milestone:
 - RAG returns collection-scoped, source-attributed results
 - Settings pages are fully usable with no hidden/manual API calls
 - Regression suite includes project/task/source/MCP/skills/logs paths
+
+## 10) Delivery Tracker (Done / Next)
+
+### Done
+
+- Removed Electron runtime paths from active app flow (headless-only architecture).
+- Consolidated documentation into:
+  - `README.md`
+  - `ARCHITECTURE_MAP.md`
+- Implemented project-first UI flow:
+  - project create/select/manage in sidebar
+  - task history per project
+  - reopen tasks
+- Implemented/expanded settings tabs for headless mode:
+  - API config
+  - credentials CRUD
+  - MCP presets/servers/status/tools
+  - skills list/install/enable/delete
+  - logs list/toggle/export/clear
+- Added default capabilities:
+  - arXiv tools (`arxiv_search`)
+  - Hugging Face tools (`hf_daily_papers`, `hf_paper`)
+  - default skills (Web Research + Code Operations)
+  - default example MCP server seed (`Filesystem (Example)`)
+- Added deep research support:
+  - `deep_research` tool
+  - per-session Deep Research toggle in chat
+- Improved retrieval:
+  - query variants + normalization + ranking improvements
+  - retrieval context injection in chat turns
+- Added manual source ingestion:
+  - URL import
+  - local file upload import in project workspace
+- Added clickable source links where shown in workspace/RAG cards.
+
+### Next
+
+- Improve retrieval quality from lexical ranking to robust embeddings/vector index.
+- Add chunking/dedup/metadata normalization pipeline for imported files.
+- Improve collection UX:
+  - explicit “summarize current collection” action/button
+  - clearer current-collection indicator inside chat transcript
+- Add stronger source provenance UI:
+  - stable citation ids
+  - direct source-to-snippet navigation
+- Expand MCP execution reliability beyond config/status listing.
+- Add end-to-end UI tests for:
+  - project/task lifecycle
+  - collection/file ingestion
+  - deep research flows
+  - RAG and source citation behavior

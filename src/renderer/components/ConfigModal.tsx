@@ -11,17 +11,27 @@ interface ConfigModalProps {
   isFirstRun?: boolean;
 }
 
-const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'custom', string> = {
+function inferBedrockRegion(baseUrl?: string): string {
+  const value = String(baseUrl || '').toLowerCase();
+  const runtimeMatch = value.match(/bedrock-runtime\.([a-z0-9-]+)\.amazonaws\.com/);
+  if (runtimeMatch?.[1]) return runtimeMatch[1];
+  const mantleMatch = value.match(/bedrock-mantle\.([a-z0-9-]+)\.api\.aws/);
+  return mantleMatch?.[1] || 'us-east-1';
+}
+
+const PROVIDER_LABELS: Record<'openrouter' | 'anthropic' | 'openai' | 'custom' | 'bedrock', string> = {
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   custom: 'Custom',
+  bedrock: 'Bedrock',
 };
 
 export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun }: ConfigModalProps) {
-  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom' | 'openai'>('openrouter');
+  const [provider, setProvider] = useState<'openrouter' | 'anthropic' | 'custom' | 'openai' | 'bedrock'>('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [bedrockRegion, setBedrockRegion] = useState('us-east-1');
   const [customProtocol, setCustomProtocol] = useState<'anthropic' | 'openai'>('anthropic');
   const [model, setModel] = useState('');
   const [openaiMode, setOpenaiMode] = useState<'responses' | 'chat'>('responses');
@@ -52,6 +62,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
       setProvider(initialConfig.provider);
       setApiKey(initialConfig.apiKey || '');
       setBaseUrl(initialConfig.baseUrl || '');
+      setBedrockRegion(initialConfig.bedrockRegion || inferBedrockRegion(initialConfig.baseUrl));
       setCustomProtocol(initialConfig.customProtocol || 'anthropic');
       setOpenaiMode('responses');
 
@@ -109,14 +120,24 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
   }, [provider, presets, isInitialLoad]);
 
   useEffect(() => {
-    if (provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')) {
+    if (
+      provider === 'openai' ||
+      provider === 'bedrock' ||
+      (provider === 'custom' && customProtocol === 'openai')
+    ) {
       setOpenaiMode('responses');
     }
   }, [provider, customProtocol]);
 
   useEffect(() => {
+    if (provider !== 'bedrock') return;
+    const nextRegion = bedrockRegion.trim().toLowerCase() || 'us-east-1';
+    setBaseUrl(`https://bedrock-mantle.${nextRegion}.api.aws/v1`);
+  }, [provider, bedrockRegion]);
+
+  useEffect(() => {
     setTestResult(null);
-  }, [provider, apiKey, baseUrl, customProtocol, model, customModel, useCustomModel]);
+  }, [provider, apiKey, baseUrl, customProtocol, model, customModel, useCustomModel, bedrockRegion]);
 
   async function handleTest() {
     if (!apiKey.trim()) {
@@ -136,7 +157,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
 
     try {
       const presetBaseUrl = presets?.[provider]?.baseUrl;
-      const resolvedBaseUrl = provider === 'custom'
+      const resolvedBaseUrl = provider === 'custom' || provider === 'bedrock'
         ? baseUrl.trim()
         : (presetBaseUrl || baseUrl).trim();
 
@@ -144,6 +165,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         provider,
         apiKey: apiKey.trim(),
         baseUrl: resolvedBaseUrl || undefined,
+        bedrockRegion,
         customProtocol,
         model: finalModel,
         useLiveRequest: useLiveTest,
@@ -180,12 +202,14 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
 
     try {
       const presetBaseUrl = presets?.[provider]?.baseUrl;
-      const resolvedBaseUrl = provider === 'custom'
+      const resolvedBaseUrl = provider === 'custom' || provider === 'bedrock'
         ? baseUrl.trim()
         : (presetBaseUrl || baseUrl).trim();
 
       const resolvedOpenaiMode =
-        provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
+        provider === 'openai' ||
+        provider === 'bedrock' ||
+        (provider === 'custom' && customProtocol === 'openai')
           ? 'responses'
           : openaiMode;
 
@@ -193,6 +217,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         provider,
         apiKey: apiKey.trim(),
         baseUrl: resolvedBaseUrl || undefined,
+        bedrockRegion,
         customProtocol,
         model: finalModel,
         openaiMode: resolvedOpenaiMode,
@@ -267,8 +292,8 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               <Server className="w-4 h-4" />
               API Provider
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['openrouter', 'anthropic', 'openai', 'custom'] as const).map((p) => (
+            <div className="grid grid-cols-5 gap-2">
+              {(['openrouter', 'anthropic', 'openai', 'bedrock', 'custom'] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => setProvider(p)}
@@ -356,6 +381,33 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               </p>
             </div>
           )}
+          {provider === 'bedrock' && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                <Server className="w-4 h-4" />
+                AWS Region
+              </label>
+              <input
+                type="text"
+                value={bedrockRegion}
+                onChange={(e) => setBedrockRegion(e.target.value)}
+                placeholder="us-east-1"
+                className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
+              />
+              <p className="text-xs text-text-muted">Endpoint: {baseUrl || 'https://bedrock-mantle.us-east-1.api.aws/v1'}</p>
+              <label className="flex items-center gap-2 text-sm font-medium text-text-primary pt-1">
+                <Server className="w-4 h-4" />
+                Base URL
+              </label>
+              <input
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://bedrock-mantle.us-east-1.api.aws/v1"
+                className="w-full px-4 py-3 rounded-xl bg-background border border-border text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
+              />
+            </div>
+          )}
 
           {/* Model Selection */}
           <div className="space-y-2">
@@ -385,7 +437,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
                 placeholder={
                   provider === 'openrouter'
                     ? 'openai/gpt-4o or another model ID'
-                    : provider === 'openai' || (provider === 'custom' && customProtocol === 'openai')
+                    : provider === 'openai' || provider === 'bedrock' || (provider === 'custom' && customProtocol === 'openai')
                       ? 'gpt-4o'
                       : 'claude-sonnet-4'
                 }
@@ -412,7 +464,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
             )}
             {useCustomModel && (
               <p className="text-xs text-text-muted">
-                Enter model ID, e.g. anthropic/claude-sonnet-4.5, openai/gpt-4o
+                Enter model ID, e.g. anthropic/claude-sonnet-4.5, openai/gpt-4o, openai.gpt-oss-20b-1:0
               </p>
             )}
           </div>
