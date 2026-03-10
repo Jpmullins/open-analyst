@@ -44,14 +44,29 @@ interface MessageCardProps {
   isStreaming?: boolean;
 }
 
+function normalizeContentBlocks(rawContent: unknown): ContentBlock[] {
+  if (!Array.isArray(rawContent)) {
+    return [{ type: 'text', text: String(rawContent ?? '') } as ContentBlock];
+  }
+
+  return rawContent.flatMap((block) => {
+    if (!block || typeof block !== 'object') {
+      return [{ type: 'text', text: String(block ?? '') } as ContentBlock];
+    }
+
+    if (typeof (block as { type?: unknown }).type !== 'string') {
+      return [{ type: 'text', text: JSON.stringify(block) } as ContentBlock];
+    }
+
+    return [block as ContentBlock];
+  });
+}
+
 export function MessageCard({ message, isStreaming }: MessageCardProps) {
   const isUser = message.role === 'user';
   const isQueued = message.localStatus === 'queued';
   const isCancelled = message.localStatus === 'cancelled';
-  const rawContent = message.content as unknown;
-  const contentBlocks = Array.isArray(rawContent)
-    ? (rawContent as ContentBlock[])
-    : [{ type: 'text', text: String(rawContent ?? '') } as ContentBlock];
+  const contentBlocks = normalizeContentBlocks(message.content as unknown);
   const [copied, setCopied] = useState(false);
 
   // Extract text content for copying
@@ -121,7 +136,9 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
             </button>
           </div>
           {message.timestamp && (
-            <div className="text-[11px] text-text-muted text-right pr-1">{formatRelativeTime(message.timestamp)}</div>
+            <div className="text-[11px] text-text-muted text-right pr-1">
+              <span suppressHydrationWarning>{formatRelativeTime(message.timestamp)}</span>
+            </div>
           )}
         </div>
       ) : (
@@ -130,7 +147,9 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
           <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
             <Sparkles className="w-3 h-3" />
             <span>Assistant</span>
-            {message.timestamp && <span>· {formatRelativeTime(message.timestamp)}</span>}
+            {message.timestamp && (
+              <span suppressHydrationWarning>· {formatRelativeTime(message.timestamp)}</span>
+            )}
           </div>
           {contentBlocks
             .filter((block) => block.type !== 'text' || (block as { text?: string }).text)
@@ -140,10 +159,13 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
               block={block}
               isUser={isUser}
               isStreaming={isStreaming}
-              allBlocks={message.content}
+              allBlocks={contentBlocks}
               message={message}
             />
           ))}
+          {contentBlocks.length === 0 && (
+            <div className="text-sm text-text-muted italic">Empty message</div>
+          )}
         </div>
       )}
     </div>
@@ -793,8 +815,6 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
   // MCP tools start with mcp__ (double underscore)
   const isMCPTool = toolName?.startsWith('mcp__') || false;
 
-  console.log('[ToolResultBlock] toolUseId:', block.toolUseId, 'toolName:', toolName, 'isMCPTool:', isMCPTool, 'expanded:', expanded);
-
   // Generate summary for tool results
   const generateSummary = (content: string, isError: boolean): string => {
     if (isError) {
@@ -898,16 +918,6 @@ function ToolResultBlock({ block, allBlocks }: { block: ToolResultContent; allBl
 
   const summary = generateSummary(block.content, block.isError || false);
   const hasImages = block.images && block.images.length > 0;
-
-  // Debug: Log the entire block to see what we're receiving
-  console.log('[ToolResultBlock] Full block:', {
-    toolUseId: block.toolUseId,
-    hasImages: hasImages,
-    imagesCount: block.images?.length || 0,
-    contentLength: block.content?.length || 0,
-    imagesMimeTypes: block.images?.map(img => img.mimeType),
-    imagesDataLengths: block.images?.map(img => img.data?.length || 0)
-  });
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">

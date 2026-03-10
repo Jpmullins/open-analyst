@@ -192,6 +192,7 @@ export interface HeadlessDocument {
   title: string;
   sourceType: string;
   sourceUri: string;
+  storageUri?: string | null;
   content: string;
   metadata?: Record<string, unknown>;
   createdAt: number;
@@ -411,6 +412,14 @@ export interface HeadlessSkill {
   enabled: boolean;
   config?: Record<string, unknown>;
   createdAt: number;
+  instructions?: string;
+  tools?: string[];
+  references?: string[];
+  scripts?: string[];
+  source?: {
+    kind: 'builtin' | 'repository' | 'custom';
+    path?: string;
+  };
 }
 
 export interface HeadlessLogFile {

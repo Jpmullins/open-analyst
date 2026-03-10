@@ -36,6 +36,8 @@ export default [
     route("projects/:projectId/collections", "routes/api.projects.$projectId.collections.ts"),
     route("projects/:projectId/collections/ensure", "routes/api.projects.$projectId.collections.ensure.ts"),
     route("projects/:projectId/documents", "routes/api.projects.$projectId.documents.ts"),
+    route("projects/:projectId/documents/:documentId/artifact", "routes/api.projects.$projectId.documents.$documentId.artifact.ts"),
+    route("projects/:projectId/artifacts/capture", "routes/api.projects.$projectId.artifacts.capture.ts"),
     route("projects/:projectId/import/url", "routes/api.projects.$projectId.import.url.ts"),
     route("projects/:projectId/import/file", "routes/api.projects.$projectId.import.file.ts"),
     route("projects/:projectId/rag/query", "routes/api.projects.$projectId.rag.query.ts"),

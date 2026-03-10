@@ -13,6 +13,7 @@ src/tools/web_tools.py
 src/util/__init__.py
 src/util/capture.py
 src/util/sandbox.py
+tests/test_agent_factory.py
 tests/test_command_tools.py
 tests/test_file_tools.py
 tests/test_project_tools.py

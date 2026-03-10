@@ -1,6 +1,12 @@
 ---
 name: arlis-bulletin
 description: "Create ARLIS Insights Bulletin reports (.docx) from a topic, research notes, or raw data. Produces intelligence-community-style analytic bulletins using the official ARLIS template with proper branding, classification markings, and formatting. Use this skill whenever the user asks to write a bulletin, intelligence brief, analytic report, ARLIS product, threat assessment, technology assessment, or any short-form analytic document following IC writing standards. Also use when the user mentions KIQs, BLUFs, analytic story arcs, or four-sweeps review in the context of creating a written product."
+tools:
+  - list_directory
+  - read_file
+  - write_file
+  - execute_command
+  - capture_artifact
 ---
 
 # ARLIS Insights Bulletin Skill
@@ -22,9 +28,10 @@ Use this skill when the user wants to:
 3. **Read the template spec** — Read `references/template-spec.md` for exact formatting details
 4. **Formulate the KIQ** — Craft a two-part Key Intelligence Question based on the source material
 5. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
-6. **Generate the document** — Run `scripts/generate_bulletin.py` to clone the template and inject content
-7. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
-8. **Visual QA** — Convert to PDF/images and visually inspect
+6. **Generate the document inside the project workspace** — Run `scripts/generate_bulletin.py` to clone the template and inject content. Save the final `.docx` under a workspace-relative folder such as `outputs/<topic-slug>/arlis-bulletin.docx`. Do not write outputs under the agent service directory.
+7. **Capture the finished document as a project artifact** — After generating the `.docx`, call `capture_artifact` with the workspace-relative path so the bulletin is registered in the project and stored in the configured artifact backend (local or S3).
+8. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
+9. **Visual QA** — Convert to PDF/images and visually inspect
 
 ## Working with Input Files
 
@@ -130,7 +137,7 @@ The script clones the template, preserving the ARLIS logo, classification markin
 
 **Important**: The script handles all formatting automatically (bold/italic leads, bullet points, endnote references, font sizes). You provide plain text content and the script applies the correct XML formatting.
 
-If the script doesn't cover a specific need (e.g., more than 3 bullets per section, extra sections), you can also use the docx editing workflow: unpack the template, edit the XML directly, and repack. Read the `docx` skill's editing documentation for that approach.
+If the script doesn't cover a specific need (e.g., more than 3 bullets per section, extra sections), you can also use the docx editing workflow: unpack the template, edit the XML directly, and repack. The bundled bulletin script is the primary path. The `docx` skill is optional for advanced manual editing and QA, not a prerequisite for generating the initial bulletin.
 
 ## Step 4: Self-Review (Four Sweeps)
 

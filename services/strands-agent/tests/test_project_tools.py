@@ -1,14 +1,21 @@
-"""Tests for project_tools.py — collection overview (mocked httpx)."""
+"""Tests for project_tools.py and bound project tools."""
 
 import os
 import sys
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+strands_mod = types.ModuleType("strands")
+strands_mod.tool = lambda fn: fn
+strands_mod.Agent = object
+sys.modules.setdefault("strands", strands_mod)
+
 from tools.project_tools import collection_overview
+from tools import create_project_tools
 
 
 class TestCollectionOverview:
@@ -52,3 +59,17 @@ class TestCollectionOverview:
     def test_requires_project_id(self):
         with pytest.raises(ValueError, match="project context is required"):
             collection_overview(project_id="")
+
+
+class TestBoundProjectTools:
+    def test_file_tools_are_bound_to_workspace(self, workspace):
+        tools = {
+            tool.__name__: tool
+            for tool in create_project_tools(workspace_dir=workspace)
+        }
+
+        result = tools["write_file"]("reports/output.txt", "artifact")
+
+        assert "Wrote file: reports/output.txt" in result
+        with open(os.path.join(workspace, "reports", "output.txt"), "r", encoding="utf-8") as handle:
+            assert handle.read() == "artifact"

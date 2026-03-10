@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useFetcher, useSearchParams } from 'react-router';
 import {
   AlertCircle,
   CheckCircle,
@@ -29,7 +28,19 @@ import {
   headlessGetMcpTools,
   headlessGetModels,
   headlessGetSkills,
+  headlessDeleteCredential,
+  headlessDeleteMcpServer,
+  headlessDeleteSkill,
+  headlessInstallSkill,
   headlessLogsIsEnabled,
+  headlessLogsClear,
+  headlessLogsExport,
+  headlessLogsSetEnabled,
+  headlessSaveConfig,
+  headlessSaveCredential,
+  headlessSaveMcpServer,
+  headlessSetSkillEnabled,
+  headlessUpdateCredential,
   headlessValidateSkillPath,
 } from '~/lib/headless-api';
 
@@ -45,9 +56,9 @@ interface SettingsInitialData {
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
+  activeTab?: 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
+  onTabChange?: (tab: TabId) => void;
   initialData?: SettingsInitialData;
-  mode?: 'modal' | 'page';
 }
 
 type TabId = 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
@@ -86,36 +97,23 @@ const TABS: Array<{ id: TabId; label: string; description: string; icon: any }> 
   { id: 'logs', label: 'Logs', description: 'Service diagnostics and export', icon: Database },
 ];
 
-export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData, mode = 'modal' }: SettingsPanelProps) {
-  // In page mode, persist active tab in URL; in modal mode, use local state
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [localTab, setLocalTab] = useState<TabId>(initialTab);
-
-  const activeTab: TabId = mode === 'page'
-    ? (searchParams.get('tab') as TabId) || initialTab
-    : localTab;
-
-  const setActiveTab = (tab: TabId) => {
-    if (mode === 'page') {
-      setSearchParams({ tab }, { replace: true });
-    } else {
-      setLocalTab(tab);
-    }
-  };
-
-  useEffect(() => {
-    if (isOpen && mode !== 'page') setLocalTab(initialTab);
-  }, [initialTab, isOpen, mode]);
+export function SettingsPanel({
+  isOpen,
+  onClose,
+  activeTab = 'api',
+  onTabChange,
+  initialData,
+}: SettingsPanelProps) {
 
   if (!isOpen) return null;
 
   const content = (
-    <div className={`bg-surface rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[88vh] overflow-hidden border border-border flex ${mode === 'page' ? 'mx-auto my-4' : ''}`}>
+    <div className="bg-surface rounded-2xl shadow-2xl w-full max-w-5xl mx-auto my-4 max-h-[88vh] overflow-hidden border border-border flex">
       <div className="w-72 border-r border-border p-3 space-y-1">
         {TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => onTabChange?.(tab.id)}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left ${activeTab === tab.id ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-surface-hover'}`}
           >
             <tab.icon className="w-4 h-4" />
@@ -144,22 +142,12 @@ export function SettingsPanel({ isOpen, onClose, initialTab = 'api', initialData
       </div>
     </div>
   );
-
-  if (mode === 'page') {
-    return content;
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      {content}
-    </div>
-  );
+  return content;
 }
 
 function APISettingsTab({ currentModel }: { currentModel?: string }) {
   const setAppConfig = useAppStore((state) => state.setAppConfig);
   const setIsConfigured = useAppStore((state) => state.setIsConfigured);
-  const fetcher = useFetcher();
   const [config, setConfig] = useState<AppConfig>(() => getBrowserConfig());
   // Prefer the DB-persisted model, fall back to browser config
   const [model, setModel] = useState(currentModel || config.model || '');
@@ -186,7 +174,7 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const saveConfig = () => {
+  const saveConfig = async () => {
     const resolvedModel = (useCustomModel ? customModel : model).trim();
     if (!resolvedModel) {
       setError('Model is required.');
@@ -197,11 +185,7 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
       model: resolvedModel,
     };
     setError('');
-    fetcher.submit({ model: resolvedModel } as Record<string, string>, {
-      method: "POST",
-      action: "/api/config",
-      encType: "application/json",
-    });
+    await headlessSaveConfig({ model: resolvedModel });
     saveBrowserConfig(next);
     setConfig(next);
     setAppConfig(next);
@@ -264,7 +248,7 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<Partial<Credential>>({ type: 'api' });
   const [editingId, setEditingId] = useState<string | null>(null);
-  const fetcher = useFetcher();
+  const [isSaving, setIsSaving] = useState(false);
 
   const load = async () => {
     try {
@@ -277,46 +261,49 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
 
   useEffect(() => { if (!initialItems) void load(); }, []);
 
-  // Re-fetch after fetcher completes a mutation
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) {
-      void load();
-    }
-  }, [fetcher.state, fetcher.data]);
-
-  const save = () => {
+  const save = async () => {
     if (!draft.name?.trim() || !draft.username?.trim()) return;
-    if (editingId) {
-      fetcher.submit(draft as unknown as Record<string, string>, {
-        method: "PATCH",
-        action: `/api/credentials/${editingId}`,
-        encType: "application/json",
-      });
-    } else {
-      fetcher.submit({
-        name: draft.name.trim(),
-        type: draft.type || 'other',
-        username: draft.username.trim(),
-        password: draft.password ?? '',
-        service: draft.service ?? '',
-        url: draft.url ?? '',
-        notes: draft.notes ?? '',
-      } as Record<string, string>, {
-        method: "POST",
-        action: "/api/credentials",
-        encType: "application/json",
-      });
+    setIsSaving(true);
+    setError('');
+    try {
+      if (editingId) {
+        await headlessUpdateCredential(editingId, {
+          name: draft.name.trim(),
+          type: draft.type || 'other',
+          username: draft.username.trim(),
+          password: draft.password ?? '',
+          service: draft.service ?? '',
+          url: draft.url ?? '',
+          notes: draft.notes ?? '',
+        });
+      } else {
+        await headlessSaveCredential({
+          name: draft.name.trim(),
+          type: draft.type || 'other',
+          username: draft.username.trim(),
+          password: draft.password ?? '',
+          service: draft.service ?? '',
+          url: draft.url ?? '',
+          notes: draft.notes ?? '',
+        });
+      }
+      await load();
+      setDraft({ type: 'api' });
+      setEditingId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsSaving(false);
     }
-    setDraft({ type: 'api' });
-    setEditingId(null);
   };
 
-  const handleDelete = (id: string) => {
-    fetcher.submit({}, {
-      method: "DELETE",
-      action: `/api/credentials/${id}`,
-      encType: "application/json",
-    });
+  const handleDelete = async (id: string) => {
+    try {
+      await headlessDeleteCredential(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -336,7 +323,7 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
           <input className="input" placeholder="Secret/Password" type="password" value={draft.password || ''} autoComplete="new-password" onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))} />
         </label>
       </div>
-      <button className="btn btn-primary" onClick={save}>{editingId ? 'Update' : 'Save'} Credential</button>
+      <button className="btn btn-primary" onClick={() => void save()} disabled={isSaving}>{editingId ? 'Update' : 'Save'} Credential</button>
 
       <div className="space-y-2">
         {items.map((item) => (
@@ -362,7 +349,6 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
   const [tools, setTools] = useState<Array<{ serverId: string; name: string; description: string }>>([]);
   const [presets, setPresets] = useState<Record<string, any>>(initialPresets || {});
   const [error, setError] = useState('');
-  const fetcher = useFetcher();
 
   const loadAll = async () => {
     try {
@@ -388,10 +374,11 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
     return () => clearInterval(timer);
   }, []);
 
-  const addPreset = (key: string) => {
+  const addPreset = async (key: string) => {
     const preset = presets[key];
     if (!preset) return;
-    fetcher.submit({
+    try {
+      await headlessSaveMcpServer({
       id: `mcp-${key}-${Date.now()}`,
       name: preset.name || key,
       type: preset.type || 'stdio',
@@ -401,27 +388,29 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
       url: preset.url,
       headers: preset.headers || {},
       enabled: true,
-    }, {
-      method: "POST",
-      action: "/api/mcp/servers",
-      encType: "application/json",
-    });
+    } as any);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const toggleServer = (server: MCPServerConfig) => {
-    fetcher.submit({ ...server, enabled: !server.enabled }, {
-      method: "POST",
-      action: "/api/mcp/servers",
-      encType: "application/json",
-    });
+  const toggleServer = async (server: MCPServerConfig) => {
+    try {
+      await headlessSaveMcpServer({ ...server, enabled: !server.enabled } as any);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const deleteServer = (id: string) => {
-    fetcher.submit({}, {
-      method: "DELETE",
-      action: `/api/mcp/servers/${id}`,
-      encType: "application/json",
-    });
+  const deleteServer = async (id: string) => {
+    try {
+      await headlessDeleteMcpServer(id);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -458,7 +447,6 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
   const [skills, setSkills] = useState<Skill[]>(initialSkills as Skill[] || []);
   const [error, setError] = useState('');
   const [showInstallDialog, setShowInstallDialog] = useState(false);
-  const fetcher = useFetcher();
 
   const load = async () => {
     try {
@@ -471,13 +459,6 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
 
   useEffect(() => { if (!initialSkills) void load(); }, []);
 
-  // Re-fetch after fetcher completes a mutation
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) {
-      void load();
-    }
-  }, [fetcher.state, fetcher.data]);
-
   const install = async (folderPath?: string) => {
     setShowInstallDialog(false);
     if (!folderPath?.trim()) return;
@@ -486,27 +467,30 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
       setError(validation.errors.join(', '));
       return;
     }
-    fetcher.submit({ folderPath: folderPath.trim() }, {
-      method: "POST",
-      action: "/api/skills/install",
-      encType: "application/json",
-    });
+    try {
+      await headlessInstallSkill(folderPath.trim());
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const toggleEnabled = (skill: Skill) => {
-    fetcher.submit({ enabled: !skill.enabled }, {
-      method: "POST",
-      action: `/api/skills/${skill.id}/enabled`,
-      encType: "application/json",
-    });
+  const toggleEnabled = async (skill: Skill) => {
+    try {
+      await headlessSetSkillEnabled(skill.id, !skill.enabled);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const deleteSkill = (id: string) => {
-    fetcher.submit({}, {
-      method: "DELETE",
-      action: `/api/skills/${id}`,
-      encType: "application/json",
-    });
+  const deleteSkill = async (id: string) => {
+    try {
+      await headlessDeleteSkill(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -531,8 +515,8 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
               <div className="text-xs text-text-muted">{skill.type}</div>
             </div>
             <div className="flex gap-2">
-              <button className="btn btn-secondary" onClick={() => toggleEnabled(skill)}>{skill.enabled ? 'Disable' : 'Enable'}</button>
-              {skill.type !== 'builtin' && <button className="btn btn-ghost text-error" onClick={() => deleteSkill(skill.id)}><Trash2 className="w-4 h-4" /></button>}
+              <button className="btn btn-secondary" onClick={() => void toggleEnabled(skill)}>{skill.enabled ? 'Disable' : 'Enable'}</button>
+              {skill.type !== 'builtin' && <button className="btn btn-ghost text-error" onClick={() => void deleteSkill(skill.id)}><Trash2 className="w-4 h-4" /></button>}
             </div>
           </div>
         ))}
@@ -547,7 +531,6 @@ function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
   const [enabled, setEnabled] = useState(initialEnabled ?? true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const fetcher = useFetcher();
 
   const load = async () => {
     try {
@@ -567,43 +550,29 @@ function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
     return () => clearInterval(timer);
   }, []);
 
-  // Pick up export/clear results from fetcher
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data) {
-      const data = fetcher.data as any;
-      if (data?.path) {
-        setSuccess(`Exported: ${data.path}`);
-      } else if (data?.deletedCount !== undefined) {
-        setSuccess('Logs cleared.');
-        void load();
-      }
-    }
-  }, [fetcher.state, fetcher.data]);
-
-  const toggleEnabled = () => {
+  const toggleEnabled = async () => {
     const next = !enabled;
     setEnabled(next);
-    fetcher.submit({ enabled: next }, {
-      method: "POST",
-      action: "/api/logs/enabled",
-      encType: "application/json",
-    });
+    await headlessLogsSetEnabled(next);
   };
 
-  const exportLogs = () => {
-    fetcher.submit({}, {
-      method: "POST",
-      action: "/api/logs/export",
-      encType: "application/json",
-    });
+  const exportLogs = async () => {
+    try {
+      const data = await headlessLogsExport();
+      setSuccess(`Exported: ${data.path}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
-  const clearLogs = () => {
-    fetcher.submit({}, {
-      method: "POST",
-      action: "/api/logs/clear",
-      encType: "application/json",
-    });
+  const clearLogs = async () => {
+    try {
+      await headlessLogsClear();
+      setSuccess('Logs cleared.');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -611,9 +580,9 @@ function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
       {error && <Banner tone="error" text={error} />}
       {success && <Banner tone="success" text={success} />}
       <div className="flex gap-2">
-        <button className="btn btn-secondary" onClick={toggleEnabled}>{enabled ? 'Disable Dev Logs' : 'Enable Dev Logs'}</button>
-        <button className="btn btn-secondary" onClick={exportLogs}>Export</button>
-        <button className="btn btn-ghost text-error" onClick={clearLogs}>Clear</button>
+        <button className="btn btn-secondary" onClick={() => void toggleEnabled()}>{enabled ? 'Disable Dev Logs' : 'Enable Dev Logs'}</button>
+        <button className="btn btn-secondary" onClick={() => void exportLogs()}>Export</button>
+        <button className="btn btn-ghost text-error" onClick={() => void clearLogs()}>Clear</button>
       </div>
       {dir && <div className="text-xs text-text-muted">Directory: <span className="font-mono">{dir}</span></div>}
       <div className="space-y-1 max-h-[380px] overflow-y-auto">

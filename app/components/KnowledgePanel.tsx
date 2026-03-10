@@ -7,6 +7,7 @@ import {
 import type { HeadlessCollection, HeadlessDocument } from "~/lib/headless-api";
 import { useAppStore } from "~/lib/store";
 import { BookOpen, FileText, Link2, X } from "lucide-react";
+import { DocumentPreview } from "./DocumentPreview";
 
 interface KnowledgePanelProps {
   projectId: string;
@@ -123,11 +124,13 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
 
       {/* Preview */}
       {previewDoc && (
-        <div className="border-t border-border px-3 py-2 max-h-48 overflow-y-auto">
+        <div className="border-t border-border px-3 py-2 max-h-[32rem] overflow-y-auto">
           <div className="text-xs font-medium mb-1">{previewDoc.title}</div>
-          <pre className="text-xs text-text-muted whitespace-pre-wrap">
-            {(previewDoc.content || "").slice(0, 500)}
-          </pre>
+          <DocumentPreview
+            projectId={projectId}
+            document={previewDoc}
+            maxTextLength={500}
+          />
         </div>
       )}
 

@@ -92,6 +92,20 @@ export async function listDocuments(
     .orderBy(desc(documents.updatedAt));
 }
 
+export async function getDocument(
+  projectId: string,
+  documentId: string
+): Promise<Document | undefined> {
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .limit(1);
+  return doc;
+}
+
 export async function createDocument(
   projectId: string,
   input: {

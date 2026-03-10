@@ -22,6 +22,7 @@ import {
   Link2,
   Upload,
 } from "lucide-react";
+import { DocumentPreview } from "./DocumentPreview";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
@@ -339,9 +340,10 @@ export function KnowledgeWorkspace() {
                 <h3 className="text-sm font-semibold mb-2">
                   {selectedDocument.title}
                 </h3>
-                <pre className="text-xs text-text-secondary whitespace-pre-wrap max-h-64 overflow-y-auto">
-                  {selectedDocument.content || "No content"}
-                </pre>
+                <DocumentPreview
+                  projectId={projectId}
+                  document={selectedDocument}
+                />
               </div>
             )}
           </section>

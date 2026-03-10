@@ -1,3 +1,5 @@
+import type { Skill, SkillCatalogEntry } from "../types";
+
 export interface AgentEvent {
   type:
     | "text_delta"
@@ -27,6 +29,9 @@ export interface AgentChatOptions {
   collectionId?: string;
   collectionName?: string;
   deepResearch?: boolean;
+  skills?: Skill[];
+  skillCatalog?: SkillCatalogEntry[];
+  activeToolNames?: string[];
 }
 
 export interface AgentTrace {

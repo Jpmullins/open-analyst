@@ -9,6 +9,12 @@ import {
 import { createAgentProvider } from "~/lib/agent/index.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
 import { resolveModel } from "~/lib/litellm.server";
+import {
+  getActiveSkillToolNames,
+  getSkillCatalog,
+  listActiveSkills,
+  selectMatchedSkills,
+} from "~/lib/skills.server";
 import type { HeadlessConfig } from "~/lib/types";
 import type { Route } from "./+types/api.chat.stream";
 
@@ -19,6 +25,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   const body = await request.json();
   const settings = await getSettings();
+  const requestMessages = Array.isArray(body.messages) ? body.messages : [];
   const projectId = String(
     body.projectId || settings.activeProjectId || ""
   ).trim();
@@ -53,7 +60,17 @@ export async function action({ request }: Route.ActionArgs) {
 
   const provider = createAgentProvider(cfg);
   const workingDir = getProjectWorkspace(projectId);
+  const activeSkills = listActiveSkills();
   const prompt = String(body.prompt || "").trim();
+  const chatMessages = requestMessages.length
+    ? requestMessages
+    : prompt
+      ? [{ role: "user", content: prompt }]
+      : [];
+  const matchedSkills = selectMatchedSkills(activeSkills, {
+    prompt,
+    messages: chatMessages,
+  });
 
   // Reuse existing task or create new one
   let task;
@@ -94,7 +111,7 @@ export async function action({ request }: Route.ActionArgs) {
       try {
         let fullText = "";
         for await (const event of provider.stream(
-          Array.isArray(body.messages) ? body.messages : [],
+          chatMessages,
           {
             projectId,
             workingDir,
@@ -102,6 +119,9 @@ export async function action({ request }: Route.ActionArgs) {
             collectionName:
               String(body.collectionName || "").trim() || "Task Sources",
             deepResearch: body.deepResearch === true,
+            skills: matchedSkills,
+            skillCatalog: getSkillCatalog(activeSkills),
+            activeToolNames: getActiveSkillToolNames(activeSkills),
           }
         )) {
           send(event.type, event);

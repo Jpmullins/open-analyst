@@ -2,11 +2,39 @@
 
 import os
 import sys
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+strands_mod = types.ModuleType("strands")
+strands_mod.tool = lambda fn: fn
+sys.modules.setdefault("strands", strands_mod)
+
+bs4_mod = types.ModuleType("bs4")
+
+
+class _FakeSoup:
+    def __init__(self, html, _parser):
+        self.html = html
+        self.title = types.SimpleNamespace(string="Research Page")
+
+    def get_text(self, separator=" ", strip=True):
+        return str(self.html)
+
+    def __call__(self, _selectors):
+        return []
+
+    def find(self, tag_name):
+        if tag_name in {"article", "main", "body"}:
+            return self
+        return None
+
+
+bs4_mod.BeautifulSoup = _FakeSoup
+sys.modules.setdefault("bs4", bs4_mod)
 
 from tools.research_tools import arxiv_search, hf_daily_papers, hf_paper
 

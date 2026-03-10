@@ -57,3 +57,46 @@ def collection_overview(
         lines.append(f"...and {len(docs) - len(top_docs)} more documents.")
 
     return "\n".join(lines)
+
+
+@tool
+def capture_artifact(
+    relative_path: str,
+    title: str = "",
+    collection_id: str = "",
+    collection_name: str = "Artifacts",
+    project_id: str = "",
+    api_base_url: str = "http://localhost:5173",
+) -> str:
+    """Capture a generated workspace file into the project store and artifact backend.
+
+    Args:
+        relative_path: Path to the file relative to the current project workspace.
+        title: Optional document title to show in the UI.
+        collection_id: Optional target collection ID.
+        collection_name: Target collection name when collection_id is omitted.
+        project_id: The current project ID.
+        api_base_url: Base URL of the Node.js API.
+
+    Returns:
+        A summary string describing the stored project document.
+    """
+    if not project_id:
+        raise ValueError("project context is required")
+    if not relative_path or not relative_path.strip():
+        raise ValueError("relative_path is required")
+
+    api = ProjectAPI(api_base_url, project_id)
+    result = api.capture_artifact(
+        relative_path=relative_path,
+        title=title,
+        collection_id=collection_id,
+        collection_name=collection_name,
+    )
+    document = result.get("document", {}) if isinstance(result, dict) else {}
+    if not document:
+        raise RuntimeError("Failed to capture artifact")
+
+    doc_title = document.get("title", title or relative_path)
+    source_uri = document.get("sourceUri") or document.get("storageUri") or ""
+    return f"Captured artifact: {doc_title} ({source_uri})"

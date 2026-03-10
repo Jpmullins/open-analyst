@@ -1,7 +1,6 @@
-import fs from "fs";
 import path from "path";
 import { createDocument } from "~/lib/db/queries/documents.server";
-import { getConfigDir } from "~/lib/helpers.server";
+import { storeArtifact } from "~/lib/artifacts.server";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
 
 function inferExtension(contentType: string): string {
@@ -32,6 +31,14 @@ function inferTextFromBuffer(
 ): string {
   const type = String(mimeType || "").toLowerCase();
   const lowerName = String(filename || "").toLowerCase();
+  const isOfficeArchive =
+    type.includes("openxmlformats") ||
+    lowerName.endsWith(".docx") ||
+    lowerName.endsWith(".pptx") ||
+    lowerName.endsWith(".xlsx");
+  if (isOfficeArchive) {
+    return "";
+  }
   if (
     type.includes("text/") ||
     type.includes("json") ||
@@ -69,15 +76,15 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
   const buffer = Buffer.from(base64, "base64");
-  const capturesDir = path.join(getConfigDir(), "captures", projectId);
-  if (!fs.existsSync(capturesDir)) {
-    fs.mkdirSync(capturesDir, { recursive: true });
-  }
   const extension =
     path.extname(filename) || inferExtension(mimeType);
-  const storedName = `${sanitizeFilename(path.basename(filename, path.extname(filename)))}-${Date.now()}${extension}`;
-  const capturePath = path.join(capturesDir, storedName);
-  fs.writeFileSync(capturePath, buffer);
+  const storedName = `${sanitizeFilename(path.basename(filename, path.extname(filename)))}${extension}`;
+  const artifact = await storeArtifact({
+    projectId,
+    filename: storedName,
+    mimeType,
+    buffer,
+  });
 
   let content = inferTextFromBuffer(buffer, mimeType, filename);
   if (
@@ -99,14 +106,16 @@ export async function action({ request, params }: Route.ActionArgs) {
     collectionId: body.collectionId,
     title: body.title || filename,
     sourceType: "file",
-    sourceUri: `file://${capturePath}`,
-    storageUri: capturePath,
-    content: content || `[Binary file stored at ${capturePath}]`,
+    sourceUri: artifact.storageUri.startsWith("s3://")
+      ? artifact.storageUri
+      : `file://${artifact.storageUri}`,
+    storageUri: artifact.storageUri,
+    content: content || `[Binary file stored at ${artifact.storageUri}]`,
     metadata: {
-      filename,
-      mimeType,
-      bytes: buffer.length,
-      capturePath,
+      filename: artifact.filename,
+      mimeType: artifact.mimeType,
+      bytes: artifact.size,
+      storageBackend: artifact.backend,
       extractedTextLength: content.length,
     },
   });

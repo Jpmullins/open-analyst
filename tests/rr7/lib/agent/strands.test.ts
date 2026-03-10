@@ -61,6 +61,27 @@ describe("StrandsProvider", () => {
         collectionId: "col-1",
         collectionName: "My Collection",
         deepResearch: true,
+        skillCatalog: [
+          {
+            id: "repo-skill-pdf",
+            name: "pdf",
+            description: "PDF helper",
+            tools: ["read_file"],
+          },
+        ],
+        activeToolNames: ["read_file", "web_search"],
+        skills: [
+          {
+            id: "repo-skill-pdf",
+            name: "pdf",
+            description: "PDF helper",
+            type: "builtin",
+            enabled: true,
+            createdAt: Date.now(),
+            instructions: "Use this skill for PDFs.",
+            tools: ["read_file"],
+          },
+        ],
       }
     );
 
@@ -81,6 +102,23 @@ describe("StrandsProvider", () => {
     expect(body.collection_id).toBe("col-1");
     expect(body.collection_name).toBe("My Collection");
     expect(body.deep_research).toBe(true);
+    expect(body.skills).toEqual([
+      expect.objectContaining({
+        id: "repo-skill-pdf",
+        name: "pdf",
+        instructions: "Use this skill for PDFs.",
+        tools: ["read_file"],
+      }),
+    ]);
+    expect(body.skill_catalog).toEqual([
+      expect.objectContaining({
+        id: "repo-skill-pdf",
+        name: "pdf",
+        description: "PDF helper",
+        tools: ["read_file"],
+      }),
+    ]);
+    expect(body.active_tool_names).toEqual(["read_file", "web_search"]);
     expect(body.model_id).toBe("bedrock-claude-opus-4.6");
     expect(body.litellm_base_url).toBe("http://test-gateway:4000");
     expect(body.litellm_api_key).toBe("test-key-123");

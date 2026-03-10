@@ -1,6 +1,12 @@
 import { getSettings } from "~/lib/db/queries/settings.server";
 import { createTask, updateTask, appendTaskEvent } from "~/lib/db/queries/tasks.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
+import {
+  getActiveSkillToolNames,
+  getSkillCatalog,
+  listActiveSkills,
+  selectMatchedSkills,
+} from "~/lib/skills.server";
 import type { HeadlessConfig } from "~/lib/types";
 import type { Route } from "./+types/api.chat";
 
@@ -19,6 +25,11 @@ export async function action({ request }: Route.ActionArgs) {
   const collectionId = String(body.collectionId || "").trim();
   const collectionName = String(body.collectionName || "").trim();
   const deepResearch = body.deepResearch === true;
+  const activeSkills = listActiveSkills();
+  const matchedSkills = selectMatchedSkills(activeSkills, {
+    prompt,
+    messages,
+  });
 
   if (!projectId) {
     return Response.json(
@@ -67,6 +78,9 @@ export async function action({ request }: Route.ActionArgs) {
       collectionId: collectionId || undefined,
       collectionName: collectionName || "Task Sources",
       deepResearch,
+      skills: matchedSkills,
+      skillCatalog: getSkillCatalog(activeSkills),
+      activeToolNames: getActiveSkillToolNames(activeSkills),
       onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
         await appendTaskEvent(task.id, eventType, payload);
       },

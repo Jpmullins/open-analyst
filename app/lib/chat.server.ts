@@ -1,6 +1,7 @@
 import type { HeadlessConfig } from "./types";
 import { createAgentProvider } from "./agent/index.server";
 import { getProjectWorkspace } from "./filesystem.server";
+import type { Skill, SkillCatalogEntry } from "./types";
 
 interface ChatMessage {
   role: string;
@@ -12,6 +13,9 @@ interface ChatOptions {
   collectionId?: string;
   collectionName?: string;
   deepResearch?: boolean;
+  skills?: Skill[];
+  skillCatalog?: SkillCatalogEntry[];
+  activeToolNames?: string[];
   onRunEvent?: (eventType: string, payload: Record<string, unknown>) => void;
 }
 
@@ -44,6 +48,9 @@ export async function runAgentChat(
         collectionId: options.collectionId,
         collectionName: options.collectionName || "Task Sources",
         deepResearch: options.deepResearch,
+        skills: options.skills || [],
+        skillCatalog: options.skillCatalog || [],
+        activeToolNames: options.activeToolNames || [],
       }
     );
 

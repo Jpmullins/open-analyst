@@ -64,6 +64,33 @@ class ProjectAPI:
         except Exception:
             return {}
 
+    def capture_artifact(
+        self,
+        *,
+        relative_path: str,
+        title: str = "",
+        collection_id: str = "",
+        collection_name: str = "Artifacts",
+        source_type: str = "generated",
+        metadata: dict | None = None,
+    ) -> dict:
+        """Capture a workspace file into the project document store."""
+        try:
+            r = self._client.post(
+                f"{self.base_url}/api/projects/{self.project_id}/artifacts/capture",
+                json={
+                    "relativePath": relative_path,
+                    "title": title,
+                    "collectionId": collection_id,
+                    "collectionName": collection_name,
+                    "sourceType": source_type,
+                    "metadata": metadata or {},
+                },
+            )
+            return r.json() if r.is_success else {}
+        except Exception:
+            return {}
+
     def list_collections(self) -> list:
         """List all collections in the project."""
         try:

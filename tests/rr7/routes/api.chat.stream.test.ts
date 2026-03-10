@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { createProject } from "~/lib/db/queries/projects.server";
 
+const capturedOptions: Array<Record<string, unknown>> = [];
+
 // Mock the agent provider before importing the route
 vi.mock("~/lib/agent/index.server", () => ({
   createAgentProvider: () => ({
     name: "mock",
-    async *stream() {
+    async *stream(_messages: unknown, options: Record<string, unknown>) {
+      capturedOptions.push(options);
       yield {
         type: "text_delta" as const,
         text: "Hello from stream",
@@ -15,6 +18,42 @@ vi.mock("~/lib/agent/index.server", () => ({
     },
     async dispose() {},
   }),
+}));
+
+vi.mock("~/lib/skills.server", () => ({
+  listActiveSkills: () => [
+    {
+      id: "repo-skill-pdf",
+      name: "pdf",
+      description: "PDF helper",
+      type: "builtin",
+      enabled: true,
+      createdAt: Date.now(),
+      instructions: "Use this skill for PDFs.",
+      tools: ["read_file"],
+    },
+  ],
+  getSkillCatalog: () => [
+    {
+      id: "repo-skill-pdf",
+      name: "pdf",
+      description: "PDF helper",
+      tools: ["read_file"],
+    },
+  ],
+  getActiveSkillToolNames: () => ["read_file"],
+  selectMatchedSkills: () => [
+    {
+      id: "repo-skill-pdf",
+      name: "pdf",
+      description: "PDF helper",
+      type: "builtin",
+      enabled: true,
+      createdAt: Date.now(),
+      instructions: "Use this skill for PDFs.",
+      tools: ["read_file"],
+    },
+  ],
 }));
 
 import { action } from "~/routes/api.chat.stream";
@@ -110,5 +149,41 @@ describe("POST /api/chat/stream", () => {
     const tasks = await listTasks(projectId);
     expect(tasks.length).toBeGreaterThanOrEqual(1);
     expect(tasks[0].type).toBe("chat");
+  });
+
+  it("passes active skills into provider stream options", async () => {
+    capturedOptions.length = 0;
+
+    const response = await action({
+      request: makeRequest({
+        projectId,
+        messages: [{ role: "user", content: "pdf help" }],
+        prompt: "pdf help",
+      }),
+      params: {},
+      context: {},
+    });
+
+    const reader = response.body?.getReader();
+    if (reader) {
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+    }
+
+    expect(capturedOptions[0]?.skills).toEqual([
+      expect.objectContaining({
+        id: "repo-skill-pdf",
+        name: "pdf",
+      }),
+    ]);
+    expect(capturedOptions[0]?.skillCatalog).toEqual([
+      expect.objectContaining({
+        id: "repo-skill-pdf",
+        name: "pdf",
+      }),
+    ]);
+    expect(capturedOptions[0]?.activeToolNames).toEqual(["read_file"]);
   });
 });

@@ -117,6 +117,21 @@ export interface Skill {
   enabled: boolean;
   config?: Record<string, unknown>;
   createdAt: number;
+  instructions?: string;
+  tools?: string[];
+  source?: {
+    kind: "builtin" | "repository" | "custom";
+    path?: string;
+  };
+  references?: string[];
+  scripts?: string[];
+}
+
+export interface SkillCatalogEntry {
+  id: string;
+  name: string;
+  description?: string;
+  tools?: string[];
 }
 
 export type SkillType = 'builtin' | 'mcp' | 'custom';
@@ -437,6 +452,7 @@ export interface Document {
   title: string;
   sourceType: string;
   sourceUri: string;
+  storageUri?: string | null;
   content: string;
   metadata: Record<string, unknown>;
   createdAt: number;
@@ -496,4 +512,12 @@ export interface SkillConfig {
   enabled: boolean;
   config: Record<string, unknown>;
   createdAt: number;
+}
+
+export interface ArtifactRecord {
+  storageUri: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  backend: "local" | "s3";
 }
