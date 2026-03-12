@@ -7,6 +7,8 @@ import {
 } from './helpers.server';
 import { inspectMcpServer, type McpServerInspection } from './mcp-client.server';
 import type { McpPreset, McpServerConfig } from './types';
+import type { Project } from './db/schema';
+import { resolveProjectArtifactConfig } from './project-storage.server';
 
 const MCP_SERVERS_FILENAME = 'mcp-servers.json';
 const MCP_CACHE_TTL_MS = 30_000;
@@ -99,6 +101,43 @@ function isAnalystMcpServer(server: Partial<McpServerConfig>): boolean {
     url === 'http://localhost:8000/mcp' ||
     url === 'http://localhost:8000/mcp/'
   );
+}
+
+export function getAnalystMcpServer(configDir?: string): McpServerConfig | null {
+  const servers = listMcpServers(configDir);
+  return servers.find((server) => isAnalystMcpServer(server)) || null;
+}
+
+export function buildProjectMcpHeaders(
+  project: Project,
+  apiBaseUrl: string
+): Record<string, string> {
+  const artifact = resolveProjectArtifactConfig(project);
+  const headers: Record<string, string> = {
+    'x-open-analyst-project-id': project.id,
+    'x-open-analyst-project-name': project.name,
+    'x-open-analyst-workspace-slug': project.workspaceSlug,
+    'x-open-analyst-api-base-url': apiBaseUrl.replace(/\/+$/g, ''),
+    'x-open-analyst-artifact-backend': artifact.backend,
+  };
+
+  if (artifact.localRoot) {
+    headers['x-open-analyst-local-artifact-root'] = artifact.localRoot;
+  }
+  if (artifact.bucket) {
+    headers['x-open-analyst-s3-bucket'] = artifact.bucket;
+  }
+  if (artifact.region) {
+    headers['x-open-analyst-s3-region'] = artifact.region;
+  }
+  if (artifact.endpoint) {
+    headers['x-open-analyst-s3-endpoint'] = artifact.endpoint;
+  }
+  if (artifact.keyPrefix) {
+    headers['x-open-analyst-s3-prefix'] = artifact.keyPrefix.replace(/\/artifacts$/g, '');
+  }
+
+  return headers;
 }
 
 function normalizeMcpServer(server: McpServerConfig): McpServerConfig {
@@ -450,4 +489,22 @@ export async function getSelectedMcpServers(
     .map((entry) => entry.server);
 
   return [...pinnedServers, ...scored].slice(0, maxServers);
+}
+
+export function applyProjectMcpContext(
+  servers: McpServerConfig[],
+  project: Project,
+  apiBaseUrl: string
+): McpServerConfig[] {
+  return servers.map((server) => {
+    if (!isAnalystMcpServer(server)) return server;
+
+    return {
+      ...server,
+      headers: {
+        ...(server.headers || {}),
+        ...buildProjectMcpHeaders(project, apiBaseUrl),
+      },
+    };
+  });
 }

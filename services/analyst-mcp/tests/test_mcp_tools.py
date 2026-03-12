@@ -14,6 +14,8 @@ from analyst_mcp.models import (
     CapabilityResponse,
     ChunkRecord,
     CollectionDetailResponse,
+    CollectionArtifactEntry,
+    CollectionArtifactMetadataResponse,
     CollectionMutationResponse,
     CollectionResponse,
     CollectionSummary,
@@ -127,6 +129,8 @@ class StubService:
             suffix=".pdf",
             path="/tmp/embodied-ai-logistics.pdf",
             mime_type="application/pdf",
+            artifact_url="http://localhost:5173/api/projects/proj-1/analyst-mcp/papers/paper%3Aembodied-ai-2026/artifact?suffix=.pdf",
+            download_url="http://localhost:5173/api/projects/proj-1/analyst-mcp/papers/paper%3Aembodied-ai-2026/artifact?suffix=.pdf&download=1",
         )
         self.download = DownloadResult(
             canonical_id=self.paper.canonical_id,
@@ -284,6 +288,15 @@ class StubService:
     async def collection_search(self, name: str, query: str, limit: int = 10) -> CollectionDetailResponse | None:
         return await self.list_collection_papers(name, limit=limit)
 
+    async def collection_artifact_metadata(self, name: str, limit: int = 50) -> CollectionArtifactMetadataResponse | None:
+        detail = await self.list_collection_papers(name, limit=limit)
+        if detail is None:
+            return None
+        return CollectionArtifactMetadataResponse(
+            collection=detail.collection,
+            items=[CollectionArtifactEntry(paper=self.paper, artifacts=[self.artifact])],
+        )
+
     async def add_papers_to_collection(self, name: str, identifiers: list[str], provider: str | None = None) -> CollectionMutationResponse:
         return CollectionMutationResponse(collection=(await self.list_collections())[0], detail=f"Added {len(identifiers)} paper(s) to {name}.")
 
@@ -362,6 +375,7 @@ async def test_mcp_lists_all_expected_tools(tmp_path: Path, monkeypatch: pytest.
         "add_papers_to_collection",
         "remove_papers_from_collection",
         "collection_search",
+        "collection_artifact_metadata",
         "collect_collection_artifacts",
         "index_collection",
         "start_collect_collection_artifacts",
@@ -410,6 +424,7 @@ async def test_mcp_collect_articles_tool_reports_downloads(tmp_path: Path, monke
     assert payload["searched"] == 1
     assert payload["downloaded"][0]["bytes_written"] == 2048
     assert payload["skipped_ids"] == []
+    assert payload["skip_reasons"] == {}
 
 
 @pytest.mark.asyncio
@@ -469,6 +484,7 @@ async def test_mcp_collection_and_capability_tools_return_collection_state(tmp_p
     detail = _tool_payload(await mcp.call_tool("get_collection", {"name": "mission-logistics"}))
     added = _tool_payload(await mcp.call_tool("add_papers_to_collection", {"name": "mission-logistics", "identifiers": ["paper:embodied-ai-2026"]}))
     searched = _tool_payload(await mcp.call_tool("collection_search", {"name": "mission-logistics", "query": "embodied ai"}))
+    artifact_metadata = _tool_payload(await mcp.call_tool("collection_artifact_metadata", {"name": "mission-logistics"}))
     collected = _tool_payload(await mcp.call_tool("collect_collection_artifacts", {"name": "mission-logistics", "preferred_formats": ["pdf"]}))
     indexed = _tool_payload(await mcp.call_tool("index_collection", {"name": "mission-logistics", "preferred_formats": ["pdf"]}))
     capabilities = _tool_payload(await mcp.call_tool("describe_capabilities", {}))
@@ -479,6 +495,7 @@ async def test_mcp_collection_and_capability_tools_return_collection_state(tmp_p
     assert detail["collection"]["paper_count"] == 1
     assert added["detail"].startswith("Added 1")
     assert searched["papers"][0]["canonical_id"] == "paper:embodied-ai-2026"
+    assert artifact_metadata["items"][0]["artifacts"][0]["artifact_url"].startswith("http://localhost:5173/api/projects/proj-1/analyst-mcp/papers/")
     assert collected["downloaded"][0]["collections"] == ["mission-logistics"]
     assert indexed["downloaded"][0]["collections"] == ["mission-logistics"]
     assert capabilities["artifact_storage_backend"] == "local"

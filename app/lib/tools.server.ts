@@ -189,6 +189,39 @@ const TOOL_DEFS: Array<{
   {
     type: "function",
     function: {
+      name: "collection_artifact_metadata",
+      description:
+        "List stored artifact metadata for the active collection or project, including storage URIs and artifact links.",
+      parameters: {
+        type: "object",
+        properties: {
+          collectionId: { type: "string" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "capture_artifact",
+      description:
+        "Capture a generated workspace file into the project store and artifact backend.",
+      parameters: {
+        type: "object",
+        properties: {
+          relativePath: { type: "string" },
+          title: { type: "string" },
+          collectionId: { type: "string" },
+          collectionName: { type: "string" },
+        },
+        required: ["relativePath"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "execute_command",
       description: "Run a shell command in the working directory",
       parameters: {

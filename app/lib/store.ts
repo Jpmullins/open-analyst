@@ -5,6 +5,14 @@ interface ProjectSummary {
   id: string;
   name: string;
   description?: string | null;
+  workspaceSlug?: string | null;
+  workspaceLocalRoot?: string | null;
+  artifactBackend?: string | null;
+  artifactLocalRoot?: string | null;
+  artifactS3Bucket?: string | null;
+  artifactS3Region?: string | null;
+  artifactS3Endpoint?: string | null;
+  artifactS3Prefix?: string | null;
   createdAt?: number | string | Date | null;
   updatedAt?: number | string | Date | null;
 }

@@ -21,19 +21,21 @@ Additional usage docs:
 - Daily sync that refreshes arXiv `src`/`pdf` manifests and recent arXiv/OpenAlex metadata windows.
 - Tar selective extraction helper for arXiv bulk archives.
 - Server-neutral paper and artifact APIs under `/api/papers/*` for external clients and UI backends.
+- Request-scoped storage resolution from Open Analyst project headers, with env fallback when those headers are absent.
 
 ## Quick start
 1. Prefer setting `ANALYST_MCP_*` values in the repo-root `.env`.
 2. Optionally create `services/analyst-mcp/.env` only for service-local overrides.
 3. If `ANALYST_MCP_POSTGRES_DSN` is omitted, the service falls back to `DATABASE_URL`.
 4. When sharing a database with Open Analyst, this service creates and uses its own `analyst_mcp` schema automatically.
-5. Start the service from the repo root:
+5. When Open Analyst selects this server for a project turn, it passes project storage context headers so artifacts are stored under that project's workspace slug and configured backend.
+6. Start the service from the repo root:
 
 ```bash
 pnpm dev:analyst-mcp
 ```
 
-6. Check the MCP/API server:
+7. Check the MCP/API server:
 
 ```bash
 curl http://localhost:8000/health
@@ -41,13 +43,13 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/detai
 curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 ```
 
-7. Start the full stack from the repo root when testing with Open Analyst:
+8. Start the full stack from the repo root when testing with Open Analyst:
 
 ```bash
 pnpm dev:all
 ```
 
-8. In Open Analyst, enable the `Analyst MCP` connector and confirm it points at `http://localhost:8000/mcp` with the same `x-api-key` value.
+9. In Open Analyst, enable the `Analyst MCP` connector and confirm it points at `http://localhost:8000/mcp` with the same `x-api-key` value.
 
 ## Recommended Operating Mode
 
@@ -136,6 +138,7 @@ pytest
 - `collect_articles(query, sources, date_from, date_to, limit, preferred_formats)`
 - `get_paper(identifier, provider, include_graph)`
 - `list_paper_artifacts(identifier, provider)`
+- `collection_artifact_metadata(name, limit)`
 - `download_articles(identifiers, preferred_formats)`
 - `graph_lookup(seed_ids, limit)`
 - `recommend_papers(query_or_ids, limit)`
@@ -154,6 +157,26 @@ pytest
 - `GET /api/papers/{canonical_id}/artifacts`
 - `GET /api/papers/{canonical_id}/artifact`
 - `POST /api/papers/{canonical_id}/download`
+- `GET /api/collections/{name}/artifacts`
+
+## Storage behavior
+
+- Without Open Analyst project headers, artifact storage uses the service-level env defaults such as `ANALYST_MCP_STORAGE_ROOT` or the configured S3 backend.
+- With Open Analyst project headers, artifacts are stored under the active project workspace slug.
+- Local layout:
+
+```text
+<artifact-root>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suffix>
+```
+
+- S3 layout:
+
+```text
+s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suffix>
+```
+
+- Artifact metadata includes the raw storage path or URI plus `artifact_url` and `download_url`.
+- When Open Analyst is present, those URLs point back through the Open Analyst proxy route so chat and the UI can open the stored artifact through one stable app link.
 
 ## MCP resources
 - `time://today`

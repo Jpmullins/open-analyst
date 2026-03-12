@@ -12,7 +12,7 @@ from .file_tools import (
     write_file,
 )
 from .generate_tools import generate_file
-from .project_tools import capture_artifact, collection_overview
+from .project_tools import capture_artifact, collection_artifact_metadata, collection_overview
 
 
 def create_file_tools(
@@ -143,10 +143,17 @@ def create_project_tools(
             api_base_url=api_base_url,
         )
 
+    @tool(name="collection_artifact_metadata")
+    def collection_artifact_metadata_bound(collection_id_override: str = "") -> str:
+        return collection_artifact_metadata(
+            collection_id=collection_id_override or collection_id,
+            project_id=project_id,
+            api_base_url=api_base_url,
+        )
     # Web, research, and project tools are added in Phase 1.3.3
     try:
         from .web_tools import web_fetch, web_search
-        from .research_tools import hf_daily_papers, hf_paper, deep_research
+        from .research_tools import deep_research, hf_daily_papers, hf_paper
 
         tools.extend([
             web_fetch,
@@ -155,6 +162,7 @@ def create_project_tools(
             hf_paper,
             deep_research,
             collection_overview_bound,
+            collection_artifact_metadata_bound,
             capture_artifact_bound,
         ])
     except ImportError:

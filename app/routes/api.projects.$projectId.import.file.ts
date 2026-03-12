@@ -1,6 +1,8 @@
 import path from "path";
-import { createDocument } from "~/lib/db/queries/documents.server";
+import { createDocument, updateDocumentMetadata } from "~/lib/db/queries/documents.server";
+import { getProject } from "~/lib/db/queries/projects.server";
 import { storeArtifact } from "~/lib/artifacts.server";
+import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
 
 function inferExtension(contentType: string): string {
@@ -66,6 +68,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
   const body = await request.json();
   const projectId = params.projectId;
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
   const filename = String(body.filename || "uploaded-file").trim();
   const mimeType = String(body.mimeType || "application/octet-stream").trim();
   const base64 = String(body.contentBase64 || "").trim();
@@ -80,7 +86,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     path.extname(filename) || inferExtension(mimeType);
   const storedName = `${sanitizeFilename(path.basename(filename, path.extname(filename)))}${extension}`;
   const artifact = await storeArtifact({
-    projectId,
+    project,
     filename: storedName,
     mimeType,
     buffer,
@@ -119,5 +125,12 @@ export async function action({ request, params }: Route.ActionArgs) {
       extractedTextLength: content.length,
     },
   });
-  return Response.json({ document }, { status: 201 });
+  const links = buildProjectArtifactUrls(projectId, document.id);
+  const updated = await updateDocumentMetadata(projectId, document.id, {
+    ...(document.metadata && typeof document.metadata === "object" ? document.metadata : {}),
+    artifactUrl: links.artifactUrl,
+    downloadUrl: links.downloadUrl,
+    workspaceSlug: project.workspaceSlug,
+  });
+  return Response.json({ document: updated }, { status: 201 });
 }

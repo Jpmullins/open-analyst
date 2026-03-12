@@ -1,8 +1,9 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
+import { getProject } from '~/lib/db/queries/projects.server';
 import { createTask, updateTask, appendTaskEvent } from '~/lib/db/queries/tasks.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
-import { getSelectedMcpServers } from '~/lib/mcp.server';
+import { applyProjectMcpContext, getSelectedMcpServers } from '~/lib/mcp.server';
 import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
 import {
   getActiveSkillToolNames,
@@ -53,7 +54,13 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   // Ensure workspace directory exists for this project
-  getProjectWorkspace(projectId);
+  await getProjectWorkspace(projectId);
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json({ error: `Project not found: ${projectId}` }, { status: 404 });
+  }
+  const apiBaseUrl = new URL(request.url).origin;
+  const runtimeMcpServers = applyProjectMcpContext(selectedMcpServers, project, apiBaseUrl);
 
   // Build a minimal HeadlessConfig for the agent provider
   const cfg: HeadlessConfig = {
@@ -84,7 +91,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (isToolCatalogQuestion({ prompt, messages: chatMessages })) {
       const text = await buildToolCatalogText({
         activeToolNames,
-        mcpServers: selectedMcpServers,
+        mcpServers: runtimeMcpServers,
       });
       await appendTaskEvent(task.id, 'chat_completed', {
         traceCount: 0,
@@ -127,7 +134,7 @@ export async function action({ request }: Route.ActionArgs) {
       skills: matchedSkills,
       skillCatalog: getSkillCatalog(activeSkills),
       activeToolNames,
-      mcpServers: selectedMcpServers,
+      mcpServers: runtimeMcpServers,
       onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
         await appendTaskEvent(task.id, eventType, payload);
       },

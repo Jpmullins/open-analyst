@@ -135,6 +135,16 @@ def build_mcp_server(service: AnalystService) -> FastMCP:
             return {"error": "collection_not_found", "name": name}
         return detail.model_dump(mode="json")
 
+    @mcp.tool(description="Return collection papers with stored artifact metadata and stable artifact links when available.")
+    async def collection_artifact_metadata(
+        name: Annotated[str, Field(description="Collection name")],
+        limit: Annotated[int, Field(description="Maximum papers to include", ge=1, le=100)] = 20,
+    ) -> dict:
+        detail = await service.collection_artifact_metadata(name, limit=limit)
+        if detail is None:
+            return {"error": "collection_not_found", "name": name}
+        return detail.model_dump(mode="json")
+
     @mcp.tool(description="Collect/download artifacts for every paper in a named collection.")
     async def collect_collection_artifacts(
         name: Annotated[str, Field(description="Collection name")],

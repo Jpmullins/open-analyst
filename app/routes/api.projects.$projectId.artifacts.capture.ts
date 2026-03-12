@@ -1,8 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
-import { createDocument, ensureCollection } from "~/lib/db/queries/documents.server";
+import { createDocument, ensureCollection, updateDocumentMetadata } from "~/lib/db/queries/documents.server";
+import { getProject } from "~/lib/db/queries/projects.server";
 import { storeArtifact } from "~/lib/artifacts.server";
 import { resolveInWorkspace } from "~/lib/filesystem.server";
+import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
 import type { Route } from "./+types/api.projects.$projectId.artifacts.capture";
 
 function inferExtension(contentType: string): string {
@@ -83,12 +85,16 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const body = await request.json();
   const projectId = params.projectId;
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
   const relativePath = String(body.relativePath || body.path || "").trim();
   if (!relativePath) {
     return Response.json({ error: "relativePath is required" }, { status: 400 });
   }
 
-  const workspacePath = resolveInWorkspace(projectId, relativePath);
+  const workspacePath = await resolveInWorkspace(projectId, relativePath);
   const stat = await fs.stat(workspacePath).catch(() => null);
   if (!stat || !stat.isFile()) {
     return Response.json({ error: "Artifact file not found in project workspace" }, { status: 404 });
@@ -108,7 +114,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   const buffer = await fs.readFile(workspacePath);
 
   const artifact = await storeArtifact({
-    projectId,
+    project,
     filename: storedName,
     mimeType,
     buffer,
@@ -144,6 +150,13 @@ export async function action({ request, params }: Route.ActionArgs) {
       ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
     },
   });
+  const links = buildProjectArtifactUrls(projectId, document.id);
+  const updated = await updateDocumentMetadata(projectId, document.id, {
+    ...(document.metadata && typeof document.metadata === "object" ? document.metadata : {}),
+    artifactUrl: links.artifactUrl,
+    downloadUrl: links.downloadUrl,
+    workspaceSlug: project.workspaceSlug,
+  });
 
-  return Response.json({ document }, { status: 201 });
+  return Response.json({ document: updated }, { status: 201 });
 }

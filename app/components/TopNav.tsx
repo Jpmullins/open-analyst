@@ -5,12 +5,14 @@ import {
   ChevronDown,
   FolderKanban,
   Moon,
+  PackageOpen,
   Plus,
   Settings,
   Sun,
   Menu,
 } from "lucide-react";
 import { AlertDialog } from "./AlertDialog";
+import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 
 export function TopNav() {
   const {
@@ -26,7 +28,8 @@ export function TopNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
-  const fetcher = useFetcher();
+  const createFetcher = useFetcher();
+  const projectMutationFetcher = useFetcher();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -38,6 +41,7 @@ export function TopNav() {
     projectId: string;
     projectName: string;
   } | null>(null);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeProjectId = params.projectId || null;
@@ -59,15 +63,26 @@ export function TopNav() {
 
   // Navigate to new project after creation
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) {
-      const data = fetcher.data as any;
+    if (createFetcher.state === "idle" && createFetcher.data) {
+      const data = createFetcher.data as any;
       if (data?.project?.id) {
         navigate(`/projects/${data.project.id}`);
         setDropdownOpen(false);
         setNewProjectName("");
       }
     }
-  }, [fetcher.state, fetcher.data, navigate]);
+  }, [createFetcher.state, createFetcher.data, navigate]);
+
+  useEffect(() => {
+    if (projectMutationFetcher.state !== "idle" || !projectMutationFetcher.data) {
+      return;
+    }
+    const data = projectMutationFetcher.data as any;
+    if (data?.project?.id) {
+      upsertProject(data.project);
+      setProjectSettingsOpen(false);
+    }
+  }, [projectMutationFetcher.state, projectMutationFetcher.data, upsertProject]);
 
   const toggleTheme = () => {
     updateSettings({ theme: settings.theme === "dark" ? "light" : "dark" });
@@ -76,7 +91,7 @@ export function TopNav() {
   const handleCreateProject = () => {
     const name = newProjectName.trim();
     if (!name) return;
-    fetcher.submit(
+    createFetcher.submit(
       { name },
       { method: "POST", action: "/api/projects", encType: "application/json" }
     );
@@ -92,7 +107,7 @@ export function TopNav() {
       return;
     }
     upsertProject({ id: renameDialog.projectId, name: nextName.trim() });
-    fetcher.submit(
+    projectMutationFetcher.submit(
       { name: nextName.trim() },
       {
         method: "PATCH",
@@ -106,7 +121,7 @@ export function TopNav() {
   const confirmDelete = () => {
     if (!deleteDialog) return;
     removeProject(deleteDialog.projectId);
-    fetcher.submit(
+    projectMutationFetcher.submit(
       {},
       {
         method: "DELETE",
@@ -118,6 +133,23 @@ export function TopNav() {
       navigate("/");
     }
     setDeleteDialog(null);
+  };
+
+  const saveProjectSettings = (values: {
+    workspaceLocalRoot: string;
+    artifactBackend: string;
+    artifactLocalRoot: string;
+    artifactS3Bucket: string;
+    artifactS3Region: string;
+    artifactS3Endpoint: string;
+    artifactS3Prefix: string;
+  }) => {
+    if (!activeProject) return;
+    projectMutationFetcher.submit(values, {
+      method: "PATCH",
+      action: `/api/projects/${activeProject.id}`,
+      encType: "application/json",
+    });
   };
 
   // Determine which section tab is active
@@ -281,6 +313,16 @@ export function TopNav() {
 
         {/* Right actions */}
         <div className="flex items-center gap-1">
+          {activeProject && (
+            <button
+              onClick={() => setProjectSettingsOpen(true)}
+              className="h-8 px-2 rounded-lg flex items-center gap-1.5 hover:bg-surface-hover text-text-secondary text-sm"
+              aria-label="Project storage settings"
+            >
+              <PackageOpen className="w-4 h-4" />
+              <span className="hidden md:inline">Project</span>
+            </button>
+          )}
           <span
             className={`w-2 h-2 rounded-full ${
               isConfigured ? "bg-success" : "bg-amber-500"
@@ -330,6 +372,13 @@ export function TopNav() {
         variant="danger"
         onConfirm={confirmDelete}
         onCancel={() => setDeleteDialog(null)}
+      />
+      <ProjectSettingsDialog
+        open={projectSettingsOpen}
+        project={activeProject || null}
+        isSaving={projectMutationFetcher.state !== "idle"}
+        onCancel={() => setProjectSettingsOpen(false)}
+        onSave={saveProjectSettings}
       />
     </>
   );

@@ -21,7 +21,12 @@ from tools import create_project_tools
 # This tells LiteLLM to auto-rewrite system messages for compatibility.
 litellm.modify_params = True
 
-CORE_TOOL_NAMES = {"collection_overview", "capture_artifact", "generate_file"}
+CORE_TOOL_NAMES = {
+    "collection_overview",
+    "collection_artifact_metadata",
+    "capture_artifact",
+    "generate_file",
+}
 
 SYSTEM_PROMPT = """You are Open Analyst, an AI research assistant.
 

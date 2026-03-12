@@ -24,6 +24,14 @@ CREATE TABLE projects (
   name varchar(255) NOT NULL,
   description text DEFAULT '',
   datastores jsonb DEFAULT '[]'::jsonb,
+  workspace_slug varchar(255) NOT NULL DEFAULT '',
+  workspace_local_root text,
+  artifact_backend varchar(16) NOT NULL DEFAULT 'env',
+  artifact_local_root text,
+  artifact_s3_bucket text,
+  artifact_s3_region varchar(255),
+  artifact_s3_endpoint text,
+  artifact_s3_prefix text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );

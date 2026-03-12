@@ -158,6 +158,25 @@ export async function createDocument(
   return doc;
 }
 
+export async function updateDocumentMetadata(
+  projectId: string,
+  documentId: string,
+  metadata: Record<string, unknown>
+): Promise<Document> {
+  const [doc] = await db
+    .update(documents)
+    .set({
+      metadata,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
+  return doc;
+}
+
 // --- RAG query (in-memory TF-IDF, same as before) ---
 
 export interface RagResult {

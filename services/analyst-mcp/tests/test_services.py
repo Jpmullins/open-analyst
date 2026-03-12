@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import io
 import json
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -18,6 +20,7 @@ from analyst_mcp.config import Settings
 from analyst_mcp.errors import AnalystMcpUnavailableError
 from analyst_mcp.models import ChunkRecord, DownloadResult, PaperRecord
 from analyst_mcp.providers import ProviderRegistry, extract_tar_member
+from analyst_mcp.request_context import OpenAnalystRequestContext, reset_request_context, set_request_context
 from analyst_mcp.services import AnalystService, LiteLLMService, RagIndexService
 from analyst_mcp.vector_index import EmbeddingService, LocalChunkIndex
 
@@ -120,6 +123,49 @@ async def test_download_and_index_pdf(tmp_path: Path, monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_available_artifacts_include_project_scoped_links_and_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_test_env(monkeypatch, tmp_path)
+    service = AnalystService(Settings())
+    paper = PaperRecord(
+        canonical_id="paper:test-scope",
+        provider="openalex",
+        source_id="W9",
+        title="Scoped Artifact",
+        pdf_url="https://example.org/scoped.pdf",
+        source_urls=["https://example.org/scoped.pdf"],
+    )
+    await service.repository.save_paper(paper)
+    respx.get("https://example.org/scoped.pdf").mock(
+        return_value=httpx.Response(200, content=b"scoped text", headers={"content-type": "text/plain"})
+    )
+    token = set_request_context(
+        OpenAnalystRequestContext(
+            project_id="proj-1",
+            project_name="Mission Alpha",
+            workspace_slug="mission-alpha-1234abcd",
+            api_base_url="http://localhost:5173",
+            artifact_backend="local",
+            local_artifact_root=str(tmp_path / "project-artifacts"),
+        )
+    )
+    try:
+        await service.downloads.download_paper(paper, ["pdf"])
+        artifacts = await service.downloads.available_artifacts(paper)
+    finally:
+        reset_request_context(token)
+        await service.close()
+
+    assert artifacts[0]["path"].endswith(
+        "project-artifacts/mission-alpha-1234abcd/artifacts/openalex/W9/W9.pdf"
+    )
+    assert artifacts[0]["artifact_url"] == (
+        "http://localhost:5173/api/projects/proj-1/analyst-mcp/papers/paper%3Atest-scope/artifact?suffix=.pdf"
+    )
+    assert artifacts[0]["download_url"].endswith("&download=1")
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_collect_articles_searches_then_downloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure_test_env(monkeypatch, tmp_path)
     monkeypatch.setenv("ANALYST_MCP_ALLOW_EMBEDDING_FALLBACK", "true")
@@ -163,6 +209,7 @@ async def test_collect_articles_searches_then_downloads(tmp_path: Path, monkeypa
     assert result.searched == 1
     assert len(result.downloaded) == 1
     assert result.skipped_ids == []
+    assert result.skip_reasons == {}
     collections = await service.list_collections()
     assert collections[0].paper_count == 1
     assert collections[0].artifact_count >= 1
@@ -662,3 +709,70 @@ async def test_provider_registry_get_paper_degrades_when_one_provider_fails() ->
     assert paper is not None
     assert paper.provider == "semantic_scholar"
     assert paper.title == "Resilient Routing Under Contested Conditions"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_arxiv_search_uses_relevance_for_topical_queries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_test_env(monkeypatch, tmp_path)
+    service = AnalystService(Settings())
+    route = respx.get("https://export.arxiv.org/api/query").mock(
+        return_value=httpx.Response(200, text="<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
+    )
+
+    try:
+        await service.providers.providers["arxiv"].search("autonomous drone navigation", 5, "2025-01-01", "2026-12-31")
+    finally:
+        await service.close()
+
+    assert route.called
+    assert route.calls.last.request.url.params["sortBy"] == "relevance"
+
+
+def test_provider_registry_ranks_results_by_query_match() -> None:
+    weak_match = PaperRecord(
+        canonical_id="paper:weak-match",
+        provider="arxiv",
+        source_id="weak",
+        title="Recent updates in unrelated systems",
+        abstract="Fresh paper with little overlap.",
+        published_at=datetime(2026, 3, 12, tzinfo=UTC),
+    )
+    strong_match = PaperRecord(
+        canonical_id="paper:strong-match",
+        provider="arxiv",
+        source_id="strong",
+        title="Autonomous Drone Flight Control for Maritime Navigation",
+        abstract="A UAV navigation and quadcopter control study.",
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    query = "UAV autonomous drone flight control quadcopter aerial vehicle navigation"
+
+    assert ProviderRegistry._ranking_key(strong_match, query) > ProviderRegistry._ranking_key(weak_match, query)
+
+
+@pytest.mark.asyncio
+async def test_describe_capabilities_matches_mcp_tool_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_test_env(monkeypatch, tmp_path)
+    service = AnalystService(Settings())
+    source = Path(__file__).resolve().parents[1] / "src" / "analyst_mcp" / "mcp_server.py"
+    module = ast.parse(source.read_text())
+    declared_tools = sorted(
+        node.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and any(
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "tool"
+            for decorator in node.decorator_list
+        )
+    )
+
+    try:
+        capabilities = await service.describe_capabilities()
+    finally:
+        await service.close()
+
+    assert sorted(capabilities.mcp_tools) == declared_tools

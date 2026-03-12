@@ -49,6 +49,7 @@ Optional variables:
 - `STRANDS_URL`
 - `NODE_API_BASE_URL`
 - `ARTIFACT_STORAGE_BACKEND`
+- `PROJECT_WORKSPACES_ROOT`
 - `ARTIFACT_LOCAL_DIR`
 - `ARTIFACT_S3_BUCKET`
 - `ARTIFACT_S3_REGION`
@@ -76,6 +77,14 @@ cd services/strands-agent && uv sync
 cd ../analyst-mcp && uv sync
 cd ../..
 ```
+
+Step-by-step startup:
+
+1. Set the root `.env`.
+2. Make sure the Postgres database exists.
+3. Run `pnpm db:migrate`.
+4. Start the full stack with `pnpm dev:all`.
+5. In the UI, enable `Analyst MCP` under Settings -> MCP.
 
 Start Postgres locally:
 
@@ -138,6 +147,39 @@ pnpm dev:all
 
 The web app serves the UI and API routes on port `5173` by default. The Strands service defaults to `8080`. The vendored Analyst MCP service defaults to `8000`.
 
+## Project Workspaces And Artifact Storage
+
+- Every project gets a stable workspace slug derived from the project name plus project id.
+- Local agent/file work happens in a local workspace directory.
+- Artifact storage defaults come from the root `.env`.
+- Each project can override its workspace root and artifact backend from the project storage dialog in the top nav.
+
+Default local layout:
+
+```text
+<PROJECT_WORKSPACES_ROOT>/<workspace-slug>/
+<ARTIFACT_LOCAL_DIR>/<workspace-slug>/artifacts/
+```
+
+Default S3 layout:
+
+```text
+s3://<ARTIFACT_S3_BUCKET>/<ARTIFACT_S3_PREFIX>/<workspace-slug>/artifacts/
+```
+
+For imported files and captured artifacts, document metadata stores:
+
+- `storageUri`
+- `artifactUrl`
+- `downloadUrl`
+- `workspaceSlug`
+
+For `analyst_mcp` downloads, Open Analyst passes the active project storage context as request headers, so collected papers land under the same project-scoped local directory or S3 prefix. Stable analyst artifact links are exposed through:
+
+```text
+/api/projects/:projectId/analyst-mcp/papers/:identifier/artifact
+```
+
 After startup, verify the MCP service directly:
 
 ```bash
@@ -153,6 +195,11 @@ Then in the UI:
 3. Confirm the URL is `http://localhost:8000/mcp`.
 4. Confirm the `x-api-key` header matches `ANALYST_MCP_API_KEY`.
 5. Start a task chat and pin the connector if you want to force analyst tool usage for a turn.
+
+Useful chat tools for stored artifacts:
+
+- local project artifacts: `collection_artifact_metadata`
+- analyst collections with artifact links: `mcp__analyst__collection_artifact_metadata`
 
 ## Production-Like Run
 

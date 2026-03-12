@@ -196,6 +196,14 @@ export interface HeadlessProject {
   id: string;
   name: string;
   description: string;
+  workspaceSlug?: string | null;
+  workspaceLocalRoot?: string | null;
+  artifactBackend?: string | null;
+  artifactLocalRoot?: string | null;
+  artifactS3Bucket?: string | null;
+  artifactS3Region?: string | null;
+  artifactS3Endpoint?: string | null;
+  artifactS3Prefix?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -264,11 +272,20 @@ export async function headlessGetProjects(): Promise<{
 
 export async function headlessCreateProject(
   name: string,
-  description = ''
+  description = '',
+  storage?: {
+    workspaceLocalRoot?: string | null;
+    artifactBackend?: string | null;
+    artifactLocalRoot?: string | null;
+    artifactS3Bucket?: string | null;
+    artifactS3Region?: string | null;
+    artifactS3Endpoint?: string | null;
+    artifactS3Prefix?: string | null;
+  }
 ): Promise<HeadlessProject> {
   const response = await requestJson<{ project: HeadlessProject }>('/projects', {
     method: 'POST',
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({ name, description, ...storage }),
   });
   return response.project;
 }
@@ -282,7 +299,17 @@ export async function headlessSetActiveProject(projectId: string): Promise<void>
 
 export async function headlessUpdateProject(
   projectId: string,
-  updates: { name?: string; description?: string }
+  updates: {
+    name?: string;
+    description?: string;
+    workspaceLocalRoot?: string | null;
+    artifactBackend?: string | null;
+    artifactLocalRoot?: string | null;
+    artifactS3Bucket?: string | null;
+    artifactS3Region?: string | null;
+    artifactS3Endpoint?: string | null;
+    artifactS3Prefix?: string | null;
+  }
 ): Promise<HeadlessProject> {
   const response = await requestJson<{ project: HeadlessProject }>(
     `/projects/${encodeURIComponent(projectId)}`,

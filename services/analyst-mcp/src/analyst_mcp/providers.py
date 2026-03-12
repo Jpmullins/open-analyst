@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import tarfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -98,7 +99,8 @@ class ArxivProvider(BaseProvider):
             "search_query": self._compose_query(query=query, date_from=date_from, date_to=date_to),
             "start": 0,
             "max_results": min(limit, 50),
-            "sortBy": "lastUpdatedDate",
+            # Topical search should favor relevance; recency-only scans use list_recent().
+            "sortBy": "relevance" if query else "lastUpdatedDate",
             "sortOrder": "descending",
         }
         payload = await self._get_text(self.settings.arxiv_base_url, params=params, headers={"User-Agent": self.settings.user_agent()})
@@ -366,7 +368,12 @@ class ProviderRegistry:
                 current = deduped.get(record.canonical_id)
                 if current is None or (record.citation_count or 0) > (current.citation_count or 0):
                     deduped[record.canonical_id] = record
-        return list(deduped.values())[:limit]
+        ranked = sorted(
+            deduped.values(),
+            key=lambda record: self._ranking_key(record, query),
+            reverse=True,
+        )
+        return ranked[:limit]
 
     async def get_paper(self, identifier: str, provider_name: str | None = None) -> PaperRecord | None:
         if provider_name and provider_name in self.providers:
@@ -385,6 +392,39 @@ class ProviderRegistry:
 
     def provider_names(self) -> list[str]:
         return list(self.providers.keys())
+
+    @staticmethod
+    def _ranking_key(record: PaperRecord, query: str) -> tuple[float, int, float]:
+        tokens = ProviderRegistry._query_tokens(query)
+        if not tokens:
+            published = record.published_at or datetime.fromtimestamp(0, tz=UTC)
+            return (0.0, record.citation_count or 0, published.timestamp())
+
+        title = (record.title or "").lower()
+        abstract = (record.abstract or "").lower()
+        topics = " ".join(record.topics).lower()
+
+        score = 0.0
+        for token in tokens:
+            if token in title:
+                score += 4.0
+            elif token in topics:
+                score += 2.0
+            elif token in abstract:
+                score += 1.0
+
+        title_phrase = title.replace("-", " ")
+        if " ".join(tokens) and " ".join(tokens) in title_phrase:
+            score += 3.0
+
+        citation_count = record.citation_count or 0
+        published = record.published_at or datetime.fromtimestamp(0, tz=UTC)
+        return (score, citation_count, published.timestamp())
+
+    @staticmethod
+    def _query_tokens(query: str) -> list[str]:
+        stopwords = {"a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with"}
+        return [token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 1 and token not in stopwords]
 
 
 def extract_tar_member(archive_path: Path, member_name: str, destination: Path) -> Path:

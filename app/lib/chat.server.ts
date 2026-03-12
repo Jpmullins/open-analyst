@@ -36,7 +36,7 @@ export async function runAgentChat(
   const provider = createAgentProvider(config);
   const projectId = options.projectId || '';
   const workingDir = projectId
-    ? getProjectWorkspace(projectId)
+    ? await getProjectWorkspace(projectId)
     : config.workingDir || process.cwd();
 
   try {

@@ -27,7 +27,7 @@ strands_mod.tool = _mock_tool
 strands_mod.Agent = object
 sys.modules.setdefault("strands", strands_mod)
 
-from tools.project_tools import collection_overview
+from tools.project_tools import collection_artifact_metadata, collection_overview
 from tools import create_project_tools
 
 
@@ -86,3 +86,38 @@ class TestBoundProjectTools:
         assert "Wrote file: reports/output.txt" in result
         with open(os.path.join(workspace, "reports", "output.txt"), "r", encoding="utf-8") as handle:
             assert handle.read() == "artifact"
+
+
+class TestCollectionArtifactMetadata:
+    @patch("util.capture.httpx.Client")
+    def test_lists_storage_uris_and_links(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        documents_resp = MagicMock()
+        documents_resp.is_success = True
+        documents_resp.json.return_value = {
+            "documents": [
+                {
+                    "id": "doc-1",
+                    "title": "Embodied AI Review",
+                    "storageUri": "s3://bucket/workspace/artifacts/doc-1.pdf",
+                    "metadata": {
+                        "artifactUrl": "http://localhost:5173/api/projects/proj-1/documents/doc-1/artifact",
+                        "downloadUrl": "http://localhost:5173/api/projects/proj-1/documents/doc-1/artifact?download=1",
+                        "workspaceSlug": "mission-alpha-1234abcd",
+                    },
+                }
+            ]
+        }
+        mock_client.get.return_value = documents_resp
+
+        result = collection_artifact_metadata(
+            project_id="proj-1",
+            api_base_url="http://localhost:5173",
+        )
+
+        assert "Documents with stored artifacts: 1" in result
+        assert "storage: s3://bucket/workspace/artifacts/doc-1.pdf" in result
+        assert "open: http://localhost:5173/api/projects/proj-1/documents/doc-1/artifact" in result
+        assert "workspace: mission-alpha-1234abcd" in result

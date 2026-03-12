@@ -10,10 +10,11 @@ import os
 import re
 import shutil
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Sequence
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
 
 import aioboto3
@@ -29,9 +30,10 @@ from .bulk_ingest import ArxivBulkIngester, OpenAlexBulkIngester
 from .collection_store import LocalCollectionStore, PostgresCollectionStore
 from .config import Settings
 from .errors import AnalystMcpUnavailableError
-from .models import ArtifactRecord, CapacityEstimate, CapabilityResponse, ChunkRecord, CollectionDetailResponse, CollectionMutationResponse, CollectionRecord, CollectionResponse, CollectionSummary, DailyScanResponse, DownloadResult, GraphEdge, GraphLookupResponse, GraphNode, HealthComponent, HealthDetailsResponse, IngestStatus, JobListResponse, JobRecord, LiteratureReviewResponse, PaperDetailResponse, PaperRecord, RagResponse, Recommendation, RecommendationResponse, SearchResponse, StorageHealthResponse
+from .models import ArtifactRecord, CapacityEstimate, CapabilityResponse, ChunkRecord, CollectionArtifactEntry, CollectionArtifactMetadataResponse, CollectionDetailResponse, CollectionMutationResponse, CollectionRecord, CollectionResponse, CollectionSummary, DailyScanResponse, DownloadResult, GraphEdge, GraphLookupResponse, GraphNode, HealthComponent, HealthDetailsResponse, IngestStatus, JobListResponse, JobRecord, LiteratureReviewResponse, PaperDetailResponse, PaperRecord, RagResponse, Recommendation, RecommendationResponse, SearchResponse, StorageHealthResponse
 from .paper_store import LocalPaperStore, PostgresPaperStore
 from .providers import ArxivProvider, OpenAlexProvider, ProviderRegistry, SemanticScholarProvider
+from .request_context import get_request_context
 from .vector_index import EmbeddingService, LocalChunkIndex, PostgresVectorIndex
 
 ARTIFACT_SUFFIXES = {
@@ -82,6 +84,45 @@ DISCOVERABLE_ARTIFACT_SUFFIXES = (
 )
 
 
+@dataclass(slots=True)
+class StorageScope:
+    backend: str
+    local_root: Path | None = None
+    bucket: str | None = None
+    region: str | None = None
+    endpoint: str | None = None
+    key_prefix: str = ""
+    workspace_slug: str = ""
+    project_id: str = ""
+    api_base_url: str = ""
+
+
+class DownloadObjectStoreAdapter:
+    def __init__(self, service: "DownloadService") -> None:
+        self.service = service
+
+    def _current_store(self) -> LocalObjectStore | S3ObjectStore:
+        return self.service._object_store(self.service._storage_scopes()[0])
+
+    async def put_bytes(self, relative_path: str, content: bytes):
+        return await self._current_store().put_bytes(relative_path, content)
+
+    async def read_bytes(self, relative_path: str) -> bytes:
+        return await self._current_store().read_bytes(relative_path)
+
+    async def read_text(self, relative_path: str) -> str:
+        store = self._current_store()
+        if hasattr(store, "read_text"):
+            return await store.read_text(relative_path)
+        return (await store.read_bytes(relative_path)).decode("utf-8", errors="ignore")
+
+    async def exists(self, relative_path: str) -> bool:
+        return await self._current_store().exists(relative_path)
+
+    def uri_for(self, relative_path: str) -> str:
+        return self._current_store().uri_for(relative_path)
+
+
 class LocalObjectStore:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -107,11 +148,21 @@ class LocalObjectStore:
 
 
 class S3ObjectStore:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        bucket: str | None = None,
+        region: str | None = None,
+        endpoint: str | None = None,
+    ) -> None:
         self.settings = settings
+        self.bucket = bucket or settings.s3_bucket
+        self.region = region or settings.aws_region
+        self.endpoint = endpoint or settings.minio_endpoint
 
     def _session(self) -> aioboto3.Session:
-        kwargs: dict[str, str] = {"region_name": self.settings.aws_region}
+        kwargs: dict[str, str] = {"region_name": self.region}
         if self.settings.aws_access_key_id:
             kwargs["aws_access_key_id"] = self.settings.aws_access_key_id
         if self.settings.aws_secret_access_key:
@@ -120,21 +171,21 @@ class S3ObjectStore:
 
     async def put_bytes(self, relative_path: str, content: bytes) -> str:
         session = self._session()
-        async with session.client("s3", endpoint_url=self.settings.minio_endpoint or None) as client:
-            await client.put_object(Bucket=self.settings.s3_bucket, Key=relative_path, Body=content)
-        return f"s3://{self.settings.s3_bucket}/{relative_path}"
+        async with session.client("s3", endpoint_url=self.endpoint or None) as client:
+            await client.put_object(Bucket=self.bucket, Key=relative_path, Body=content)
+        return f"s3://{self.bucket}/{relative_path}"
 
     async def read_bytes(self, relative_path: str) -> bytes:
         session = self._session()
-        async with session.client("s3", endpoint_url=self.settings.minio_endpoint or None) as client:
-            response = await client.get_object(Bucket=self.settings.s3_bucket, Key=relative_path)
+        async with session.client("s3", endpoint_url=self.endpoint or None) as client:
+            response = await client.get_object(Bucket=self.bucket, Key=relative_path)
             return await response["Body"].read()
 
     async def exists(self, relative_path: str) -> bool:
         session = self._session()
-        async with session.client("s3", endpoint_url=self.settings.minio_endpoint or None) as client:
+        async with session.client("s3", endpoint_url=self.endpoint or None) as client:
             try:
-                await client.head_object(Bucket=self.settings.s3_bucket, Key=relative_path)
+                await client.head_object(Bucket=self.bucket, Key=relative_path)
             except ClientError as exc:
                 code = exc.response.get("Error", {}).get("Code")
                 if code in {"404", "NoSuchKey", "NotFound"}:
@@ -143,7 +194,7 @@ class S3ObjectStore:
         return True
 
     def uri_for(self, relative_path: str) -> str:
-        return f"s3://{self.settings.s3_bucket}/{relative_path}"
+        return f"s3://{self.bucket}/{relative_path}"
 
 
 class GraphStore:
@@ -722,28 +773,29 @@ class DownloadService:
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
         self.settings = settings
         self.client = client
-        backend = settings.storage_backend.lower()
-        self.object_store = LocalObjectStore(settings.storage_root) if backend == "local" else S3ObjectStore(settings)
+        self.object_store = DownloadObjectStoreAdapter(self)
 
     async def storage_health(self) -> StorageHealthResponse:
-        backend = self.settings.storage_backend.lower()
-        if backend == "local":
+        scope = self._storage_scopes()[0]
+        object_store = self._object_store(scope)
+        if scope.backend == "local":
             return StorageHealthResponse(
                 ok=True,
                 backend="local",
-                detail=f"Local storage root is {self.settings.storage_root}.",
-                sample_uri=str(self.settings.storage_root),
+                detail=f"Local storage root is {scope.local_root}.",
+                sample_uri=str(scope.local_root),
             )
         probe_name = f"healthchecks/{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.txt"
         payload = f"analyst-mcp storage probe {datetime.now(UTC).isoformat()}".encode("utf-8")
-        stored = await self.object_store.put_bytes(probe_name, payload)
-        exists = await self.object_store.exists(probe_name)
-        detail = f"S3 bucket {self.settings.s3_bucket} write/read probe {'passed' if exists else 'failed'}."
+        relative_path = self._scoped_relative_path(scope, probe_name)
+        stored = await object_store.put_bytes(relative_path, payload)
+        exists = await object_store.exists(relative_path)
+        detail = f"S3 bucket {scope.bucket} write/read probe {'passed' if exists else 'failed'}."
         return StorageHealthResponse(
             ok=exists,
             backend="s3",
             detail=detail,
-            bucket=self.settings.s3_bucket,
+            bucket=scope.bucket,
             sample_uri=str(stored),
         )
 
@@ -752,6 +804,8 @@ class DownloadService:
         if not urls:
             raise ValueError(f"No downloadable artifacts for {paper.canonical_id}")
         last_error: Exception | None = None
+        scope = self._storage_scopes()[0]
+        object_store = self._object_store(scope)
         for target_url in urls:
             try:
                 response = await self.client.get(target_url, headers={"User-Agent": self.settings.user_agent()})
@@ -761,8 +815,8 @@ class DownloadService:
                     last_error = ValueError(f"Rejected non-artifact response from {target_url} ({content_type or 'unknown'})")
                     continue
                 suffix = self._artifact_suffix(target_url, content_type)
-                relative_path = f"{paper.provider}/{paper.source_id}/{paper.source_id}{suffix}"
-                stored = await self.object_store.put_bytes(relative_path, response.content)
+                relative_path = self._scoped_relative_path(scope, self._artifact_leaf_path(paper, suffix))
+                stored = await object_store.put_bytes(relative_path, response.content)
                 return DownloadResult(
                     canonical_id=paper.canonical_id,
                     provider=paper.provider,
@@ -817,20 +871,31 @@ class DownloadService:
 
     async def available_artifacts(self, paper: PaperRecord) -> list[dict[str, str]]:
         artifacts: list[dict[str, str]] = []
+        seen_paths: set[str] = set()
         for suffix in DISCOVERABLE_ARTIFACT_SUFFIXES:
-            relative_path = self._artifact_relative_path(paper, suffix)
-            if not await self.object_store.exists(relative_path):
-                continue
-            artifacts.append(
-                {
-                    "kind": self._artifact_kind(suffix),
-                    "suffix": suffix,
-                    "relative_path": relative_path,
-                    "path": self.object_store.uri_for(relative_path),
-                    "mime_type": self._artifact_mime_type(suffix),
-                    "label": self._artifact_label(suffix),
-                }
-            )
+            for scope in self._storage_scopes():
+                relative_path = self._scoped_relative_path(scope, self._artifact_leaf_path(paper, suffix))
+                object_store = self._object_store(scope)
+                if not await object_store.exists(relative_path):
+                    continue
+                uri = object_store.uri_for(relative_path)
+                if uri in seen_paths:
+                    continue
+                seen_paths.add(uri)
+                artifact_url, download_url = self._artifact_access_urls(paper, suffix)
+                artifacts.append(
+                    {
+                        "kind": self._artifact_kind(suffix),
+                        "suffix": suffix,
+                        "relative_path": relative_path,
+                        "path": uri,
+                        "mime_type": self._artifact_mime_type(suffix),
+                        "label": self._artifact_label(suffix),
+                        "artifact_url": artifact_url or "",
+                        "download_url": download_url or "",
+                    }
+                )
+                break
         return artifacts
 
     async def read_artifact(self, paper: PaperRecord, kind: str = "any", suffix: str | None = None) -> tuple[dict[str, str], bytes]:
@@ -843,10 +908,95 @@ class DownloadService:
             selected = next((artifact for artifact in artifacts if artifact["kind"] == kind), None)
         if selected is None:
             raise FileNotFoundError(f"No stored artifact for {paper.canonical_id}")
-        return selected, await self.object_store.read_bytes(selected["relative_path"])
+        scope = next(
+            (candidate for candidate in self._storage_scopes() if self._scoped_relative_path(candidate, self._artifact_leaf_path(paper, selected["suffix"])) == selected["relative_path"]),
+            self._storage_scopes()[0],
+        )
+        return selected, await self._object_store(scope).read_bytes(selected["relative_path"])
 
     def _artifact_relative_path(self, paper: PaperRecord, suffix: str) -> str:
+        return self._scoped_relative_path(self._storage_scopes()[0], self._artifact_leaf_path(paper, suffix))
+
+    def _artifact_leaf_path(self, paper: PaperRecord, suffix: str) -> str:
         return f"{paper.provider}/{paper.source_id}/{paper.source_id}{suffix}"
+
+    def _storage_scopes(self) -> list[StorageScope]:
+        context = get_request_context()
+        backend_hint = context.artifact_backend.strip().lower()
+        workspace_slug = context.workspace_slug.strip()
+        if backend_hint == "s3" or (backend_hint == "" and self.settings.storage_backend.lower() == "s3"):
+            primary = StorageScope(
+                backend="s3",
+                bucket=(context.s3_bucket or self.settings.s3_bucket or "").strip(),
+                region=(context.s3_region or self.settings.aws_region).strip(),
+                endpoint=(context.s3_endpoint or self.settings.minio_endpoint or "").strip() or None,
+                key_prefix=self._join_key_prefix(context.s3_prefix, "artifacts"),
+                workspace_slug=workspace_slug,
+                project_id=context.project_id.strip(),
+                api_base_url=context.api_base_url.strip(),
+            )
+        else:
+            base_root = Path((context.local_artifact_root or str(self.settings.storage_root)).strip() or str(self.settings.storage_root))
+            scoped_root = base_root / workspace_slug / "artifacts" if workspace_slug else base_root
+            primary = StorageScope(
+                backend="local",
+                local_root=scoped_root,
+                workspace_slug=workspace_slug,
+                project_id=context.project_id.strip(),
+                api_base_url=context.api_base_url.strip(),
+            )
+
+        scopes = [primary]
+        legacy_backend = self.settings.storage_backend.lower()
+        if context.project_id or context.workspace_slug:
+            if legacy_backend == "s3":
+                scopes.append(
+                    StorageScope(
+                        backend="s3",
+                        bucket=(self.settings.s3_bucket or "").strip(),
+                        region=self.settings.aws_region,
+                        endpoint=self.settings.minio_endpoint or None,
+                        key_prefix="",
+                    )
+                )
+            else:
+                scopes.append(
+                    StorageScope(
+                        backend="local",
+                        local_root=self.settings.storage_root,
+                    )
+                )
+        return scopes
+
+    def _object_store(self, scope: StorageScope) -> LocalObjectStore | S3ObjectStore:
+        if scope.backend == "local":
+            return LocalObjectStore(scope.local_root or self.settings.storage_root)
+        return S3ObjectStore(
+            self.settings,
+            bucket=scope.bucket,
+            region=scope.region,
+            endpoint=scope.endpoint,
+        )
+
+    def _scoped_relative_path(self, scope: StorageScope, relative_path: str) -> str:
+        if scope.backend != "s3":
+            return relative_path
+        prefix = self._join_key_prefix(scope.key_prefix, relative_path)
+        return prefix or relative_path
+
+    def _join_key_prefix(self, *parts: str | None) -> str:
+        return "/".join(part.strip().strip("/") for part in parts if part and part.strip())
+
+    def _artifact_access_urls(self, paper: PaperRecord, suffix: str) -> tuple[str | None, str | None]:
+        context = get_request_context()
+        project_id = context.project_id.strip()
+        api_base_url = context.api_base_url.strip().rstrip("/")
+        if not project_id or not api_base_url:
+            return None, None
+        identifier = quote(paper.canonical_id, safe="")
+        query = urlencode({"suffix": suffix})
+        base = f"{api_base_url}/api/projects/{quote(project_id, safe='')}/analyst-mcp/papers/{identifier}/artifact?{query}"
+        return base, f"{base}&download=1"
 
     def _artifact_kind(self, suffix: str) -> str:
         if suffix == ".pdf":
@@ -1397,6 +1547,7 @@ class AnalystService:
         search = await self.search_literature(query=query, sources=sources, date_from=date_from, date_to=date_to, limit=limit)
         downloaded: list[DownloadResult] = []
         skipped_ids: list[str] = []
+        skip_reasons: dict[str, str] = {}
         collection_name = collection_name or self._query_collection_name(query)
         await self.collections.create_collection(collection_name, description=f"Collected from query: {query}", default_sources=sources or [])
         await self.collections.add_papers(collection_name, [paper.canonical_id for paper in search.results])
@@ -1404,8 +1555,9 @@ class AnalystService:
             try:
                 download = await self.downloads.download_paper(paper, preferred_formats)
                 download.collections = [collection_name]
-            except Exception:
+            except Exception as exc:
                 skipped_ids.append(paper.canonical_id)
+                skip_reasons[paper.canonical_id] = str(exc)
                 continue
             downloaded.append(await self._index_download_if_available(download))
         await self._invalidate_collections([collection_name])
@@ -1415,6 +1567,7 @@ class AnalystService:
             searched=len(search.results),
             downloaded=downloaded,
             skipped_ids=skipped_ids,
+            skip_reasons=skip_reasons,
             collection_name=collection_name,
         )
 
@@ -1466,6 +1619,30 @@ class AnalystService:
         detail.papers = detail.papers[:limit]
         return detail
 
+    async def collection_artifact_metadata(self, name: str, limit: int = 50) -> CollectionArtifactMetadataResponse | None:
+        detail = await self.list_collection_papers(name, limit=limit)
+        if detail is None:
+            return None
+        items = [
+            CollectionArtifactEntry(
+                paper=paper,
+                artifacts=[
+                    ArtifactRecord(
+                        kind=artifact["kind"],
+                        label=artifact["label"],
+                        suffix=artifact["suffix"],
+                        path=artifact["path"],
+                        mime_type=artifact["mime_type"],
+                        artifact_url=artifact.get("artifact_url") or None,
+                        download_url=artifact.get("download_url") or None,
+                    )
+                    for artifact in await self.downloads.available_artifacts(paper)
+                ],
+            )
+            for paper in detail.papers
+        ]
+        return CollectionArtifactMetadataResponse(collection=detail.collection, items=items)
+
     async def collection_search(self, name: str, query: str, limit: int = 10) -> CollectionDetailResponse | None:
         return await self.collections.search_collection(name, query=query, limit=limit)
 
@@ -1475,12 +1652,14 @@ class AnalystService:
             raise ValueError(f"Unknown collection: {name}")
         downloaded: list[DownloadResult] = []
         skipped_ids: list[str] = []
+        skip_reasons: dict[str, str] = {}
         for paper in detail.papers:
             try:
                 download = await self.downloads.download_paper(paper, preferred_formats)
                 download.collections = [name]
-            except Exception:
+            except Exception as exc:
                 skipped_ids.append(paper.canonical_id)
+                skip_reasons[paper.canonical_id] = str(exc)
                 continue
             downloaded.append(await self._index_download_if_available(download))
         await self._invalidate_collections([name])
@@ -1490,6 +1669,7 @@ class AnalystService:
             searched=len(detail.papers),
             downloaded=downloaded,
             skipped_ids=skipped_ids,
+            skip_reasons=skip_reasons,
             collection_name=name,
         )
 
@@ -1568,6 +1748,8 @@ class AnalystService:
                 suffix=artifact["suffix"],
                 path=artifact["path"],
                 mime_type=artifact["mime_type"],
+                artifact_url=artifact.get("artifact_url") or None,
+                download_url=artifact.get("download_url") or None,
             )
             for artifact in artifacts
         ]
@@ -1711,7 +1893,9 @@ class AnalystService:
                 "add_papers_to_collection",
                 "remove_papers_from_collection",
                 "collection_search",
+                "collection_artifact_metadata",
                 "collect_collection_artifacts",
+                "index_collection",
                 "start_collect_collection_artifacts",
                 "get_job",
                 "list_jobs",
@@ -1720,7 +1904,13 @@ class AnalystService:
                 "rag_query",
                 "daily_scan_summary",
                 "literature_review",
+                "describe_capabilities",
                 "storage_health",
+                "ingest_status",
+                "bootstrap_preflight",
+                "bootstrap_openalex_snapshot",
+                "bootstrap_arxiv_inventory",
+                "fetch_arxiv_archive_members",
             ],
             workflows=[
                 "Search providers or a collection for top papers",

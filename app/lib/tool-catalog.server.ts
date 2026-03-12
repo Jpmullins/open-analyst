@@ -2,7 +2,7 @@ import { getMcpTools, type McpDiscoveredTool } from './mcp.server';
 import { listAvailableTools } from './tools.server';
 import type { McpServerConfig } from './types';
 
-const CORE_TOOL_NAMES = ['collection_overview', 'capture_artifact'];
+const CORE_TOOL_NAMES = ['collection_overview', 'collection_artifact_metadata', 'capture_artifact'];
 
 export function isToolCatalogQuestion(input: { prompt?: string; messages?: Array<{ role?: string; content?: unknown }> }): boolean {
   const prompt = String(input.prompt || '').toLowerCase();

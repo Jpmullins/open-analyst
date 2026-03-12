@@ -1,11 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { getConfigDir } from "./helpers.server";
+import { getProject } from "./db/queries/projects.server";
+import { getDefaultWorkspaceRoot, resolveProjectWorkspace } from "./project-storage.server";
 
-const WORKSPACES_DIR_NAME = "workspaces";
-
-function getWorkspacesRoot(): string {
-  return path.join(getConfigDir(), WORKSPACES_DIR_NAME);
+function getLegacyProjectWorkspace(projectId: string): string {
+  return path.join(getDefaultWorkspaceRoot(), projectId);
 }
 
 function validateProjectId(projectId: string): void {
@@ -22,22 +21,24 @@ function validateProjectId(projectId: string): void {
   }
 }
 
-export function getProjectWorkspace(projectId: string): string {
+export async function getProjectWorkspace(projectId: string): Promise<string> {
   validateProjectId(projectId);
-  const workspacesRoot = getWorkspacesRoot();
-  const workspaceDir = path.join(workspacesRoot, projectId);
+  const project = await getProject(projectId);
+  const workspaceDir = project
+    ? resolveProjectWorkspace(project)
+    : getLegacyProjectWorkspace(projectId);
   if (!fs.existsSync(workspaceDir)) {
     fs.mkdirSync(workspaceDir, { recursive: true });
   }
   return workspaceDir;
 }
 
-export function resolveInWorkspace(
+export async function resolveInWorkspace(
   projectId: string,
   relativePath: string
-): string {
+): Promise<string> {
   validateProjectId(projectId);
-  const workspaceDir = getProjectWorkspace(projectId);
+  const workspaceDir = await getProjectWorkspace(projectId);
   const input = String(relativePath || ".").trim();
 
   // Block absolute paths outside workspace
@@ -60,7 +61,7 @@ export function resolveInWorkspace(
 }
 
 export function listWorkspaces(): string[] {
-  const root = getWorkspacesRoot();
+  const root = getDefaultWorkspaceRoot();
   if (!fs.existsSync(root)) return [];
   return fs
     .readdirSync(root, { withFileTypes: true })

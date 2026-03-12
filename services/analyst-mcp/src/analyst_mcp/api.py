@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .errors import AnalystMcpUnavailableError
 from .mcp_server import build_mcp_server
+from .request_context import OpenAnalystRequestContext, reset_request_context, set_request_context
 from .services import AnalystService
 
 
@@ -62,12 +63,29 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def api_key_guard(request: Request, call_next):
+        context = OpenAnalystRequestContext(
+            project_id=request.headers.get("x-open-analyst-project-id", "").strip(),
+            project_name=request.headers.get("x-open-analyst-project-name", "").strip(),
+            workspace_slug=request.headers.get("x-open-analyst-workspace-slug", "").strip(),
+            api_base_url=request.headers.get("x-open-analyst-api-base-url", "").strip(),
+            artifact_backend=request.headers.get("x-open-analyst-artifact-backend", "").strip(),
+            local_artifact_root=request.headers.get("x-open-analyst-local-artifact-root", "").strip(),
+            s3_bucket=request.headers.get("x-open-analyst-s3-bucket", "").strip(),
+            s3_region=request.headers.get("x-open-analyst-s3-region", "").strip(),
+            s3_endpoint=request.headers.get("x-open-analyst-s3-endpoint", "").strip(),
+            s3_prefix=request.headers.get("x-open-analyst-s3-prefix", "").strip(),
+        )
+        token = set_request_context(context)
         if request.url.path.startswith(settings.mcp_path) or request.url.path.startswith("/api/"):
             expected = settings.api_key.get_secret_value()
             supplied = _extract_api_key(request)
             if supplied != expected:
+                reset_request_context(token)
                 return JSONResponse(status_code=401, content={"detail": "invalid_api_key"})
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_context(token)
 
     @app.get("/")
     async def root():
@@ -179,6 +197,14 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="collection_not_found")
         return detail.model_dump(mode="json")
 
+    @app.get("/api/collections/{name}/artifacts")
+    async def api_collection_artifacts(name: str, limit: int = Query(default=50, ge=1, le=200)):
+        analyst_service: AnalystService = app.state.service
+        detail = await analyst_service.collection_artifact_metadata(name, limit=limit)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="collection_not_found")
+        return detail.model_dump(mode="json")
+
     @app.post("/api/collections/{name}/collect")
     async def api_collect_collection(name: str, payload: DownloadRequest):
         analyst_service: AnalystService = app.state.service
@@ -270,6 +296,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/papers/{identifier}/artifact")
     async def api_paper_artifact(
+        request: Request,
         identifier: str,
         provider: str | None = None,
         kind: str = Query(default="any"),
@@ -284,10 +311,11 @@ def create_app() -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="artifact_not_found") from exc
         filename = Path(artifact["relative_path"]).name
+        disposition = "attachment" if request.query_params.get("download") == "1" else "inline"
         return Response(
             content=content,
             media_type=artifact["mime_type"],
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+            headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
         )
 
     app.mount(settings.mcp_path, mcp_app)

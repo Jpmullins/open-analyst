@@ -1,4 +1,5 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
+import { getProject } from '~/lib/db/queries/projects.server';
 import {
   createTask,
   getTask,
@@ -10,7 +11,7 @@ import {
 import { createAgentProvider } from '~/lib/agent/index.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
-import { getSelectedMcpServers } from '~/lib/mcp.server';
+import { applyProjectMcpContext, getSelectedMcpServers } from '~/lib/mcp.server';
 import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
 import { applyChatStreamEvent, extractFinalAssistantText } from '~/lib/chat-stream';
 import type { ContentBlock } from '~/lib/types';
@@ -61,7 +62,7 @@ export async function action({ request }: Route.ActionArgs) {
   };
 
   const provider = createAgentProvider(cfg);
-  const workingDir = getProjectWorkspace(projectId);
+  const workingDir = await getProjectWorkspace(projectId);
   const activeSkills = listActiveSkills();
   const prompt = String(body.prompt || '').trim();
   const pinnedMcpServerIds = Array.isArray(body.pinnedMcpServerIds)
@@ -82,6 +83,12 @@ export async function action({ request }: Route.ActionArgs) {
     messages: requestedChatMessages,
     pinnedServerIds: pinnedMcpServerIds,
   });
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json({ error: `Project not found: ${projectId}` }, { status: 404 });
+  }
+  const apiBaseUrl = new URL(request.url).origin;
+  const runtimeMcpServers = applyProjectMcpContext(selectedMcpServers, project, apiBaseUrl);
 
   // Reuse existing task or create new one
   let task;
@@ -145,7 +152,7 @@ export async function action({ request }: Route.ActionArgs) {
         if (isToolCatalogQuestion({ prompt, messages: chatMessages })) {
           const text = await buildToolCatalogText({
             activeToolNames,
-            mcpServers: selectedMcpServers,
+          mcpServers: runtimeMcpServers,
           });
           send('text_delta', { text });
           send('agent_end', {});
@@ -186,7 +193,7 @@ export async function action({ request }: Route.ActionArgs) {
           skills: matchedSkills,
           skillCatalog: getSkillCatalog(activeSkills),
           activeToolNames,
-          mcpServers: selectedMcpServers,
+          mcpServers: runtimeMcpServers,
         })) {
           send(event.type, event);
           contentBlocks = applyChatStreamEvent(contentBlocks, event);

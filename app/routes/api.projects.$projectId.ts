@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import {
   getProject,
   updateProject,
@@ -5,6 +6,7 @@ import {
   listProjects,
 } from "~/lib/db/queries/projects.server";
 import { upsertSettings } from "~/lib/db/queries/settings.server";
+import { resolveProjectWorkspace } from "~/lib/project-storage.server";
 import type { Route } from "./+types/api.projects.$projectId";
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -25,6 +27,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     const body = await request.json();
     try {
       const project = await updateProject(projectId, body);
+      await mkdir(resolveProjectWorkspace(project), { recursive: true });
       return Response.json({ project });
     } catch (err) {
       return Response.json(

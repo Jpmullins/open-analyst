@@ -55,6 +55,28 @@ describe("api.projects.$projectId", () => {
     expect(data.project.name).toBe("Updated");
   });
 
+  it("PATCH updates project storage fields", async () => {
+    const project = await createProject({ name: "Storage Project" });
+
+    const args = createMockActionArgs(
+      "PATCH",
+      `/api/projects/${project.id}`,
+      {
+        artifactBackend: "s3",
+        artifactS3Bucket: "mission-bucket",
+        artifactS3Prefix: "workspace-root",
+      },
+      { projectId: project.id }
+    );
+    const response = await action(args as never);
+    const data = (await getJsonResponse(response)) as {
+      project: { artifactBackend: string; artifactS3Bucket: string; artifactS3Prefix: string };
+    };
+    expect(data.project.artifactBackend).toBe("s3");
+    expect(data.project.artifactS3Bucket).toBe("mission-bucket");
+    expect(data.project.artifactS3Prefix).toBe("workspace-root");
+  });
+
   it("DELETE removes project", async () => {
     const project = await createProject({ name: "To Delete" });
 

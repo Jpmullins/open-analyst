@@ -63,6 +63,7 @@ class CollectionResponse(BaseModel):
     searched: int
     downloaded: list[DownloadResult]
     skipped_ids: list[str] = Field(default_factory=list)
+    skip_reasons: dict[str, str] = Field(default_factory=dict)
     collection_name: str | None = None
 
 
@@ -187,6 +188,8 @@ class ArtifactRecord(BaseModel):
     suffix: str
     path: str
     mime_type: str
+    artifact_url: str | None = None
+    download_url: str | None = None
 
 
 class PaperDetailResponse(BaseModel):
@@ -196,6 +199,16 @@ class PaperDetailResponse(BaseModel):
     has_local_artifacts: bool = False
     artifact_status: Literal["stored", "external_only", "none"] = "none"
     graph: GraphLookupResponse | None = None
+
+
+class CollectionArtifactEntry(BaseModel):
+    paper: PaperRecord
+    artifacts: list[ArtifactRecord] = Field(default_factory=list)
+
+
+class CollectionArtifactMetadataResponse(BaseModel):
+    collection: CollectionSummary
+    items: list[CollectionArtifactEntry] = Field(default_factory=list)
 
 
 class DailyScanResponse(BaseModel):
