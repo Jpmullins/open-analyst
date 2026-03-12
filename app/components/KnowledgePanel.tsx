@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  headlessGetCollections,
-  headlessGetDocuments,
-  headlessImportUrl,
-} from "~/lib/headless-api";
-import type { HeadlessCollection, HeadlessDocument } from "~/lib/headless-api";
+import { useEffect, useState } from "react";
+import { useFetcher } from "react-router";
+import { headlessImportUrl } from "~/lib/headless-api";
+import type { HeadlessDocument } from "~/lib/headless-api";
 import { useAppStore } from "~/lib/store";
+import type { ArtifactMeta } from "~/lib/types";
 import { BookOpen, FileText, Link2, X } from "lucide-react";
 import { DocumentPreview } from "./DocumentPreview";
 
@@ -15,35 +13,30 @@ interface KnowledgePanelProps {
 }
 
 export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
-  const { activeCollectionByProject, setProjectActiveCollection } = useAppStore();
+  const { activeCollectionByProject, setProjectActiveCollection, openFileViewer } = useAppStore();
 
-  const [collections, setCollections] = useState<HeadlessCollection[]>([]);
-  const [documents, setDocuments] = useState<HeadlessDocument[]>([]);
   const [sourceUrl, setSourceUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<HeadlessDocument | null>(null);
 
+  const fetcher = useFetcher<{
+    collections: { id: string; name: string }[];
+    documents: HeadlessDocument[];
+  }>();
+
+  const collections = fetcher.data?.collections ?? [];
+  const documents = fetcher.data?.documents ?? [];
+
   const activeCollectionId =
     activeCollectionByProject[projectId] || collections[0]?.id || null;
 
-  const refresh = useCallback(async () => {
-    try {
-      const cols = await headlessGetCollections(projectId);
-      setCollections(cols);
-      const colId =
-        activeCollectionByProject[projectId] || cols[0]?.id || null;
-      if (colId) {
-        const docs = await headlessGetDocuments(projectId, colId);
-        setDocuments(docs);
-      }
-    } catch {
-      // Silently fail in panel — not critical
-    }
-  }, [projectId, activeCollectionByProject]);
-
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    const colId = activeCollectionId || "";
+    fetcher.load(
+      `/api/projects/${projectId}/knowledge${colId ? `?collectionId=${colId}` : ""}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, activeCollectionId]);
 
   const handleCollectionChange = (id: string) => {
     setProjectActiveCollection(projectId, id);
@@ -56,7 +49,9 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
     try {
       await headlessImportUrl(projectId, url, activeCollectionId);
       setSourceUrl("");
-      await refresh();
+      fetcher.load(
+        `/api/projects/${projectId}/knowledge?collectionId=${activeCollectionId}`
+      );
     } catch {
       // Fail silently in panel
     } finally {
@@ -66,11 +61,11 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
 
   return (
     <div className="w-72 border-l border-border bg-surface flex flex-col overflow-hidden shrink-0">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <div className="flex items-center gap-1.5 text-sm font-medium">
+      {/* Header — h-14 matches main chat header for visual alignment */}
+      <div className="flex items-center justify-between px-3 h-14 border-b border-border">
+        <div className="flex items-center gap-1.5">
           <BookOpen className="w-4 h-4 text-accent" />
-          Knowledge
+          <span className="text-sm font-medium">Knowledge</span>
         </div>
         <button
           onClick={onClose}
@@ -104,9 +99,22 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
         {documents.map((doc) => (
           <button
             key={doc.id}
-            onClick={() =>
-              setPreviewDoc(previewDoc?.id === doc.id ? null : doc)
-            }
+            onClick={() => {
+              if (doc.storageUri) {
+                const docArtifact: ArtifactMeta = {
+                  documentId: doc.id,
+                  filename: (doc.metadata?.filename as string) || doc.title,
+                  mimeType: (doc.metadata?.mimeType as string) || 'application/octet-stream',
+                  size: (doc.metadata?.bytes as number) || 0,
+                  artifactUrl: `/api/projects/${projectId}/documents/${doc.id}/artifact`,
+                  downloadUrl: `/api/projects/${projectId}/documents/${doc.id}/artifact?download=1`,
+                  title: doc.title,
+                };
+                openFileViewer(docArtifact);
+              } else {
+                setPreviewDoc(previewDoc?.id === doc.id ? null : doc);
+              }
+            }}
             className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center gap-2 transition-colors ${
               previewDoc?.id === doc.id
                 ? "bg-accent-muted"

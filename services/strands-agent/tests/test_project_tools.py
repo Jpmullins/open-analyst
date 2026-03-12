@@ -10,7 +10,20 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 strands_mod = types.ModuleType("strands")
-strands_mod.tool = lambda fn: fn
+
+
+def _mock_tool(fn=None, *, name=None, **_kw):
+    """Mock @tool that supports both @tool and @tool(name=...) forms."""
+    def decorator(func):
+        if name:
+            func.tool_name = name
+        return func
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+
+strands_mod.tool = _mock_tool
 strands_mod.Agent = object
 sys.modules.setdefault("strands", strands_mod)
 
@@ -64,7 +77,7 @@ class TestCollectionOverview:
 class TestBoundProjectTools:
     def test_file_tools_are_bound_to_workspace(self, workspace):
         tools = {
-            tool.__name__: tool
+            getattr(tool, "tool_name", None) or tool.__name__: tool
             for tool in create_project_tools(workspace_dir=workspace)
         }
 

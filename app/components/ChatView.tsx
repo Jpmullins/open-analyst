@@ -10,6 +10,7 @@ import {
   type HeadlessCollection,
 } from '~/lib/headless-api';
 import { KnowledgePanel } from './KnowledgePanel';
+import { FileViewerPanel } from './FileViewerPanel';
 import { Send, Square, Plus, Loader2, Plug, X, BookOpen } from 'lucide-react';
 
 interface ChatViewProps {
@@ -25,7 +26,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ taskId, taskTitle, projectId, initialMessages }: ChatViewProps) {
-  const { appConfig, activeCollectionByProject, setProjectActiveCollection } = useAppStore();
+  const { appConfig, activeCollectionByProject, setProjectActiveCollection, fileViewerArtifact, closeFileViewer } = useAppStore();
   const { streamingMessage, isStreaming, sendMessage, stop } = useChatStream();
   const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -506,8 +507,24 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
     stop();
   };
 
+  // Mutual exclusion: file viewer open → close knowledge panel
+  useEffect(() => {
+    if (fileViewerArtifact) {
+      setKnowledgePanelOpen(false);
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.delete('panel');
+          return p;
+        },
+        { replace: true }
+      );
+    }
+  }, [fileViewerArtifact]);
+
   const toggleKnowledgePanel = () => {
     const next = !knowledgePanelOpen;
+    if (next) closeFileViewer();
     setKnowledgePanelOpen(next);
     setSearchParams(
       (prev) => {
@@ -560,17 +577,15 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                 </div>
               </>
             )}
-            <button
-              onClick={toggleKnowledgePanel}
-              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
-                knowledgePanelOpen
-                  ? 'bg-accent-muted text-accent'
-                  : 'hover:bg-surface-hover text-text-secondary'
-              }`}
-              aria-label={knowledgePanelOpen ? 'Close knowledge panel' : 'Open knowledge panel'}
-            >
-              <BookOpen className="w-4 h-4" />
-            </button>
+            {!knowledgePanelOpen && (
+              <button
+                onClick={toggleKnowledgePanel}
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-surface-hover text-text-secondary"
+                aria-label="Open knowledge panel"
+              >
+                <BookOpen className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -750,6 +765,12 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
       </div>
       {knowledgePanelOpen && (
         <KnowledgePanel projectId={projectId} onClose={toggleKnowledgePanel} />
+      )}
+      {fileViewerArtifact && !knowledgePanelOpen && (
+        <FileViewerPanel onOpenKnowledge={() => {
+          closeFileViewer();
+          toggleKnowledgePanel();
+        }} />
       )}
     </div>
   );

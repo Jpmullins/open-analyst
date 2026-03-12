@@ -33,6 +33,7 @@ export default [
     route("projects", "routes/api.projects.ts"),
     route("projects/active", "routes/api.projects.active.ts"),
     route("projects/:projectId", "routes/api.projects.$projectId.ts"),
+    route("projects/:projectId/knowledge", "routes/api.projects.$projectId.knowledge.ts"),
     route("projects/:projectId/collections", "routes/api.projects.$projectId.collections.ts"),
     route("projects/:projectId/collections/ensure", "routes/api.projects.$projectId.collections.ensure.ts"),
     route("projects/:projectId/documents", "routes/api.projects.$projectId.documents.ts"),

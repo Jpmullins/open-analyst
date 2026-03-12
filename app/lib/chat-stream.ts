@@ -1,4 +1,5 @@
 import type {
+  ArtifactMeta,
   ContentBlock,
   StatusContent,
   TextContent,
@@ -78,14 +79,36 @@ function appendToolStart(blocks: ContentBlock[], event: ChatStreamEvent): Conten
   ];
 }
 
+const ARTIFACT_META_RE = /<!-- ARTIFACT_META (.*?) -->/g;
+
+export function extractArtifactMeta(output: string): {
+  cleanOutput: string;
+  artifacts: ArtifactMeta[];
+} {
+  const artifacts: ArtifactMeta[] = [];
+  const cleanOutput = output.replace(ARTIFACT_META_RE, (_match, json) => {
+    try {
+      artifacts.push(JSON.parse(json) as ArtifactMeta);
+    } catch {
+      // Ignore malformed sentinels
+    }
+    return '';
+  }).trim();
+  return { cleanOutput, artifacts };
+}
+
 function appendToolResult(blocks: ContentBlock[], event: ChatStreamEvent): ContentBlock[] {
   if (!event.toolUseId) return blocks;
+
+  const rawOutput = String(event.toolOutput || event.error || '').trim();
+  const { cleanOutput, artifacts } = extractArtifactMeta(rawOutput);
 
   const result: ToolResultContent = {
     type: 'tool_result',
     toolUseId: event.toolUseId,
-    content: String(event.toolOutput || event.error || '').trim(),
+    content: cleanOutput,
     isError: (event.toolStatus || event.status) === 'error' || Boolean(event.error),
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 
   const exists = blocks.some(

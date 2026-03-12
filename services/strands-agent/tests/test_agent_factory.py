@@ -9,7 +9,16 @@ os.environ.setdefault("LITELLM_API_KEY", "test-key")
 
 strands_mod = types.ModuleType("strands")
 strands_mod.Agent = object
-strands_mod.tool = lambda fn: fn
+def _mock_tool(fn=None, *, name=None, **_kw):
+    def decorator(func):
+        if name:
+            func.tool_name = name
+        return func
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+strands_mod.tool = _mock_tool
 sys.modules.setdefault("strands", strands_mod)
 
 strands_models_mod = types.ModuleType("strands.models")
@@ -88,6 +97,7 @@ def test_collect_allowed_tools_prefers_explicit_active_tool_names():
         "web_fetch",
         "collection_overview",
         "capture_artifact",
+        "generate_file",
     }
 
 
@@ -107,6 +117,7 @@ def test_collect_allowed_tools_falls_back_to_skill_tools():
         "web_fetch",
         "collection_overview",
         "capture_artifact",
+        "generate_file",
     }
 
 

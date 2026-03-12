@@ -12,6 +12,7 @@ from pathlib import Path
 from strands import tool
 
 from util.sandbox import resolve_in_workspace
+from util.auto_capture import is_deliverable, try_auto_capture, format_tool_output_with_artifact
 
 
 @tool
@@ -55,21 +56,48 @@ def read_file(path: str, workspace_dir: str = ".") -> str:
 
 
 @tool
-def write_file(path: str, content: str, workspace_dir: str = ".") -> str:
+def write_file(
+    path: str,
+    content: str,
+    workspace_dir: str = ".",
+    project_id: str = "",
+    api_base_url: str = "",
+    collection_id: str = "",
+    collection_name: str = "",
+) -> str:
     """Write content to a file within the workspace, creating directories as needed.
 
     Args:
         path: Relative path to the file.
         content: The content to write.
         workspace_dir: The workspace root directory.
+        project_id: Project ID for auto-capture (injected by tool binding).
+        api_base_url: API base URL for auto-capture (injected by tool binding).
+        collection_id: Collection ID for auto-capture (injected by tool binding).
+        collection_name: Collection name for auto-capture (injected by tool binding).
 
     Returns:
-        Confirmation message with the relative path.
+        Confirmation message with the relative path, plus artifact metadata if captured.
     """
     file_path = resolve_in_workspace(workspace_dir, path)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     Path(file_path).write_text(content or "", encoding="utf-8")
-    return f"Wrote file: {os.path.relpath(file_path, workspace_dir)}"
+
+    relpath = os.path.relpath(file_path, workspace_dir)
+    base_msg = f"Wrote file: {relpath}"
+
+    if project_id and api_base_url and is_deliverable(relpath):
+        artifact = try_auto_capture(
+            relative_path=relpath,
+            workspace_dir=workspace_dir,
+            project_id=project_id,
+            api_base_url=api_base_url,
+            collection_id=collection_id,
+            collection_name=collection_name or "Artifacts",
+        )
+        return format_tool_output_with_artifact(base_msg, artifact)
+
+    return base_msg
 
 
 @tool

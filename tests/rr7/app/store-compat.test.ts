@@ -21,6 +21,10 @@ describe('store compatibility', () => {
     expect(state).toHaveProperty('isLoading');
     expect(state).toHaveProperty('sidebarCollapsed');
 
+    // File viewer state
+    expect(state).toHaveProperty('fileViewerArtifact');
+    expect(state.fileViewerArtifact).toBeNull();
+
     // Actions
     expect(typeof state.setIsConfigured).toBe('function');
     expect(typeof state.setAppConfig).toBe('function');
@@ -28,5 +32,7 @@ describe('store compatibility', () => {
     expect(typeof state.setActiveProjectId).toBe('function');
     expect(typeof state.setShowConfigModal).toBe('function');
     expect(typeof state.setLoading).toBe('function');
+    expect(typeof state.openFileViewer).toBe('function');
+    expect(typeof state.closeFileViewer).toBe('function');
   });
 });

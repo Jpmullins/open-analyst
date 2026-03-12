@@ -48,6 +48,7 @@ function defaultSkillRecords(): SkillConfig[] {
           'glob',
           'grep',
           'execute_command',
+          'generate_file',
         ],
       },
       createdAt: ts,
@@ -106,9 +107,12 @@ function builtinRuntimeSkills(): Skill[] {
         'glob',
         'grep',
         'execute_command',
+        'generate_file',
       ],
       instructions:
-        'Use this skill when the task requires inspecting, editing, or executing code and workspace files. Stay within the project workspace and prefer direct file inspection before editing.',
+        'Use this skill when the task requires inspecting, editing, or executing code and workspace files. '
+        + 'Use generate_file (not execute_command) to create binary files like DOCX, PDF, XLSX, or images. '
+        + 'Stay within the project workspace and prefer direct file inspection before editing.',
       source: { kind: 'builtin' },
       config: {},
     },

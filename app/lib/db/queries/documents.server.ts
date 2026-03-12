@@ -67,6 +67,27 @@ export async function ensureCollection(
   return collection;
 }
 
+export async function getCollectionDocumentCounts(
+  projectId: string
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select({
+      collectionId: documents.collectionId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(documents)
+    .where(eq(documents.projectId, projectId))
+    .groupBy(documents.collectionId);
+
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.collectionId) {
+      counts[row.collectionId] = row.count;
+    }
+  }
+  return counts;
+}
+
 // --- Documents ---
 
 export async function listDocuments(
