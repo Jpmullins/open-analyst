@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams, useFetcher } from "react-router";
 import {
   headlessCreateCollection,
   headlessCreateDocument,
-  headlessGetCollections,
-  headlessGetDocuments,
   headlessImportUrl,
   headlessImportFile,
   headlessRagQuery,
 } from "~/lib/headless-api";
 import type {
-  HeadlessCollection,
   HeadlessDocument,
   HeadlessRagResult,
 } from "~/lib/headless-api";
@@ -29,10 +26,6 @@ export function KnowledgeWorkspace() {
   const projectId = params.projectId!;
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Collections
-  const [collections, setCollections] = useState<HeadlessCollection[]>([]);
-  const [collectionName, setCollectionName] = useState("");
-
   // Active collection from URL
   const activeCollectionId = searchParams.get("collection") || null;
   const setActiveCollectionId = (id: string | null) => {
@@ -47,45 +40,42 @@ export function KnowledgeWorkspace() {
     );
   };
 
-  // Documents
-  const [documents, setDocuments] = useState<HeadlessDocument[]>([]);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
-    null
-  );
+  // Fetcher for collections + documents
+  const fetcher = useFetcher<{
+    collections: { id: string; name: string; description: string }[];
+    documents: HeadlessDocument[];
+  }>();
 
-  // Source form
+  const collections = fetcher.data?.collections ?? [];
+  const documents = fetcher.data?.documents ?? [];
+  const loading = fetcher.state === "loading" && !fetcher.data;
+
+  useEffect(() => {
+    const colId = activeCollectionId || "";
+    fetcher.load(
+      `/api/projects/${projectId}/knowledge${colId ? `?collectionId=${colId}` : ""}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, activeCollectionId]);
+
+  // Local UI state
+  const [collectionName, setCollectionName] = useState("");
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceContent, setSourceContent] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [uploading, setUploading] = useState(false);
-
-  // RAG
   const [ragQuery, setRagQuery] = useState("");
   const [ragResults, setRagResults] = useState<HeadlessRagResult[]>([]);
-
-  // Loading
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshData = useCallback(async () => {
-    try {
-      const cols = await headlessGetCollections(projectId);
-      setCollections(cols);
-      const colId = activeCollectionId || cols[0]?.id || null;
-      if (colId) {
-        const docs = await headlessGetDocuments(projectId, colId);
-        setDocuments(docs);
-      }
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
+  const reloadKnowledge = useCallback(() => {
+    const colId = activeCollectionId || "";
+    fetcher.load(
+      `/api/projects/${projectId}/knowledge${colId ? `?collectionId=${colId}` : ""}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeCollectionId]);
-
-  useEffect(() => {
-    refreshData();
-  }, [refreshData]);
 
   const handleCreateCollection = async () => {
     const name = collectionName.trim();
@@ -94,7 +84,7 @@ export function KnowledgeWorkspace() {
       const col = await headlessCreateCollection(projectId, name);
       setCollectionName("");
       setActiveCollectionId(col.id);
-      await refreshData();
+      reloadKnowledge();
     } catch (err) {
       setError(String(err));
     }
@@ -113,7 +103,7 @@ export function KnowledgeWorkspace() {
       });
       setSourceTitle("");
       setSourceContent("");
-      await refreshData();
+      reloadKnowledge();
     } catch (err) {
       setError(String(err));
     }
@@ -126,7 +116,7 @@ export function KnowledgeWorkspace() {
     try {
       await headlessImportUrl(projectId, url, activeCollectionId);
       setSourceUrl("");
-      await refreshData();
+      reloadKnowledge();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -146,7 +136,7 @@ export function KnowledgeWorkspace() {
         for (const file of Array.from(input.files)) {
           await headlessImportFile(projectId, file, activeCollectionId);
         }
-        await refreshData();
+        reloadKnowledge();
       } catch (err) {
         setError(String(err));
       } finally {

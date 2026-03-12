@@ -44,3 +44,27 @@ class TestExecuteCommand:
                 cwd="../../",
                 workspace_dir=workspace,
             )
+
+    def test_python_script_blocked(self, workspace):
+        """Python -c commands should be rejected in favor of generate_file."""
+        result = execute_command(
+            command='python -c "print(1)"',
+            workspace_dir=workspace,
+        )
+        assert "generate_file" in result
+        assert "Error" in result
+
+    def test_python3_script_blocked(self, workspace):
+        result = execute_command(
+            command='python3 -c "import os"',
+            workspace_dir=workspace,
+        )
+        assert "generate_file" in result
+
+    def test_legitimate_commands_allowed(self, workspace):
+        """Non-Python commands should still work normally."""
+        result = execute_command(
+            command="echo works",
+            workspace_dir=workspace,
+        )
+        assert "works" in result

@@ -10,6 +10,7 @@ import {
   getFileLinkButtonClassName,
 } from '~/lib/file-link';
 import type {
+  ArtifactMeta,
   Message,
   ContentBlock,
   ToolUseContent,
@@ -37,6 +38,10 @@ import {
   Plug,
   FileText,
   Sparkles,
+  Download,
+  ExternalLink,
+  FileSpreadsheet,
+  Image,
 } from 'lucide-react';
 
 function formatRelativeTime(ts: number): string {
@@ -492,6 +497,7 @@ function ToolUseBlock({ block }: { block: ToolUseContent }) {
       glob: 'Searching files',
       grep: 'Searching content',
       execute_command: 'Running command',
+      generate_file: 'Generating file',
     };
     return titles[name] || `Using ${name}`;
   };
@@ -828,6 +834,56 @@ function AskUserQuestionBlock({ block }: { block: ToolUseContent }) {
   );
 }
 
+function getArtifactIconColor(mimeType: string): { icon: typeof FileText; color: string } {
+  if (mimeType.includes('pdf')) return { icon: FileText, color: 'text-red-500' };
+  if (mimeType.includes('spreadsheet') || mimeType.includes('csv') || mimeType.includes('excel'))
+    return { icon: FileSpreadsheet, color: 'text-green-500' };
+  if (mimeType.startsWith('image/')) return { icon: Image, color: 'text-purple-500' };
+  return { icon: FileText, color: 'text-blue-500' };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
+  const { icon: Icon, color } = getArtifactIconColor(artifact.mimeType);
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5">
+      <div className={`w-8 h-8 rounded-lg bg-surface-muted flex items-center justify-center ${color}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-text-primary truncate">
+          {artifact.title || artifact.filename}
+        </p>
+        <p className="text-xs text-text-muted">{formatFileSize(artifact.size)}</p>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <a
+          href={artifact.artifactUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
+          title="Preview"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+        <a
+          href={artifact.downloadUrl}
+          className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
+          title="Download"
+        >
+          <Download className="w-3.5 h-3.5" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function ToolResultBlock({
   block,
   allBlocks,
@@ -950,58 +1006,67 @@ function ToolResultBlock({
 
   const summary = generateSummary(block.content, block.isError || false);
   const hasImages = block.images && block.images.length > 0;
+  const hasArtifacts = block.artifacts && block.artifacts.length > 0;
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden bg-surface">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={`w-full px-4 py-3 flex items-center gap-3 transition-colors ${
-          block.isError ? 'bg-error/10 hover:bg-error/20' : 'bg-success/10 hover:bg-success/20'
-        }`}
-      >
-        {block.isError ? (
-          <AlertCircle className="w-5 h-5 text-error" />
-        ) : (
-          <CheckCircle2 className="w-5 h-5 text-success" />
-        )}
-        <span
-          className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}
+    <div className="space-y-2">
+      <div className="rounded-xl border border-border overflow-hidden bg-surface">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className={`w-full px-4 py-3 flex items-center gap-3 transition-colors ${
+            block.isError ? 'bg-error/10 hover:bg-error/20' : 'bg-success/10 hover:bg-success/20'
+          }`}
         >
-          {summary}
-          {hasImages && block.images && (
-            <span className="ml-2 text-xs text-text-muted">
-              📸 {block.images.length} image{block.images.length > 1 ? 's' : ''}
-            </span>
+          {block.isError ? (
+            <AlertCircle className="w-5 h-5 text-error" />
+          ) : (
+            <CheckCircle2 className="w-5 h-5 text-success" />
           )}
-        </span>
-        {expanded ? (
-          <ChevronDown className="w-4 h-4 text-text-muted" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-text-muted" />
+          <span
+            className={`font-medium text-sm flex-1 text-left ${block.isError ? 'text-error' : 'text-success'}`}
+          >
+            {summary}
+            {hasImages && block.images && (
+              <span className="ml-2 text-xs text-text-muted">
+                📸 {block.images.length} image{block.images.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </span>
+          {expanded ? (
+            <ChevronDown className="w-4 h-4 text-text-muted" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-text-muted" />
+          )}
+        </button>
+
+        {expanded && (
+          <div className="p-4 bg-surface space-y-4">
+            <pre className="code-block text-xs whitespace-pre-wrap font-mono">{block.content}</pre>
+
+            {/* Render images if present */}
+            {block.images && block.images.length > 0 && (
+              <div className="space-y-3">
+                {block.images.map((image, index) => (
+                  <div key={index} className="border border-border rounded-lg overflow-hidden">
+                    <img
+                      src={`data:${image.mimeType};base64,${image.data}`}
+                      alt={`Screenshot ${index + 1}`}
+                      className="w-full h-auto"
+                      style={{ maxHeight: '600px', objectFit: 'contain' }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
-      </button>
+      </div>
 
-      {expanded && (
-        <div className="p-4 bg-surface space-y-4">
-          <pre className="code-block text-xs whitespace-pre-wrap font-mono">{block.content}</pre>
-
-          {/* Render images if present */}
-          {block.images && block.images.length > 0 && (
-            <div className="space-y-3">
-              {block.images.map((image, index) => (
-                <div key={index} className="border border-border rounded-lg overflow-hidden">
-                  <img
-                    src={`data:${image.mimeType};base64,${image.data}`}
-                    alt={`Screenshot ${index + 1}`}
-                    className="w-full h-auto"
-                    style={{ maxHeight: '600px', objectFit: 'contain' }}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Artifact cards — always visible below the result */}
+      {hasArtifacts &&
+        block.artifacts!.map((artifact) => (
+          <ArtifactCard key={artifact.documentId} artifact={artifact} />
+        ))}
     </div>
   );
 }

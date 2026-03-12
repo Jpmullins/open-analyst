@@ -70,6 +70,16 @@ export interface ToolUseContent {
   input: Record<string, unknown>;
 }
 
+export interface ArtifactMeta {
+  documentId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  artifactUrl: string;
+  downloadUrl: string;
+  title?: string;
+}
+
 export interface ToolResultContent {
   type: 'tool_result';
   toolUseId: string;
@@ -79,6 +89,7 @@ export interface ToolResultContent {
     data: string;
     mimeType: string;
   }>;
+  artifacts?: ArtifactMeta[];
 }
 
 export interface StatusContent {

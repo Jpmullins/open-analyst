@@ -10,7 +10,16 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 strands_mod = types.ModuleType("strands")
-strands_mod.tool = lambda fn: fn
+def _mock_tool(fn=None, *, name=None, **_kw):
+    def decorator(func):
+        if name:
+            func.tool_name = name
+        return func
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+strands_mod.tool = _mock_tool
 sys.modules.setdefault("strands", strands_mod)
 
 bs4_mod = types.ModuleType("bs4")

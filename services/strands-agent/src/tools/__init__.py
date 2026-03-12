@@ -11,31 +11,40 @@ from .file_tools import (
     read_file,
     write_file,
 )
+from .generate_tools import generate_file
 from .project_tools import capture_artifact, collection_overview
 
 
-def create_file_tools(workspace_dir: str) -> list:
+def create_file_tools(
+    workspace_dir: str,
+    project_id: str = "",
+    api_base_url: str = "",
+    collection_id: str = "",
+    collection_name: str = "",
+) -> list:
     """Create file and command tools bound to a workspace directory."""
 
-    @tool
+    @tool(name="list_directory")
     def list_directory_bound(path: str = ".") -> str:
         return list_directory(path=path, workspace_dir=workspace_dir)
 
-    list_directory_bound.__name__ = "list_directory"
-
-    @tool
+    @tool(name="read_file")
     def read_file_bound(path: str) -> str:
         return read_file(path=path, workspace_dir=workspace_dir)
 
-    read_file_bound.__name__ = "read_file"
-
-    @tool
+    @tool(name="write_file")
     def write_file_bound(path: str, content: str) -> str:
-        return write_file(path=path, content=content, workspace_dir=workspace_dir)
+        return write_file(
+            path=path,
+            content=content,
+            workspace_dir=workspace_dir,
+            project_id=project_id,
+            api_base_url=api_base_url,
+            collection_id=collection_id,
+            collection_name=collection_name,
+        )
 
-    write_file_bound.__name__ = "write_file"
-
-    @tool
+    @tool(name="edit_file")
     def edit_file_bound(path: str, old_string: str, new_string: str) -> str:
         return edit_file(
             path=path,
@@ -44,25 +53,29 @@ def create_file_tools(workspace_dir: str) -> list:
             workspace_dir=workspace_dir,
         )
 
-    edit_file_bound.__name__ = "edit_file"
-
-    @tool
+    @tool(name="glob")
     def glob_search_bound(pattern: str = "**/*", path: str = ".") -> str:
         return glob_search(pattern=pattern, path=path, workspace_dir=workspace_dir)
 
-    glob_search_bound.__name__ = "glob"
-
-    @tool
+    @tool(name="grep")
     def grep_search_bound(pattern: str, path: str = ".") -> str:
         return grep_search(pattern=pattern, path=path, workspace_dir=workspace_dir)
 
-    grep_search_bound.__name__ = "grep"
-
-    @tool
+    @tool(name="execute_command")
     def execute_command_bound(command: str, cwd: str = ".") -> str:
         return execute_command(command=command, cwd=cwd, workspace_dir=workspace_dir)
 
-    execute_command_bound.__name__ = "execute_command"
+    @tool(name="generate_file")
+    def generate_file_bound(path: str, python_code: str) -> str:
+        return generate_file(
+            path=path,
+            python_code=python_code,
+            workspace_dir=workspace_dir,
+            project_id=project_id,
+            api_base_url=api_base_url,
+            collection_id=collection_id,
+            collection_name=collection_name,
+        )
 
     return [
       list_directory_bound,
@@ -72,6 +85,7 @@ def create_file_tools(workspace_dir: str) -> list:
       glob_search_bound,
       grep_search_bound,
       execute_command_bound,
+      generate_file_bound,
     ]
 
 
@@ -79,11 +93,11 @@ def _filter_tools(tools: list, allowed_tool_names: set[str] | None) -> list:
     if not allowed_tool_names:
         return tools
     return [
-        tool
-        for tool in tools
+        t for t in tools
         if (
-            getattr(tool, "__name__", "")
-            or getattr(tool, "name", "")
+            getattr(t, "tool_name", "")
+            or getattr(t, "__name__", "")
+            or getattr(t, "name", "")
         ) in allowed_tool_names
     ]
 
@@ -97,9 +111,15 @@ def create_project_tools(
     allowed_tool_names: set[str] | None = None,
 ) -> list:
     """Assemble all tools for a project agent invocation."""
-    tools = create_file_tools(workspace_dir)
+    tools = create_file_tools(
+        workspace_dir,
+        project_id=project_id,
+        api_base_url=api_base_url,
+        collection_id=collection_id,
+        collection_name=collection_name,
+    )
 
-    @tool
+    @tool(name="collection_overview")
     def collection_overview_bound(collection_id_override: str = "") -> str:
         return collection_overview(
             collection_id=collection_id_override or collection_id,
@@ -107,9 +127,7 @@ def create_project_tools(
             api_base_url=api_base_url,
         )
 
-    collection_overview_bound.__name__ = "collection_overview"
-
-    @tool
+    @tool(name="capture_artifact")
     def capture_artifact_bound(
         relative_path: str,
         title: str = "",
@@ -124,8 +142,6 @@ def create_project_tools(
             project_id=project_id,
             api_base_url=api_base_url,
         )
-
-    capture_artifact_bound.__name__ = "capture_artifact"
 
     # Web, research, and project tools are added in Phase 1.3.3
     try:
