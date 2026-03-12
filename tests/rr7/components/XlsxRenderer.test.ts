@@ -14,6 +14,22 @@ vi.mock('xlsx', () => ({
   utils: mockUtils,
 }));
 
+async function waitFor(
+  fn: () => void,
+  { timeout = 2000, interval = 10 } = {}
+) {
+  const start = Date.now();
+  while (true) {
+    try {
+      fn();
+      return;
+    } catch (err) {
+      if (Date.now() - start > timeout) throw err;
+      await new Promise((r) => setTimeout(r, interval));
+    }
+  }
+}
+
 describe('XlsxRenderer', () => {
   beforeEach(() => {
     mockRead.mockReset();
@@ -78,13 +94,9 @@ describe('XlsxRenderer', () => {
     ]);
 
     const container = await renderComponent('/api/test.xlsx');
-    const { act } = await import('react');
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => {
+      expect(container.querySelector('table')).not.toBeNull();
     });
-
-    const table = container.querySelector('table');
-    expect(table).not.toBeNull();
   });
 
   it('shows sheet tabs when workbook has multiple sheets', async () => {
@@ -106,13 +118,10 @@ describe('XlsxRenderer', () => {
     mockUtils.sheet_to_json.mockReturnValue([['A', 'B']]);
 
     const container = await renderComponent('/api/test.xlsx');
-    const { act } = await import('react');
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => {
+      // Should render tab buttons for sheet names
+      expect(container.textContent).toContain('Sheet1');
+      expect(container.textContent).toContain('Sheet2');
     });
-
-    // Should render tab buttons for sheet names
-    expect(container.textContent).toContain('Sheet1');
-    expect(container.textContent).toContain('Sheet2');
   });
 });

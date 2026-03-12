@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams, useFetcher } from "react-router";
 import {
   headlessCreateCollection,
-  headlessCreateDocument,
   headlessImportUrl,
   headlessImportFile,
   headlessRagQuery,
@@ -20,6 +19,8 @@ import {
   Upload,
 } from "lucide-react";
 import { DocumentPreview } from "./DocumentPreview";
+import { AlertDialog } from "./AlertDialog";
+import { formatRelativeTime } from "~/lib/format";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
@@ -42,12 +43,14 @@ export function KnowledgeWorkspace() {
 
   // Fetcher for collections + documents
   const fetcher = useFetcher<{
-    collections: { id: string; name: string; description: string }[];
+    collections: { id: string; name: string; description: string; updatedAt?: string | number }[];
     documents: HeadlessDocument[];
+    documentCounts: Record<string, number>;
   }>();
 
   const collections = fetcher.data?.collections ?? [];
   const documents = fetcher.data?.documents ?? [];
+  const documentCounts = fetcher.data?.documentCounts ?? {};
   const loading = fetcher.state === "loading" && !fetcher.data;
 
   useEffect(() => {
@@ -59,10 +62,10 @@ export function KnowledgeWorkspace() {
   }, [projectId, activeCollectionId]);
 
   // Local UI state
-  const [collectionName, setCollectionName] = useState("");
+  const [showAllCollections, setShowAllCollections] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [sourceTitle, setSourceTitle] = useState("");
-  const [sourceContent, setSourceContent] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [ragQuery, setRagQuery] = useState("");
@@ -77,32 +80,16 @@ export function KnowledgeWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeCollectionId]);
 
-  const handleCreateCollection = async () => {
-    const name = collectionName.trim();
-    if (!name) return;
-    try {
-      const col = await headlessCreateCollection(projectId, name);
-      setCollectionName("");
-      setActiveCollectionId(col.id);
-      reloadKnowledge();
-    } catch (err) {
-      setError(String(err));
+  const handleCreateCollection = async (name?: string) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) {
+      setShowCreateDialog(false);
+      return;
     }
-  };
-
-  const handleCreateManualSource = async () => {
-    const title = sourceTitle.trim();
-    const content = sourceContent.trim();
-    if (!title || !content || !activeCollectionId) return;
     try {
-      await headlessCreateDocument(projectId, {
-        collectionId: activeCollectionId,
-        title,
-        content,
-        sourceType: "manual",
-      });
-      setSourceTitle("");
-      setSourceContent("");
+      const col = await headlessCreateCollection(projectId, trimmed);
+      setShowCreateDialog(false);
+      setActiveCollectionId(col.id);
       reloadKnowledge();
     } catch (err) {
       setError(String(err));
@@ -161,7 +148,30 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  // Build collection name map for the sources table
+  const collectionNameMap: Record<string, string> = {};
+  for (const col of collections) {
+    collectionNameMap[col.id] = col.name;
+  }
+
+  // Filter documents for the All Sources table
+  const filteredDocuments = documents.filter((doc) => {
+    if (!sourceFilter) return true;
+    const lower = sourceFilter.toLowerCase();
+    const title = (doc.title || "").toLowerCase();
+    const sourceType = (doc.sourceType || "").toLowerCase();
+    const colName = (doc.collectionId ? collectionNameMap[doc.collectionId] || "" : "").toLowerCase();
+    return title.includes(lower) || sourceType.includes(lower) || colName.includes(lower);
+  });
+
   const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
+
+  // Collections display: show first 10 or all
+  const COLLECTION_LIMIT = 10;
+  const visibleCollections = showAllCollections
+    ? collections
+    : collections.slice(0, COLLECTION_LIMIT);
+  const hiddenCount = collections.length - COLLECTION_LIMIT;
 
   if (loading) {
     return (
@@ -185,159 +195,210 @@ export function KnowledgeWorkspace() {
           </div>
         )}
 
-        {/* Collections */}
+        {/* Collections — card grid */}
         <section>
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Database className="w-5 h-5 text-accent" />
-            Collections
-          </h2>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {collections.map((col) => (
-              <button
-                key={col.id}
-                onClick={() => setActiveCollectionId(col.id)}
-                className={`tag ${
-                  activeCollectionId === col.id ? "tag-active" : ""
-                }`}
-              >
-                {col.name}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              className="input text-sm py-2 max-w-xs"
-              placeholder="New collection name…"
-              value={collectionName}
-              onChange={(e) => setCollectionName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleCreateCollection();
-                }
-              }}
-            />
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Database className="w-5 h-5 text-accent" />
+              Collections
+            </h2>
             <button
-              className="btn btn-secondary px-3"
-              onClick={handleCreateCollection}
-              aria-label="Create collection"
+              className="btn btn-primary text-sm"
+              onClick={() => setShowCreateDialog(true)}
             >
               <Plus className="w-4 h-4" />
+              Add Collection
             </button>
           </div>
+
+          {collections.length === 0 ? (
+            <div className="card p-8 text-center">
+              <Database className="w-8 h-8 text-text-muted mx-auto mb-2" />
+              <p className="text-sm text-text-muted">
+                No collections yet. Create one to start organizing your sources.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {visibleCollections.map((col) => (
+                  <button
+                    key={col.id}
+                    onClick={() => setActiveCollectionId(col.id)}
+                    className={`card card-hover p-4 text-left ${
+                      activeCollectionId === col.id ? "ring-2 ring-accent" : ""
+                    }`}
+                  >
+                    <div className="text-sm font-medium truncate mb-1">
+                      {col.name}
+                    </div>
+                    {col.description && (
+                      <p className="text-xs text-text-muted line-clamp-2 mb-2">
+                        {col.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <span className="badge badge-idle">
+                        {documentCounts[col.id] || 0} sources
+                      </span>
+                      {col.updatedAt && (
+                        <span className="text-xs text-text-muted" suppressHydrationWarning>
+                          {formatRelativeTime(col.updatedAt)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {!showAllCollections && hiddenCount > 0 && (
+                <div className="mt-3 text-center">
+                  <button
+                    className="btn btn-secondary text-sm"
+                    onClick={() => setShowAllCollections(true)}
+                  >
+                    Show {hiddenCount} more collections
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </section>
 
-        {/* Sources */}
-        {activeCollectionId && (
-          <section>
-            <h2 className="text-lg font-semibold mb-4">Sources</h2>
+        {/* All Sources — filterable table */}
+        <section>
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-accent" />
+            All Sources
+          </h2>
 
-            {/* Add source actions */}
-            <div className="card p-4 mb-4 space-y-3">
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  className="input text-sm py-2"
-                  placeholder="Import from URL…"
-                  value={sourceUrl}
-                  onChange={(e) => setSourceUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleImportUrl();
-                    }
-                  }}
-                />
-                <button
-                  className="btn btn-secondary px-3"
-                  onClick={handleImportUrl}
-                  disabled={uploading}
-                  aria-label="Import URL"
-                >
-                  <Link2 className="w-4 h-4" />
-                </button>
-                <button
-                  className="btn btn-secondary px-3"
-                  onClick={handleImportFiles}
-                  disabled={uploading}
-                  aria-label="Upload files"
-                >
-                  <Upload className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  className="input text-sm py-2"
-                  placeholder="Manual source title"
-                  value={sourceTitle}
-                  onChange={(e) => setSourceTitle(e.target.value)}
-                />
-                <textarea
-                  className="input text-sm py-2 min-h-[80px] resize-y"
-                  placeholder="Paste content…"
-                  value={sourceContent}
-                  onChange={(e) => setSourceContent(e.target.value)}
-                />
-                <button
-                  className="btn btn-secondary text-sm"
-                  onClick={handleCreateManualSource}
-                >
-                  <FileText className="w-4 h-4" />
-                  Add manual source
-                </button>
-              </div>
-            </div>
-
-            {/* Document list */}
-            <div className="space-y-1">
-              {documents.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() =>
-                    setSelectedDocumentId(
-                      selectedDocumentId === doc.id ? null : doc.id
-                    )
-                  }
-                  className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 transition-colors ${
-                    selectedDocumentId === doc.id
-                      ? "bg-accent-muted"
-                      : "hover:bg-surface-hover"
-                  }`}
-                >
-                  <FileText className="w-4 h-4 text-text-muted shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm truncate">
-                      {doc.title || "Untitled"}
-                    </div>
-                    <div className="text-xs text-text-muted">
-                      {doc.sourceType || "manual"}
-                    </div>
-                  </div>
-                </button>
-              ))}
-              {documents.length === 0 && (
-                <p className="text-sm text-text-muted py-2">
-                  No sources in this collection yet.
-                </p>
-              )}
-            </div>
-
-            {/* Document preview */}
-            {selectedDocument && (
-              <div className="card p-4 mt-4">
-                <h3 className="text-sm font-semibold mb-2">
-                  {selectedDocument.title}
-                </h3>
-                <DocumentPreview
-                  projectId={projectId}
-                  document={selectedDocument}
-                />
-              </div>
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="text"
+              className="input text-sm py-2 flex-1"
+              placeholder="Filter sources…"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+            />
+            {activeCollectionId && (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    className="input text-sm py-2 w-48"
+                    placeholder="Import URL…"
+                    value={sourceUrl}
+                    onChange={(e) => setSourceUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleImportUrl();
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-secondary px-3"
+                    onClick={handleImportUrl}
+                    disabled={uploading}
+                    aria-label="Import URL"
+                  >
+                    <Link2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    className="btn btn-secondary px-3"
+                    onClick={handleImportFiles}
+                    disabled={uploading}
+                    aria-label="Upload files"
+                  >
+                    <Upload className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
             )}
-          </section>
-        )}
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface-muted">
+                  <th className="text-left px-4 py-2.5 font-medium text-text-muted">Title</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-text-muted">Collection</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-text-muted">Type</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-text-muted">Date Added</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDocuments.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-text-muted">
+                      {documents.length === 0
+                        ? "No sources yet. Select a collection and import sources."
+                        : "No sources match your filter."}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDocuments.map((doc) => (
+                    <tr
+                      key={doc.id}
+                      onClick={() =>
+                        setSelectedDocumentId(
+                          selectedDocumentId === doc.id ? null : doc.id
+                        )
+                      }
+                      className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                        selectedDocumentId === doc.id
+                          ? "bg-accent-muted"
+                          : "hover:bg-surface-hover"
+                      }`}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-text-muted shrink-0" />
+                          <span className="truncate max-w-[200px]">
+                            {doc.title || "Untitled"}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {doc.collectionId && collectionNameMap[doc.collectionId] ? (
+                          <span className="badge badge-idle text-xs">
+                            {collectionNameMap[doc.collectionId]}
+                          </span>
+                        ) : (
+                          <span className="text-text-muted">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-text-muted">
+                        {doc.sourceType || "manual"}
+                      </td>
+                      <td className="px-4 py-2.5 text-text-muted" suppressHydrationWarning>
+                        {doc.createdAt
+                          ? new Date(doc.createdAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Document preview */}
+          {selectedDocument && (
+            <div className="card p-4 mt-4">
+              <h3 className="text-sm font-semibold mb-2">
+                {selectedDocument.title}
+              </h3>
+              <DocumentPreview
+                projectId={projectId}
+                document={selectedDocument}
+              />
+            </div>
+          )}
+        </section>
 
         {/* RAG Search */}
         <section>
@@ -388,6 +449,15 @@ export function KnowledgeWorkspace() {
           )}
         </section>
       </div>
+
+      <AlertDialog
+        open={showCreateDialog}
+        title="Add Collection"
+        inputLabel="Collection name"
+        confirmLabel="Create"
+        onConfirm={handleCreateCollection}
+        onCancel={() => setShowCreateDialog(false)}
+      />
     </div>
   );
 }

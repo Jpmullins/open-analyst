@@ -9,6 +9,7 @@ import {
 import { useAppStore } from "~/lib/store";
 import { ArrowRight, FolderOpen, FlaskConical, BookOpen } from "lucide-react";
 import { AlertDialog } from "./AlertDialog";
+import { formatRelativeTime } from "~/lib/format";
 
 export function QuickStartDashboard() {
   const navigate = useNavigate();
@@ -78,14 +79,6 @@ export function QuickStartDashboard() {
       { method: "POST", action: "/api/workdir", encType: "application/json" }
     );
     setShowWorkdirDialog(false);
-  };
-
-  const formatRelativeTime = (ts: string | Date) => {
-    const diff = Date.now() - new Date(ts).getTime();
-    if (diff < 60_000) return "just now";
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    return new Date(ts).toLocaleDateString();
   };
 
   return (
