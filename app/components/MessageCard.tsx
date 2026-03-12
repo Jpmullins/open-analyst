@@ -848,11 +848,19 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
+export function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
   const { icon: Icon, color } = getArtifactIconColor(artifact.mimeType);
 
+  const handleCardClick = () => {
+    useAppStore.getState().openFileViewer(artifact);
+  };
+
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5">
+    <div
+      data-testid="artifact-card"
+      onClick={handleCardClick}
+      className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 hover:bg-surface-hover cursor-pointer transition-colors"
+    >
       <div className={`w-8 h-8 rounded-lg bg-surface-muted flex items-center justify-center ${color}`}>
         <Icon className="w-4 h-4" />
       </div>
@@ -867,6 +875,7 @@ function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
           href={artifact.artifactUrl}
           target="_blank"
           rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
           title="Preview"
         >
@@ -874,6 +883,7 @@ function ArtifactCard({ artifact }: { artifact: ArtifactMeta }) {
         </a>
         <a
           href={artifact.downloadUrl}
+          onClick={(e) => e.stopPropagation()}
           className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-surface-muted transition-colors text-text-muted hover:text-accent"
           title="Download"
         >

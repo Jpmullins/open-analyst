@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '~/lib/types';
+import type { ArtifactMeta, PermissionRequest, UserQuestionRequest, Settings, AppConfig, SandboxSetupProgress, SandboxSyncStatus } from '~/lib/types';
 
 interface ProjectSummary {
   id: string;
@@ -44,6 +44,9 @@ interface AppState {
   // Sandbox sync (per-session)
   sandboxSyncStatus: SandboxSyncStatus | null;
 
+  // File viewer
+  fileViewerArtifact: ArtifactMeta | null;
+
   // Actions
   setLoading: (loading: boolean) => void;
   toggleSidebar: () => void;
@@ -75,6 +78,10 @@ interface AppState {
 
   // Sandbox sync actions
   setSandboxSyncStatus: (status: SandboxSyncStatus | null) => void;
+
+  // File viewer actions
+  openFileViewer: (artifact: ArtifactMeta) => void;
+  closeFileViewer: () => void;
 }
 
 const defaultSettings: Settings = {
@@ -123,6 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
   sandboxSetupProgress: null,
   isSandboxSetupComplete: false,
   sandboxSyncStatus: null,
+  fileViewerArtifact: null,
 
   // UI actions
   setLoading: (loading) => set({ isLoading: loading }),
@@ -189,4 +197,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Sandbox sync actions
   setSandboxSyncStatus: (status) => set({ sandboxSyncStatus: status }),
+
+  // File viewer actions
+  openFileViewer: (artifact) => set({ fileViewerArtifact: artifact }),
+  closeFileViewer: () => set({ fileViewerArtifact: null }),
 }));
