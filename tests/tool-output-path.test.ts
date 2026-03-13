@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractFilePathFromToolOutput } from '../src/renderer/utils/tool-output-path';
+import { extractFilePathFromToolOutput } from '~/lib/tool-output-path';
 
 describe('extractFilePathFromToolOutput', () => {
   it('extracts path from File written output', () => {

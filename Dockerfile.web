@@ -1,0 +1,41 @@
+FROM node:20-bookworm-slim AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH="$PNPM_HOME:$PATH"
+
+RUN corepack enable
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+
+FROM node:20-bookworm-slim AS runtime
+
+ENV NODE_ENV=production
+ENV PNPM_HOME=/pnpm
+ENV PATH="$PNPM_HOME:$PATH"
+ENV HOST=0.0.0.0
+ENV PORT=5173
+ENV PROJECT_WORKSPACES_ROOT=/var/open-analyst/workspaces
+
+RUN corepack enable \
+  && useradd --create-home --uid 10001 appuser \
+  && mkdir -p /var/open-analyst/workspaces /var/open-analyst/config \
+  && chown -R appuser:appuser /var/open-analyst
+
+WORKDIR /app
+
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/build ./build
+COPY --from=build /app/skills ./skills
+COPY scripts/docker-web-entrypoint.sh /usr/local/bin/docker-web-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-web-entrypoint.sh
+
+EXPOSE 5173
+
+CMD ["bash", "/usr/local/bin/docker-web-entrypoint.sh"]

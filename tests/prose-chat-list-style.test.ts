@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 function readStyles() {
-  const filePath = path.resolve(__dirname, '../src/renderer/styles/globals.css');
+  const filePath = path.resolve(__dirname, '../app/styles/globals.css');
   return fs.readFileSync(filePath, 'utf8');
 }
 

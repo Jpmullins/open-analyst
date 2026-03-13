@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getArtifactIconKey, getArtifactIconComponent } from '../src/renderer/utils/artifact-steps';
+import { getArtifactIconKey, getArtifactIconComponent } from '~/lib/artifact-steps';
 
 describe('getArtifactIconKey', () => {
   it('returns type icon key for known extensions', () => {

@@ -1,0 +1,280 @@
+{
+  "generatedAt": "2026-03-12T19:54:41.090Z",
+  "status": "passed",
+  "options": {
+    "includeLive": false,
+    "includeE2E": false
+  },
+  "inventory": {
+    "generatedAt": "2026-03-12T19:52:40.770Z",
+    "matrixPath": "scripts/validation/matrix.json",
+    "summary": {
+      "repoSkillCount": 8,
+      "runtimeSkillCount": 2,
+      "localToolCount": 16,
+      "mcpToolCount": 31,
+      "uiSurfaceCount": 8,
+      "settingsOptionCount": 7,
+      "liveFlowCount": 8,
+      "coverage": {
+        "automated-local": 63,
+        "automated-live": 15,
+        "manual-only": 0,
+        "manual-live": 2
+      },
+      "issueCount": 0
+    },
+    "discovery": {
+      "repoSkills": [
+        "repo-skill-arlis-bulletin",
+        "repo-skill-content-extraction",
+        "repo-skill-docx",
+        "repo-skill-pdf",
+        "repo-skill-pptx",
+        "repo-skill-schedule",
+        "repo-skill-skill-creator",
+        "repo-skill-xlsx"
+      ],
+      "runtimeSkills": [
+        "builtin-code-ops",
+        "builtin-web-research"
+      ],
+      "localTools": [
+        "capture_artifact",
+        "collection_artifact_metadata",
+        "collection_overview",
+        "deep_research",
+        "edit_file",
+        "execute_command",
+        "generate_file",
+        "glob",
+        "grep",
+        "hf_daily_papers",
+        "hf_paper",
+        "list_directory",
+        "read_file",
+        "web_fetch",
+        "web_search",
+        "write_file"
+      ],
+      "mcpTools": [
+        "add_papers_to_collection",
+        "bootstrap_arxiv_inventory",
+        "bootstrap_openalex_snapshot",
+        "bootstrap_preflight",
+        "collect_articles",
+        "collect_collection_artifacts",
+        "collection_artifact_metadata",
+        "collection_search",
+        "create_collection",
+        "daily_scan_summary",
+        "describe_capabilities",
+        "download_articles",
+        "fetch_arxiv_archive_members",
+        "get_collection",
+        "get_job",
+        "get_paper",
+        "graph_lookup",
+        "index_collection",
+        "ingest_status",
+        "list_collections",
+        "list_jobs",
+        "list_paper_artifacts",
+        "literature_review",
+        "rag_query",
+        "recommend_papers",
+        "remove_papers_from_collection",
+        "search_literature",
+        "start_collect_articles",
+        "start_collect_collection_artifacts",
+        "start_download_articles",
+        "storage_health"
+      ]
+    },
+    "sections": [
+      {
+        "name": "skills.repo",
+        "discovered": [
+          "repo-skill-arlis-bulletin",
+          "repo-skill-content-extraction",
+          "repo-skill-docx",
+          "repo-skill-pdf",
+          "repo-skill-pptx",
+          "repo-skill-schedule",
+          "repo-skill-skill-creator",
+          "repo-skill-xlsx"
+        ],
+        "listed": [
+          "repo-skill-arlis-bulletin",
+          "repo-skill-content-extraction",
+          "repo-skill-docx",
+          "repo-skill-pdf",
+          "repo-skill-pptx",
+          "repo-skill-schedule",
+          "repo-skill-skill-creator",
+          "repo-skill-xlsx"
+        ],
+        "missingFromMatrix": [],
+        "extraInMatrix": []
+      },
+      {
+        "name": "skills.runtime",
+        "discovered": [
+          "builtin-code-ops",
+          "builtin-web-research"
+        ],
+        "listed": [
+          "builtin-web-research",
+          "builtin-code-ops"
+        ],
+        "missingFromMatrix": [],
+        "extraInMatrix": []
+      },
+      {
+        "name": "localTools",
+        "discovered": [
+          "capture_artifact",
+          "collection_artifact_metadata",
+          "collection_overview",
+          "deep_research",
+          "edit_file",
+          "execute_command",
+          "generate_file",
+          "glob",
+          "grep",
+          "hf_daily_papers",
+          "hf_paper",
+          "list_directory",
+          "read_file",
+          "web_fetch",
+          "web_search",
+          "write_file"
+        ],
+        "listed": [
+          "list_directory",
+          "read_file",
+          "write_file",
+          "edit_file",
+          "glob",
+          "grep",
+          "web_fetch",
+          "web_search",
+          "hf_daily_papers",
+          "hf_paper",
+          "deep_research",
+          "collection_overview",
+          "collection_artifact_metadata",
+          "capture_artifact",
+          "generate_file",
+          "execute_command"
+        ],
+        "missingFromMatrix": [],
+        "extraInMatrix": []
+      },
+      {
+        "name": "mcpTools",
+        "discovered": [
+          "add_papers_to_collection",
+          "bootstrap_arxiv_inventory",
+          "bootstrap_openalex_snapshot",
+          "bootstrap_preflight",
+          "collect_articles",
+          "collect_collection_artifacts",
+          "collection_artifact_metadata",
+          "collection_search",
+          "create_collection",
+          "daily_scan_summary",
+          "describe_capabilities",
+          "download_articles",
+          "fetch_arxiv_archive_members",
+          "get_collection",
+          "get_job",
+          "get_paper",
+          "graph_lookup",
+          "index_collection",
+          "ingest_status",
+          "list_collections",
+          "list_jobs",
+          "list_paper_artifacts",
+          "literature_review",
+          "rag_query",
+          "recommend_papers",
+          "remove_papers_from_collection",
+          "search_literature",
+          "start_collect_articles",
+          "start_collect_collection_artifacts",
+          "start_download_articles",
+          "storage_health"
+        ],
+        "listed": [
+          "search_literature",
+          "collect_articles",
+          "start_collect_articles",
+          "get_paper",
+          "download_articles",
+          "start_download_articles",
+          "list_paper_artifacts",
+          "list_collections",
+          "create_collection",
+          "get_collection",
+          "add_papers_to_collection",
+          "remove_papers_from_collection",
+          "collection_search",
+          "collection_artifact_metadata",
+          "collect_collection_artifacts",
+          "index_collection",
+          "start_collect_collection_artifacts",
+          "get_job",
+          "list_jobs",
+          "graph_lookup",
+          "recommend_papers",
+          "rag_query",
+          "daily_scan_summary",
+          "literature_review",
+          "describe_capabilities",
+          "storage_health",
+          "ingest_status",
+          "bootstrap_preflight",
+          "bootstrap_openalex_snapshot",
+          "bootstrap_arxiv_inventory",
+          "fetch_arxiv_archive_members"
+        ],
+        "missingFromMatrix": [],
+        "extraInMatrix": []
+      }
+    ],
+    "issues": []
+  },
+  "commands": [
+    {
+      "id": "vitest",
+      "label": "TypeScript and route/component suite",
+      "command": "pnpm exec vitest run",
+      "required": true,
+      "status": "passed",
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 50480
+    },
+    {
+      "id": "pytest-agent",
+      "label": "Strands agent pytest suite",
+      "command": "pnpm test:agent",
+      "required": true,
+      "status": "passed",
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 61474
+    },
+    {
+      "id": "pytest-analyst-mcp",
+      "label": "Analyst MCP pytest suite",
+      "command": "pnpm test:analyst-mcp",
+      "required": true,
+      "status": "passed",
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 8364
+    }
+  ]
+}

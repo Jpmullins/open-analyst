@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-open_analyst}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-open_analyst_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-open_analyst}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-open_analyst}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  strands-agent:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://open_analyst:open_analyst_dev@postgres:5432/open_analyst}
+      STRANDS_POSTGRES_DSN: ${STRANDS_POSTGRES_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analyst-mcp:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://open_analyst:open_analyst_dev@postgres:5432/open_analyst}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://open_analyst:open_analyst_dev@postgres:5432/open_analyst}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      strands-agent:
+        condition: service_healthy
+      analyst-mcp:
+        condition: service_healthy
+
+volumes:
+  pgdata:

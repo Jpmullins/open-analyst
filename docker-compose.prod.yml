@@ -1,0 +1,79 @@
+services:
+  strands-agent:
+    build:
+      context: ./services/strands-agent
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      STRANDS_POSTGRES_DSN: ${STRANDS_POSTGRES_DSN:-}
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL}
+      LITELLM_API_KEY: ${LITELLM_API_KEY}
+      NODE_API_BASE_URL: http://web:5173
+    volumes:
+      - shared-workspaces:/var/open-analyst/workspaces
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ping', timeout=5)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  analyst-mcp:
+    build:
+      context: ./services/analyst-mcp
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      ANALYST_MCP_API_KEY: ${ANALYST_MCP_API_KEY:-change-me}
+      ANALYST_MCP_LITELLM_BASE_URL: ${ANALYST_MCP_LITELLM_BASE_URL:-${LITELLM_BASE_URL}}
+      ANALYST_MCP_LITELLM_API_KEY: ${ANALYST_MCP_LITELLM_API_KEY:-${LITELLM_API_KEY}}
+      ANALYST_MCP_LITELLM_CHAT_MODEL: ${ANALYST_MCP_LITELLM_CHAT_MODEL:-}
+      ANALYST_MCP_LITELLM_EMBEDDING_MODEL: ${ANALYST_MCP_LITELLM_EMBEDDING_MODEL:-${LITELLM_EMBEDDING_MODEL}}
+      ANALYST_MCP_STORAGE_BACKEND: ${ANALYST_MCP_STORAGE_BACKEND:-local}
+      ANALYST_MCP_S3_BUCKET: ${ANALYST_MCP_S3_BUCKET:-}
+      ANALYST_MCP_AWS_REGION: ${ANALYST_MCP_AWS_REGION:-us-east-1}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      STRANDS_URL: http://strands-agent:8080
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL}
+      LITELLM_API_KEY: ${LITELLM_API_KEY}
+      LITELLM_EMBEDDING_MODEL: ${LITELLM_EMBEDDING_MODEL:-}
+      OPEN_ANALYST_DATA_DIR: /var/open-analyst/config
+      PROJECT_WORKSPACES_ROOT: /var/open-analyst/workspaces
+      ARTIFACT_STORAGE_BACKEND: ${ARTIFACT_STORAGE_BACKEND:-local}
+      ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-}
+      ARTIFACT_S3_REGION: ${ARTIFACT_S3_REGION:-us-east-1}
+      ARTIFACT_S3_PREFIX: ${ARTIFACT_S3_PREFIX:-open-analyst-artifacts}
+      ARTIFACT_S3_ENDPOINT: ${ARTIFACT_S3_ENDPOINT:-}
+      ANALYST_MCP_HOST: analyst-mcp
+      ANALYST_MCP_PORT: 8000
+      ANALYST_MCP_API_KEY: ${ANALYST_MCP_API_KEY:-change-me}
+    depends_on:
+      strands-agent:
+        condition: service_healthy
+      analyst-mcp:
+        condition: service_healthy
+    volumes:
+      - shared-workspaces:/var/open-analyst/workspaces
+      - shared-config:/var/open-analyst/config
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/api/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  shared-config:
+  shared-workspaces:

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveArtifactPath } from '../src/renderer/utils/artifact-path';
+import { resolveArtifactPath } from '~/lib/artifact-path';
 
 describe('resolveArtifactPath', () => {
   it('maps /workspace paths to cwd', () => {

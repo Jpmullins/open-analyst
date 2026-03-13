@@ -1,0 +1,1 @@
+import{c as a}from"./createLucideIcon-CWH7lh78.js";const s=a("LoaderCircle",[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]]);const c=a("Plus",[["path",{d:"M5 12h14",key:"1ays0h"}],["path",{d:"M12 5v14",key:"s699le"}]]);export{s as L,c as P};

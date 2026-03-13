@@ -1,18 +1,27 @@
+import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
+const ignoredWatchGlobs = [
+  '**/services/**',
+  '**/build/**',
+  '**/test-results/**',
+  '**/__pycache__/**',
+  '**/.pytest_cache/**',
+  '**/.venv/**',
+];
+
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
-      '@renderer': resolve(__dirname, 'src/renderer'),
-      'react-i18next': resolve(__dirname, 'src/renderer/shims/react-i18next.ts'),
+  plugins: [reactRouter()],
+  server: {
+    watch: {
+      ignored: ignoredWatchGlobs,
     },
   },
-  build: {
-    outDir: 'dist',
-    emptyOutDir: true,
+  resolve: {
+    alias: {
+      '~': resolve(__dirname, 'app'),
+      '@': resolve(__dirname, 'src'),
+    },
   },
 });

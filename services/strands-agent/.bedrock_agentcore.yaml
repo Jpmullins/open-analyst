@@ -1,0 +1,6 @@
+name: open-analyst-agent
+sdk: strands
+template: basic
+runtime:
+  port: 8080
+  entrypoint: src/main.py

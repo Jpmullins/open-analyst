@@ -18,14 +18,13 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
+    "rootDirs": [".", ".react-router/types"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@main/*": ["src/main/*"],
-      "@renderer/*": ["src/renderer/*"],
-      "react-i18next": ["src/renderer/shims/react-i18next.ts"]
+      "~/*": ["app/*"],
+      "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
+  "include": ["app", ".react-router/types"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { TraceStep } from '../src/renderer/types';
-import { getArtifactSteps, getArtifactLabel } from '../src/renderer/utils/artifact-steps';
+import type { TraceStep } from '~/lib/types';
+import { getArtifactSteps, getArtifactLabel } from '~/lib/artifact-steps';
 
 describe('getArtifactSteps', () => {
   it('includes completed Write tool calls as file steps when no artifacts exist', () => {

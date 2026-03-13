@@ -5,16 +5,17 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
-    exclude: ['node_modules', 'dist', '.claude'],
+    globalSetup: ['./tests/rr7/global-setup.ts'],
+    setupFiles: ['./tests/rr7/tc-env-setup.ts', 'dotenv/config'],
+    include: ['app/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
+    exclude: ['node_modules', 'dist', '.claude', 'tests/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
         'dist/',
-        'src/renderer/',
-        '**/*.d.ts',
+'**/*.d.ts',
         '**/*.config.*',
         '**/mockData',
       ],
@@ -24,6 +25,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '~': path.resolve(__dirname, './app'),
       '@': path.resolve(__dirname, './src'),
     },
   },

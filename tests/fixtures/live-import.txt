@@ -1,0 +1,2 @@
+Open Analyst live import fixture.
+This file is used by Playwright to verify real file import, artifact storage, and extracted-text preview flows.

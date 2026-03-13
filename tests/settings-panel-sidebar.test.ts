@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const settingsPanelPath = path.resolve(process.cwd(), 'src/renderer/components/SettingsPanel.tsx');
+const settingsPanelPath = path.resolve(process.cwd(), 'app/components/SettingsPanel.tsx');
 const settingsPanelContent = readFileSync(settingsPanelPath, 'utf8');
 const descriptionLine = settingsPanelContent
   .split('\n')

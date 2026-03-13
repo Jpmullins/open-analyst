@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitTextByFileMentions, getFileLinkButtonClassName, splitChildrenByFileMentions } from '../src/renderer/utils/file-link';
+import { splitTextByFileMentions, getFileLinkButtonClassName, splitChildrenByFileMentions } from '~/lib/file-link';
 
 describe('splitTextByFileMentions', () => {
   it('detects bare filenames with extension', () => {

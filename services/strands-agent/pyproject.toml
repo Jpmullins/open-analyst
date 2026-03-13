@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-analyst-agent"
+version = "0.1.0"
+description = "Strands Agent backend for Open Analyst"
+requires-python = ">=3.11"
+dependencies = [
+    "strands-agents>=0.1.0",
+    "strands-agents-builder>=0.1.0",
+    "bedrock-agentcore>=0.0.1",
+    "litellm>=1.0.0",
+    "mcp>=1.26.0",
+    "psycopg[binary]>=3.3.3",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
