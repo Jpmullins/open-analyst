@@ -5,6 +5,7 @@ Open Analyst is a project-oriented research workspace with:
 - a React Router 7 web app in `app/`
 - server-side API routes in the same React Router app
 - a separate Python Strands agent service in `services/strands-agent/`
+- a separate Analyst MCP service in `services/analyst-mcp/`
 - Postgres persistence via Drizzle
 
 ## Runtime Overview
@@ -15,7 +16,8 @@ At runtime the system looks like this:
 2. UI components call same-origin `/api/*` routes.
 3. API routes read and write project data in Postgres.
 4. Chat routes proxy model/tool execution to the Strands agent service.
-5. The agent calls back into the Node app for project retrieval and source capture.
+5. The agent can use Analyst MCP for paper acquisition and artifact workflows.
+6. The agent calls back into the Node app for project retrieval and source capture.
 
 Chat responses are streamed back as structured progress events plus the final answer. Tool calls, status updates, and the final assistant text are stored on the task so the UI can resume live task state cleanly. Each task also keeps a compact app-side summary, while the Strands service maintains its own session state and conversation summary keyed by the task id.
 
@@ -28,7 +30,7 @@ See:
 
 - Node.js 20+
 - pnpm
-- Python with `uv` for the Strands agent
+- Python with `uv` for the Python services
 - PostgreSQL
 - LiteLLM gateway access
 
@@ -43,9 +45,10 @@ Required variables:
 - `DATABASE_URL`
 - `LITELLM_API_KEY`
 
-Optional variables:
+Common optional variables:
 
 - `LITELLM_BASE_URL`
+- `LITELLM_EMBEDDING_MODEL`
 - `STRANDS_URL`
 - `NODE_API_BASE_URL`
 - `STRANDS_POSTGRES_DSN`
@@ -59,6 +62,7 @@ Optional variables:
 - `ANALYST_MCP_API_KEY`
 - `ANALYST_MCP_POSTGRES_DSN`
 - `ANALYST_MCP_LITELLM_BASE_URL`
+- `ANALYST_MCP_LITELLM_API_KEY`
 - `ANALYST_MCP_LITELLM_CHAT_MODEL`
 - `ANALYST_MCP_LITELLM_EMBEDDING_MODEL`
 
@@ -69,6 +73,73 @@ If `ANALYST_MCP_POSTGRES_DSN` is omitted, `analyst_mcp` falls back to `DATABASE_
 If `STRANDS_POSTGRES_DSN` is omitted, the Strands agent also falls back to `DATABASE_URL`.
 When both services share one PostgreSQL database, Open Analyst uses the normal `public` schema and `analyst_mcp` uses its own `analyst_mcp` schema automatically.
 Strands session persistence is also stored in PostgreSQL and is no longer tied to S3 artifact storage.
+
+## Fresh Pull Checklist
+
+Use this for a brand new machine or a fresh clone.
+
+### Local dev
+
+1. Clone and enter the repo.
+2. Create `.env` from `.env.example`.
+3. Set at least:
+   - `DATABASE_URL`
+   - `LITELLM_API_KEY`
+   - usually `LITELLM_BASE_URL` as well
+   - set `LITELLM_EMBEDDING_MODEL` too if you want project Knowledge embeddings to work on first run
+4. Install Node dependencies:
+
+```bash
+pnpm install
+```
+
+5. Build the external Python environments:
+
+```bash
+pnpm setup:python
+```
+
+6. Apply database migrations:
+
+```bash
+pnpm db:migrate
+```
+
+7. Start the stack:
+
+```bash
+pnpm dev:all
+```
+
+8. In the UI, enable `Analyst MCP` under Settings -> MCP if you want analyst tools available.
+
+Notes:
+
+- `pnpm setup:python` is required on each machine because the Python envs live outside the repo and are not created by `git pull`.
+- if you are using AWS RDS, make sure the target database already exists before running `pnpm db:migrate`.
+- if you see Linux watcher-limit issues in dev, use `pnpm dev:polling` or increase the host inotify limits.
+- if you want Analyst MCP acquisition plus project Knowledge retrieval on AWS Postgres, make sure `pgvector` is available on that database
+
+### Docker prod-like
+
+1. Create `.env`.
+2. Set `DATABASE_URL` if you want to use an external Postgres backend.
+3. Apply migrations:
+
+```bash
+pnpm db:migrate
+```
+
+4. Start the production-style stack:
+
+```bash
+pnpm docker:prod
+```
+
+Behavior:
+
+- if `DATABASE_URL` is set, the Docker stack uses that external database and does not start local Postgres
+- if `DATABASE_URL` is missing, the wrapper starts the bundled local `pgvector/pgvector:pg16` database
 
 ## Local Development
 

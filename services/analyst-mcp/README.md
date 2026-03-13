@@ -4,9 +4,8 @@ Python MCP server for academic and intelligence analyst research workflows.
 
 Additional usage docs:
 
-- [Graph Usage Guide](docs/graph_usage.md)
-- [Operations Guide](docs/operations.md)
-- [AWS EC2 Manifest Runbook](docs/aws_ec2_manifest_runbook.md)
+- [Graph Usage Guide](graph_usage.md)
+- [Operations Guide](operations.md)
 
 ## What is implemented
 - Streamable HTTP MCP endpoint mounted at `/mcp`, suitable for MCP-aware clients and gateways.
@@ -17,7 +16,7 @@ Additional usage docs:
 - Download pipeline that stores papers by provider/source id and indexes extracted text for RAG.
 - Knowledge-graph abstraction with Neo4j support and an in-memory fallback for development/tests.
 - Recommendation flow based on graph topics and citation-weighted candidate scoring.
-- First-class MCP workflows for daily scan summaries and structured literature reviews.
+- Service-level daily scan summaries and structured literature reviews through the CLI/API layer.
 - Daily sync that refreshes arXiv `src`/`pdf` manifests and recent arXiv/OpenAlex metadata windows.
 - Tar selective extraction helper for arXiv bulk archives.
 - Server-neutral paper and artifact APIs under `/api/papers/*` for external clients and UI backends.
@@ -26,16 +25,17 @@ Additional usage docs:
 ## Quick start
 1. Prefer setting `ANALYST_MCP_*` values in the repo-root `.env`.
 2. Optionally create `services/analyst-mcp/.env` only for service-local overrides.
-3. If `ANALYST_MCP_POSTGRES_DSN` is omitted, the service falls back to `DATABASE_URL`.
-4. When sharing a database with Open Analyst, this service creates and uses its own `analyst_mcp` schema automatically.
-5. When Open Analyst selects this server for a project turn, it passes project storage context headers so artifacts are stored under that project's workspace slug and configured backend.
-6. Start the service from the repo root:
+3. Run `pnpm setup:python` once on each machine so the external Python environments exist.
+4. If `ANALYST_MCP_POSTGRES_DSN` is omitted, the service falls back to `DATABASE_URL`.
+5. When sharing a database with Open Analyst, this service creates and uses its own `analyst_mcp` schema automatically.
+6. When Open Analyst selects this server for a project turn, it passes project storage context headers so artifacts are stored under that project's workspace slug and configured backend.
+7. Start the service from the repo root:
 
 ```bash
 pnpm dev:analyst-mcp
 ```
 
-7. Check the MCP/API server:
+8. Check the MCP/API server:
 
 ```bash
 curl http://localhost:8000/health
@@ -43,13 +43,13 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/detai
 curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 ```
 
-8. Start the full stack from the repo root when testing with Open Analyst:
+9. Start the full stack from the repo root when testing with Open Analyst:
 
 ```bash
 pnpm dev:all
 ```
 
-9. In Open Analyst, enable the `Analyst MCP` connector and confirm it points at `http://localhost:8000/mcp` with the same `x-api-key` value.
+10. In Open Analyst, enable the `Analyst MCP` connector and confirm it points at `http://localhost:8000/mcp` with the same `x-api-key` value.
 
 ## Recommended Operating Mode
 
@@ -62,11 +62,17 @@ This repo is now optimized for:
 
 If that is your target, use:
 
-- [Operations Guide](docs/operations.md)
-- [AWS EC2 Manifest Runbook](docs/aws_ec2_manifest_runbook.md)
+- [Operations Guide](operations.md)
 
 ## Local commands
-Install locally:
+Preferred repo-root setup:
+
+```bash
+pnpm setup:python
+pnpm dev:analyst-mcp
+```
+
+Direct package-local setup:
 
 ```bash
 python3 -m pip install -e '.[dev]'
@@ -227,7 +233,7 @@ For MCP clients, the corresponding tool call is:
 - The OpenAlex bulk ingester currently targets `works`, which is enough to build paper, author, topic, and citation edges but does not yet import the separate author/source/institution snapshots as first-class entities.
 - arXiv bulk support currently indexes the official archive manifests and extracts targeted members from tar files; it does not yet maintain a fully normalized historical metadata mirror.
 - OCR is intentionally deferred; born-digital PDFs and text artifacts are the supported inputs in this version.
-- The standalone UI backend currently keeps chat history in the browser session; persistent multi-session chat storage is not implemented.
+- Open Analyst owns project/task/message persistence; this service does not provide its own standalone persistent chat UI.
 
 ## AWS Notes
 
@@ -238,6 +244,4 @@ For AWS EC2 deployment inside your VPC:
 - expose `7474` and `7687` only to your admin IP if needed
 - configure AWS credentials so arXiv requester-pays S3 manifest access works
 
-Use the full runbook here:
-
-- [AWS EC2 Manifest Runbook](docs/aws_ec2_manifest_runbook.md)
+Use the operations guide in this directory for the current bootstrap and sync workflow details.

@@ -1,6 +1,6 @@
 # Repository Map
 
-Last updated: 2026-03-11
+Last updated: 2026-03-13
 
 ## Top Level
 
@@ -27,6 +27,15 @@ The Python agent service used by chat execution.
 - `src/tools/`: tool implementations
 - `tests/`: Python-side tool tests
 
+### `services/analyst-mcp/`
+
+The Python Analyst MCP service used for literature search, collection workflows, and artifact acquisition.
+
+- `src/analyst_mcp/api.py`: HTTP API and MCP app factory
+- `src/analyst_mcp/mcp_server.py`: MCP tool surface
+- `src/analyst_mcp/services.py`: core service logic
+- `tests/`: Python-side MCP and service tests
+
 ### `drizzle/`
 
 Generated database migrations and metadata for the Postgres schema.
@@ -36,7 +45,10 @@ Generated database migrations and metadata for the Postgres schema.
 Current documentation and historical planning docs.
 
 - `ARCHITECTURE.md`: current runtime architecture
+- `AGENT_ARCHITECTURE.md`: current primary-agent plus research-worker shape
+- `DEPLOYMENT.md`: Docker-first production packaging and runtime guidance
 - `REPOSITORY_MAP.md`: this file
+- `VALIDATION.md`: validation matrix and report flow
 - `plans/`: historical design and implementation plans
 
 ### `skills/`
@@ -50,6 +62,15 @@ Generated build output for the React Router app.
 ### `resources/`
 
 Static project assets such as logos and packaging resources.
+
+### Docker and scripts
+
+- `Dockerfile.web`: production web image
+- `docker-compose.prod.yml`: production-like stack using an external database when configured
+- `docker-compose.prod.local-db.yml`: local Postgres overlay for the production-like stack
+- `docker-compose.yml`: local Postgres helper for development
+- `scripts/docker-prod.sh`: wrapper that chooses the correct compose files
+- `scripts/python-service.sh`: external-venv setup/run/test wrapper for the Python services
 
 ## `app/routes/`
 

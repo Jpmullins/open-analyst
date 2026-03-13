@@ -1,15 +1,16 @@
 # Open Analyst Architecture
 
-Last updated: 2026-03-11
+Last updated: 2026-03-13
 
 ## Overview
 
-Open Analyst has two runtime services:
+Open Analyst has three runtime services:
 
 - a React Router 7 application that serves both the UI and the HTTP API
 - a Python Strands agent service that performs model orchestration and tool execution
+- a Python Analyst MCP service that handles literature search, collection, and artifact workflows
 
-The React Router app is the system of record for projects, tasks, documents, settings, skills, and MCP configuration. The Strands service is a worker-style dependency used by chat routes.
+The React Router app is the system of record for projects, tasks, documents, settings, skills, and MCP configuration. The Strands service is a worker-style dependency used by chat routes. Analyst MCP is an internal tool service used by the agent and the mirrored artifact flows.
 
 ## Runtime Topology
 
@@ -21,6 +22,7 @@ Browser
      -> local config/workspace files
      -> Strands agent service
         -> file/web/research/project tools
+        -> Analyst MCP
         -> LiteLLM gateway
 ```
 
@@ -99,6 +101,19 @@ The Node app sends the Python service:
 - LiteLLM connection details
 
 The current agent runtime uses native Strands session persistence backed by PostgreSQL plus a summarizing conversation manager. Artifact storage may use local disk or S3, but Strands chat/session state is decoupled from artifact storage and stays in Postgres.
+
+### 5b. Analyst MCP service
+
+The Analyst MCP service lives in `services/analyst-mcp/`.
+
+It provides:
+
+- literature search across academic providers
+- paper collection and download workflows
+- artifact metadata and access links
+- collection-oriented research workflows used by the primary agent
+
+In local dev it can run through `pnpm dev:analyst-mcp`. In Docker prod-like deployments it is part of the normal three-service stack.
 
 ### 5a. Session and memory model
 
