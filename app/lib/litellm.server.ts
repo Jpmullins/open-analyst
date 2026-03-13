@@ -1,8 +1,10 @@
 import { env } from "~/lib/env.server";
+import { supportsToolCalling } from "~/lib/model-capabilities";
 
 export interface LitellmModel {
   id: string;
   name: string;
+  supportsTools: boolean;
 }
 
 // Simple in-memory cache so we don't hit LiteLLM on every request
@@ -32,7 +34,11 @@ export async function fetchModels(): Promise<LitellmModel[]> {
   }
 
   const data = (await res.json()) as { data?: Array<{ id: string }> };
-  cachedModels = (data.data || []).map((m) => ({ id: m.id, name: m.id }));
+  cachedModels = (data.data || []).map((m) => ({
+    id: m.id,
+    name: m.id,
+    supportsTools: supportsToolCalling(m.id),
+  }));
   cacheTime = Date.now();
   return cachedModels;
 }
@@ -45,7 +51,11 @@ export async function fetchModels(): Promise<LitellmModel[]> {
  * If LiteLLM is unreachable and there's no cache, returns `currentModel`
  * unchanged so we don't block the user.
  */
-export async function resolveModel(currentModel: string): Promise<string> {
+export async function resolveModel(
+  currentModel: string,
+  options?: { requireToolSupport?: boolean }
+): Promise<string> {
+  const requireToolSupport = options?.requireToolSupport === true;
   let models: LitellmModel[];
   try {
     models = await fetchModels();
@@ -56,11 +66,19 @@ export async function resolveModel(currentModel: string): Promise<string> {
 
   if (models.length === 0) return currentModel;
 
-  // Current model exists in LiteLLM — valid
-  if (currentModel && models.some((m) => m.id === currentModel)) {
-    return currentModel;
+  const current = currentModel ? models.find((m) => m.id === currentModel) : undefined;
+  if (current && (!requireToolSupport || current.supportsTools)) {
+    return current.id;
   }
 
-  // Empty or stale — default to first available
+  const supported = models.find((model) => model.supportsTools);
+  if (requireToolSupport && supported) {
+    return supported.id;
+  }
+
+  if (current) {
+    return current.id;
+  }
+
   return models[0].id;
 }

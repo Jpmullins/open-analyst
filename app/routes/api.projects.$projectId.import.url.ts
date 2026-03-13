@@ -1,4 +1,5 @@
 import { createDocument } from "~/lib/db/queries/documents.server";
+import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import type { Route } from "./+types/api.projects.$projectId.import.url";
 
 function validateHttpUrl(raw: string): string {
@@ -37,5 +38,6 @@ export async function action({ request, params }: Route.ActionArgs) {
     content,
     metadata: { contentType, status: fetchRes.status },
   });
-  return Response.json({ document }, { status: 201 });
+  const indexed = await refreshDocumentKnowledgeIndex(params.projectId, document.id);
+  return Response.json({ document: indexed || document }, { status: 201 });
 }

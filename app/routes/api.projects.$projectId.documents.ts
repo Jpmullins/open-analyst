@@ -2,6 +2,7 @@ import {
   listDocuments,
   createDocument,
 } from "~/lib/db/queries/documents.server";
+import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import type { Route } from "./+types/api.projects.$projectId.documents";
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -27,5 +28,6 @@ export async function action({ request, params }: Route.ActionArgs) {
     content: body.content,
     metadata: body.metadata,
   });
-  return Response.json({ document }, { status: 201 });
+  const indexed = await refreshDocumentKnowledgeIndex(params.projectId, document.id);
+  return Response.json({ document: indexed || document }, { status: 201 });
 }

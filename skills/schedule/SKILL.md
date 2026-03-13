@@ -1,6 +1,8 @@
 ---
 name: schedule
 description: "Create a scheduled task that can be run on demand or automatically on an interval."
+tools:
+  - write_file
 ---
 
 You are creating a reusable shortcut from the current session. Follow these steps:
@@ -31,8 +33,8 @@ Pick a short, descriptive name in kebab-case (e.g. "daily-inbox-summary", "weekl
 Decide whether the task is recurring or one-off:
 - **Clearly one-off** (e.g. "refactor this function") → omit the cron expression.
 - **Clearly recurring** (e.g. "check my inbox every morning") → include an appropriate cron expression.
-- **Ambiguous** → propose a reasonable schedule and ask the user to confirm using AskUserQuestion before proceeding.
+- **Ambiguous** → propose a reasonable schedule in the chat response and ask the user to confirm before proceeding.
 
 **IMPORTANT: Cron expressions run in the user's local machine timezone, NOT UTC.** Use local times directly in the cron expression. For example, if the user asks for "8am every Friday", use `0 8 * * 5` — do NOT convert to UTC.
 
-Finally, call the "create_scheduled_task" tool.
+If the runtime exposes a scheduling tool, use it. Otherwise, return a ready-to-use schedule specification containing `taskName`, the self-contained prompt, and the cron expression so the user can install it manually or copy it into another scheduler.

@@ -45,7 +45,7 @@ class _FakeSoup:
 bs4_mod.BeautifulSoup = _FakeSoup
 sys.modules.setdefault("bs4", bs4_mod)
 
-from tools.research_tools import arxiv_search, hf_daily_papers, hf_paper
+from tools.research_tools import arxiv_search, deep_research, hf_daily_papers, hf_paper
 
 
 def _mock_response(text="", status_code=200, content_type="text/xml"):
@@ -121,3 +121,39 @@ class TestHfPaper:
     def test_empty_arxiv_id_raises(self):
         with pytest.raises(ValueError, match="arxiv_id is required"):
             hf_paper(arxiv_id="")
+
+
+class TestDeepResearch:
+    @patch("tools.research_tools.ProjectAPI")
+    @patch("tools.research_tools.web_fetch")
+    @patch("tools.research_tools.web_search")
+    def test_builds_report_from_search_and_fetch(self, mock_search, mock_fetch, MockProjectAPI):
+        mock_search.side_effect = [
+            "Query: autonomous ships\nhttps://example.com/autonomous-ships",
+            "Query: maritime ISR\nhttps://example.com/maritime-isr",
+        ]
+        mock_fetch.side_effect = [
+            "URL: https://example.com/autonomous-ships\nAutonomous ships analysis",
+            "URL: https://example.com/maritime-isr\nMaritime ISR analysis",
+        ]
+
+        mock_api = MagicMock()
+        MockProjectAPI.return_value = mock_api
+        mock_api.ensure_collection.return_value = {"id": "col-1"}
+
+        result = deep_research(
+            question="autonomous ships and maritime ISR",
+            breadth=2,
+            fetch_limit=2,
+            project_id="proj-1",
+        )
+
+        assert "# Deep Research Report" in result
+        assert "Question: autonomous ships and maritime ISR" in result
+        assert "https://example.com/autonomous-ships" in result
+        assert "https://example.com/maritime-isr" in result
+        mock_api.create_document.assert_called_once()
+
+    def test_empty_question_raises(self):
+        with pytest.raises(ValueError, match="question is required"):
+            deep_research(question="")

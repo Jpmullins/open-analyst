@@ -13,7 +13,7 @@ export async function loader() {
 
   // Validate the persisted model against LiteLLM.
   // If empty or no longer available, default to first available and persist.
-  const resolvedModel = await resolveModel(settings.model);
+  const resolvedModel = await resolveModel(settings.model, { requireToolSupport: true });
   if (resolvedModel !== settings.model) {
     await upsertSettings({ model: resolvedModel });
   }

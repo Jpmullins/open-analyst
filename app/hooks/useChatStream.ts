@@ -10,6 +10,7 @@ interface SendMessageOpts {
   messages?: Array<{ role: string; content: string }>;
   collectionId?: string;
   deepResearch?: boolean;
+  pinnedMcpServerIds?: string[];
   skipUserMessage?: boolean;
 }
 
@@ -53,6 +54,7 @@ export function useChatStream(): UseChatStreamReturn {
           messages: opts.messages || [],
           collectionId: opts.collectionId,
           deepResearch: Boolean(opts.deepResearch),
+          pinnedMcpServerIds: opts.pinnedMcpServerIds || [],
           skipUserMessage: Boolean(opts.skipUserMessage),
         }),
         signal: controller.signal,

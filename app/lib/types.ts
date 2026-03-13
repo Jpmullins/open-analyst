@@ -429,7 +429,8 @@ export interface Credential {
 export interface McpServerConfig {
   id: string;
   name: string;
-  type: 'stdio' | 'sse';
+  alias?: string;
+  type: 'stdio' | 'sse' | 'http';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -440,11 +441,14 @@ export interface McpServerConfig {
 
 export interface McpPreset {
   name: string;
-  type: 'stdio' | 'sse';
-  command: string;
-  args: string[];
+  alias?: string;
+  type: 'stdio' | 'sse' | 'http';
+  command?: string;
+  args?: string[];
   requiresEnv: string[];
   env: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface HeadlessConfig {

@@ -1,6 +1,9 @@
 ---
 name: content-extraction
 description: Extracts content ideas from long-form content and organizes them into detailed, platform-specific tables. Produces ready-to-execute briefs with titles, hooks, descriptions, and key points for newsletters, social posts, and more.
+tools:
+  - read_file
+  - write_file
 ---
 
 # Content Extraction Skill
@@ -21,7 +24,7 @@ Use this skill when:
 
 ### Step 1: Clarify Platform Targets
 
-Ask the user which platforms they want content for:
+Ask the user in normal chat which platforms they want content for before drafting outputs when the target platforms are still ambiguous:
 
 ```
 Which platforms do you want content ideas for? (Select all that apply)

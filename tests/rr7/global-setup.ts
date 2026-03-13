@@ -16,18 +16,29 @@ export async function setup() {
 
   const url = container.getConnectionUri();
 
-  // Apply the drizzle migration
-  const migrationPath = path.resolve(__dirname, "../../drizzle/0000_salty_vengeance.sql");
-  const migrationSql = fs.readFileSync(migrationPath, "utf-8");
-  const statements = migrationSql
-    .split("--> statement-breakpoint")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Apply the full Drizzle migration journal so route tests match the app schema.
+  const journalPath = path.resolve(__dirname, "../../drizzle/meta/_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf-8")) as {
+    entries?: Array<{ tag?: string }>;
+  };
 
   const client = new pg.Client({ connectionString: url });
   await client.connect();
-  for (const stmt of statements) {
-    await client.query(stmt);
+  for (const entry of journal.entries ?? []) {
+    const tag = String(entry.tag || "").trim();
+    if (!tag) {
+      continue;
+    }
+    const migrationPath = path.resolve(__dirname, `../../drizzle/${tag}.sql`);
+    const migrationSql = fs.readFileSync(migrationPath, "utf-8");
+    const statements = migrationSql
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    for (const stmt of statements) {
+      await client.query(stmt);
+    }
   }
   await client.end();
 

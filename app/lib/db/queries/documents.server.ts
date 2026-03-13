@@ -6,6 +6,12 @@ import {
   type Collection,
   type Document,
 } from "../schema";
+import {
+  buildKnowledgeEmbeddingText,
+  cosineSimilarity,
+  embedKnowledgeTexts,
+  isKnowledgeEmbeddingConfigured,
+} from "~/lib/knowledge-embedding.server";
 
 // --- Collections ---
 
@@ -31,6 +37,23 @@ export async function createCollection(
       description: String(input.description || "").trim(),
     })
     .returning();
+  return collection;
+}
+
+export async function getCollection(
+  projectId: string,
+  collectionId: string
+): Promise<Collection | undefined> {
+  const [collection] = await db
+    .select()
+    .from(collections)
+    .where(
+      and(
+        eq(collections.projectId, projectId),
+        eq(collections.id, collectionId)
+      )
+    )
+    .limit(1);
   return collection;
 }
 
@@ -127,6 +150,23 @@ export async function getDocument(
   return doc;
 }
 
+export async function getDocumentBySourceUri(
+  projectId: string,
+  sourceUri: string
+): Promise<Document | undefined> {
+  const trimmed = String(sourceUri || "").trim();
+  if (!trimmed) return undefined;
+
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.sourceUri, trimmed))
+    )
+    .limit(1);
+  return doc;
+}
+
 export async function createDocument(
   projectId: string,
   input: {
@@ -155,6 +195,92 @@ export async function createDocument(
           : {},
     })
     .returning();
+  return doc;
+}
+
+export async function updateDocument(
+  projectId: string,
+  documentId: string,
+  input: {
+    collectionId?: string | null;
+    title?: string;
+    sourceType?: string;
+    sourceUri?: string;
+    storageUri?: string | null;
+    content?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<Document> {
+  const [doc] = await db
+    .update(documents)
+    .set({
+      collectionId:
+        input.collectionId !== undefined ? input.collectionId || null : undefined,
+      title:
+        input.title !== undefined
+          ? String(input.title || "Untitled Source").trim()
+          : undefined,
+      sourceType:
+        input.sourceType !== undefined
+          ? String(input.sourceType || "manual")
+          : undefined,
+      sourceUri:
+        input.sourceUri !== undefined ? String(input.sourceUri || "") : undefined,
+      storageUri:
+        input.storageUri !== undefined ? input.storageUri || null : undefined,
+      content:
+        input.content !== undefined ? String(input.content || "") : undefined,
+      metadata:
+        input.metadata && typeof input.metadata === "object"
+          ? input.metadata
+          : input.metadata === undefined
+            ? undefined
+            : {},
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
+  return doc;
+}
+
+export async function updateDocumentMetadata(
+  projectId: string,
+  documentId: string,
+  metadata: Record<string, unknown>
+): Promise<Document> {
+  const [doc] = await db
+    .update(documents)
+    .set({
+      metadata,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
+  return doc;
+}
+
+export async function updateDocumentEmbedding(
+  projectId: string,
+  documentId: string,
+  embedding: number[] | null
+): Promise<Document> {
+  const [doc] = await db
+    .update(documents)
+    .set({
+      embedding,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
 
@@ -241,6 +367,19 @@ export async function queryDocuments(
   const limit = Math.min(20, Math.max(1, Number(options.limit || 8)));
   const docs = await listDocuments(projectId, options.collectionId);
   const variants = buildQueryVariants(query);
+  const semanticQueryText = buildKnowledgeEmbeddingText({
+    title: query,
+    content: query,
+  });
+  let queryEmbedding: number[] | null = null;
+  if (semanticQueryText && isKnowledgeEmbeddingConfigured()) {
+    try {
+      const [embedding] = await embedKnowledgeTexts([semanticQueryText]);
+      queryEmbedding = embedding || null;
+    } catch {
+      queryEmbedding = null;
+    }
+  }
 
   // Build doc stats
   const df = new Map<string, number>();
@@ -284,6 +423,23 @@ export async function queryDocuments(
       existing.score = Math.max(existing.score, score);
       existing.snippetTokens = queryTokens;
       aggregated.set(entry.doc.id, existing);
+    }
+  }
+
+  if (queryEmbedding) {
+    for (const doc of docs) {
+      const embedding = Array.isArray(doc.embedding) ? doc.embedding : null;
+      if (!embedding?.length) continue;
+      const semanticScore = cosineSimilarity(queryEmbedding, embedding);
+      if (semanticScore <= 0) continue;
+
+      const existing = aggregated.get(doc.id) || {
+        doc,
+        score: 0,
+        snippetTokens: tokenizeQuery(query),
+      };
+      existing.score = Math.max(existing.score, semanticScore * 8);
+      aggregated.set(doc.id, existing);
     }
   }
 

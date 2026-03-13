@@ -35,6 +35,16 @@ export const projects = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description").default(""),
     datastores: jsonb("datastores").default([]),
+    workspaceSlug: varchar("workspace_slug", { length: 255 }).notNull().default(""),
+    workspaceLocalRoot: text("workspace_local_root"),
+    artifactBackend: varchar("artifact_backend", { length: 16 })
+      .notNull()
+      .default("env"),
+    artifactLocalRoot: text("artifact_local_root"),
+    artifactS3Bucket: text("artifact_s3_bucket"),
+    artifactS3Region: varchar("artifact_s3_region", { length: 255 }),
+    artifactS3Endpoint: text("artifact_s3_endpoint"),
+    artifactS3Prefix: text("artifact_s3_prefix"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

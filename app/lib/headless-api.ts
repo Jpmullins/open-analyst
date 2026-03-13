@@ -20,8 +20,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export async function headlessGetModels(): Promise<Array<{ id: string; name: string }>> {
-  const result = await requestJson<{ models?: Array<{ id: string; name: string }> }>('/models');
+export async function headlessGetModels(): Promise<Array<{ id: string; name: string; supportsTools: boolean }>> {
+  const result = await requestJson<{ models?: Array<{ id: string; name: string; supportsTools?: boolean }> }>('/models');
   return Array.isArray(result.models) ? result.models : [];
 }
 
@@ -196,6 +196,14 @@ export interface HeadlessProject {
   id: string;
   name: string;
   description: string;
+  workspaceSlug?: string | null;
+  workspaceLocalRoot?: string | null;
+  artifactBackend?: string | null;
+  artifactLocalRoot?: string | null;
+  artifactS3Bucket?: string | null;
+  artifactS3Region?: string | null;
+  artifactS3Endpoint?: string | null;
+  artifactS3Prefix?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -264,11 +272,20 @@ export async function headlessGetProjects(): Promise<{
 
 export async function headlessCreateProject(
   name: string,
-  description = ''
+  description = '',
+  storage?: {
+    workspaceLocalRoot?: string | null;
+    artifactBackend?: string | null;
+    artifactLocalRoot?: string | null;
+    artifactS3Bucket?: string | null;
+    artifactS3Region?: string | null;
+    artifactS3Endpoint?: string | null;
+    artifactS3Prefix?: string | null;
+  }
 ): Promise<HeadlessProject> {
   const response = await requestJson<{ project: HeadlessProject }>('/projects', {
     method: 'POST',
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({ name, description, ...storage }),
   });
   return response.project;
 }
@@ -282,7 +299,17 @@ export async function headlessSetActiveProject(projectId: string): Promise<void>
 
 export async function headlessUpdateProject(
   projectId: string,
-  updates: { name?: string; description?: string }
+  updates: {
+    name?: string;
+    description?: string;
+    workspaceLocalRoot?: string | null;
+    artifactBackend?: string | null;
+    artifactLocalRoot?: string | null;
+    artifactS3Bucket?: string | null;
+    artifactS3Region?: string | null;
+    artifactS3Endpoint?: string | null;
+    artifactS3Prefix?: string | null;
+  }
 ): Promise<HeadlessProject> {
   const response = await requestJson<{ project: HeadlessProject }>(
     `/projects/${encodeURIComponent(projectId)}`,
@@ -467,7 +494,8 @@ export interface HeadlessCredential {
 export interface HeadlessMcpServer {
   id: string;
   name: string;
-  type: 'stdio' | 'sse';
+  alias?: string;
+  type: 'stdio' | 'sse' | 'http';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -561,19 +589,51 @@ export async function headlessDeleteMcpServer(serverId: string): Promise<void> {
 }
 
 export async function headlessGetMcpServerStatus(): Promise<
-  Array<{ id: string; name: string; connected: boolean; toolCount: number }>
+  Array<{
+    id: string;
+    name: string;
+    alias?: string;
+    enabled: boolean;
+    connected: boolean;
+    toolCount: number;
+    error?: string;
+    health?: Record<string, unknown>;
+  }>
 > {
   const response = await requestJson<{
-    statuses?: Array<{ id: string; name: string; connected: boolean; toolCount: number }>;
+    statuses?: Array<{
+      id: string;
+      name: string;
+      alias?: string;
+      enabled: boolean;
+      connected: boolean;
+      toolCount: number;
+      error?: string;
+      health?: Record<string, unknown>;
+    }>;
   }>('/mcp/status');
   return Array.isArray(response.statuses) ? response.statuses : [];
 }
 
 export async function headlessGetMcpTools(): Promise<
-  Array<{ serverId: string; name: string; description: string }>
+  Array<{
+    serverId: string;
+    serverName: string;
+    serverAlias?: string;
+    name: string;
+    description: string;
+    inputSchema?: Record<string, unknown>;
+  }>
 > {
   const response = await requestJson<{
-    tools?: Array<{ serverId: string; name: string; description: string }>;
+    tools?: Array<{
+      serverId: string;
+      serverName: string;
+      serverAlias?: string;
+      name: string;
+      description: string;
+      inputSchema?: Record<string, unknown>;
+    }>;
   }>('/mcp/tools');
   return Array.isArray(response.tools) ? response.tools : [];
 }

@@ -86,6 +86,17 @@ describe("StrandsProvider", () => {
             scripts: ["scripts/process_pdf.py"],
           },
         ],
+        mcpServers: [
+          {
+            id: "analyst-mcp",
+            name: "Analyst MCP",
+            alias: "analyst",
+            type: "http",
+            url: "http://localhost:8000/mcp",
+            headers: { "x-api-key": "test" },
+            enabled: true,
+          },
+        ],
       }
     );
 
@@ -127,9 +138,25 @@ describe("StrandsProvider", () => {
       }),
     ]);
     expect(body.active_tool_names).toEqual(["read_file", "web_search"]);
+    expect(body.mcp_servers).toEqual([
+      {
+        id: "analyst-mcp",
+        name: "Analyst MCP",
+        alias: "analyst",
+        type: "http",
+        command: "",
+        args: [],
+        env: {},
+        url: "http://localhost:8000/mcp",
+        headers: { "x-api-key": "test" },
+      },
+    ]);
     expect(body.model_id).toBe("bedrock-claude-opus-4.6");
     expect(body.litellm_base_url).toBe("http://test-gateway:4000");
     expect(body.litellm_api_key).toBe("test-key-123");
+    expect(body).not.toHaveProperty("session_s3_bucket");
+    expect(body).not.toHaveProperty("session_s3_region");
+    expect(body).not.toHaveProperty("session_s3_prefix");
   });
 
   it("handles HTTP errors with clear messages", async () => {

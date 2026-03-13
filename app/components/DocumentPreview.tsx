@@ -25,17 +25,26 @@ export function DocumentPreview({
   const isPdf =
     mimeType.toLowerCase().includes("pdf") ||
     document.title.toLowerCase().endsWith(".pdf");
-  const artifactUrl = `/api/projects/${encodeURIComponent(
-    projectId
-  )}/documents/${encodeURIComponent(document.id)}/artifact`;
+  const metadata =
+    document.metadata && typeof document.metadata === "object"
+      ? (document.metadata as Record<string, unknown>)
+      : {};
+  const artifactUrl =
+    getMetadataString(metadata, "artifactUrl") ||
+    `/api/projects/${encodeURIComponent(
+      projectId
+    )}/documents/${encodeURIComponent(document.id)}/artifact`;
+  const downloadUrl =
+    getMetadataString(metadata, "downloadUrl") || `${artifactUrl}?download=1`;
   const previewText =
     typeof maxTextLength === "number" && maxTextLength > 0
       ? (document.content || "").slice(0, maxTextLength)
       : document.content || "";
+  const hasArtifact = Boolean(artifactUrl);
 
   return (
     <div className={`space-y-3 ${className}`.trim()}>
-      {isPdf && document.storageUri && (
+      {isPdf && hasArtifact && (
         <div className="rounded-lg border border-border overflow-hidden bg-background-secondary">
           <object
             data={artifactUrl}
@@ -45,7 +54,7 @@ export function DocumentPreview({
             <div className="p-4 text-sm text-text-secondary">
               PDF preview unavailable.{" "}
               <a
-                href={`${artifactUrl}?download=1`}
+                href={downloadUrl}
                 className="text-accent underline"
                 target="_blank"
                 rel="noreferrer"

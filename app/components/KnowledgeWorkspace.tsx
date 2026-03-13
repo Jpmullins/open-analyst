@@ -10,6 +10,7 @@ import type {
   HeadlessDocument,
   HeadlessRagResult,
 } from "~/lib/headless-api";
+import type { ArtifactMeta } from "~/lib/types";
 import {
   Database,
   Plus,
@@ -18,13 +19,16 @@ import {
   Link2,
   Upload,
 } from "lucide-react";
+import { useAppStore } from "~/lib/store";
 import { DocumentPreview } from "./DocumentPreview";
 import { AlertDialog } from "./AlertDialog";
+import { FileViewerPanel } from "./FileViewerPanel";
 import { formatRelativeTime } from "~/lib/format";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
   const projectId = params.projectId!;
+  const { openFileViewer, fileViewerArtifact, closeFileViewer } = useAppStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Active collection from URL
@@ -166,6 +170,31 @@ export function KnowledgeWorkspace() {
 
   const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
 
+  const buildArtifactMeta = (doc: HeadlessDocument): ArtifactMeta => {
+    const metadata =
+      doc.metadata && typeof doc.metadata === "object"
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const artifactUrl =
+      typeof metadata.artifactUrl === "string" && metadata.artifactUrl
+        ? metadata.artifactUrl
+        : `/api/projects/${projectId}/documents/${doc.id}/artifact`;
+    const downloadUrl =
+      typeof metadata.downloadUrl === "string" && metadata.downloadUrl
+        ? metadata.downloadUrl
+        : `${artifactUrl}?download=1`;
+
+    return {
+      documentId: doc.id,
+      filename: (metadata.filename as string) || doc.title,
+      mimeType: (metadata.mimeType as string) || "application/octet-stream",
+      size: (metadata.bytes as number) || 0,
+      artifactUrl,
+      downloadUrl,
+      title: doc.title,
+    };
+  };
+
   // Collections display: show first 10 or all
   const COLLECTION_LIMIT = 10;
   const visibleCollections = showAllCollections
@@ -184,8 +213,9 @@ export function KnowledgeWorkspace() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <div className="flex-1 flex min-h-0">
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-5xl mx-auto space-y-8">
         {error && (
           <div className="text-sm text-error bg-error/10 rounded-lg px-4 py-2">
             {error}
@@ -339,11 +369,25 @@ export function KnowledgeWorkspace() {
                   filteredDocuments.map((doc) => (
                     <tr
                       key={doc.id}
-                      onClick={() =>
+                      onClick={() => {
+                        const metadata =
+                          doc.metadata && typeof doc.metadata === "object"
+                            ? (doc.metadata as Record<string, unknown>)
+                            : {};
+                        const hasArtifact =
+                          (typeof metadata.artifactUrl === "string" &&
+                            metadata.artifactUrl.length > 0) ||
+                          Boolean(doc.storageUri);
+                        if (hasArtifact) {
+                          setSelectedDocumentId(null);
+                          openFileViewer(buildArtifactMeta(doc));
+                          return;
+                        }
+                        closeFileViewer();
                         setSelectedDocumentId(
                           selectedDocumentId === doc.id ? null : doc.id
-                        )
-                      }
+                        );
+                      }}
                       className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
                         selectedDocumentId === doc.id
                           ? "bg-accent-muted"
@@ -450,14 +494,16 @@ export function KnowledgeWorkspace() {
         </section>
       </div>
 
-      <AlertDialog
-        open={showCreateDialog}
-        title="Add Collection"
-        inputLabel="Collection name"
-        confirmLabel="Create"
-        onConfirm={handleCreateCollection}
-        onCancel={() => setShowCreateDialog(false)}
-      />
+        <AlertDialog
+          open={showCreateDialog}
+          title="Add Collection"
+          inputLabel="Collection name"
+          confirmLabel="Create"
+          onConfirm={handleCreateCollection}
+          onCancel={() => setShowCreateDialog(false)}
+        />
+      </div>
+      {fileViewerArtifact && <FileViewerPanel />}
     </div>
   );
 }

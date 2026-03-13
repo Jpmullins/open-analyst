@@ -1,5 +1,5 @@
-import { getMcpTools } from "~/lib/mcp.server";
+import { getMcpTools } from '~/lib/mcp.server';
 
 export async function loader() {
-  return Response.json({ tools: getMcpTools() });
+  return Response.json({ tools: await getMcpTools() });
 }

@@ -13,14 +13,16 @@ beforeAll(async () => {
   const project = await createProject({ name: "Artifact Capture Test" });
   projectId = project.id;
 
-  const workspace = getProjectWorkspace(projectId);
+  const workspace = await getProjectWorkspace(projectId);
   workspaceFile = path.join(workspace, "outputs", "generated-note.txt");
   fs.mkdirSync(path.dirname(workspaceFile), { recursive: true });
   fs.writeFileSync(workspaceFile, "generated artifact");
 });
 
 afterAll(() => {
-  fs.rmSync(path.dirname(workspaceFile), { recursive: true, force: true });
+  if (workspaceFile) {
+    fs.rmSync(path.dirname(workspaceFile), { recursive: true, force: true });
+  }
 });
 
 describe("POST /api/projects/:projectId/artifacts/capture", () => {

@@ -19,6 +19,7 @@ import {
   getBrowserConfig,
   saveBrowserConfig,
 } from '~/lib/browser-config';
+import { supportsToolCalling } from '~/lib/model-capabilities';
 import {
   headlessGetCredentials,
   headlessGetLogs,
@@ -79,7 +80,8 @@ type Credential = {
 type MCPServerConfig = {
   id: string;
   name: string;
-  type: 'stdio' | 'sse';
+  alias?: string;
+  type: 'stdio' | 'sse' | 'http';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -154,7 +156,7 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
   const [model, setModel] = useState(currentModel || config.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -165,9 +167,9 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
         setModels(list);
         if (list.length > 0) {
           // Auto-select first model if none set or if current model no longer exists
-          const currentValid = model && list.some((m) => m.id === model);
+          const currentValid = model && list.some((m) => m.id === model && m.supportsTools);
           if (!currentValid) {
-            setModel(list[0].id);
+            setModel((list.find((m) => m.supportsTools) || list[0]).id);
           }
         }
       })
@@ -179,6 +181,10 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
     const resolvedModel = (useCustomModel ? customModel : model).trim();
     if (!resolvedModel) {
       setError('Model is required.');
+      return;
+    }
+    if (!supportsToolCalling(resolvedModel)) {
+      setError('This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.');
       return;
     }
     const next: AppConfig = {
@@ -200,7 +206,7 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
       {error && <Banner tone="error" text={error} />}
       {success && <Banner tone="success" text={success} />}
       <p className="text-sm text-text-secondary">
-        Models are served through the LiteLLM gateway. API credentials are configured via server environment variables.
+        Models are served through the LiteLLM gateway. Open Analyst requires a model that supports tool calling.
       </p>
       <label className="text-sm">Model
         <select
@@ -210,7 +216,11 @@ function APISettingsTab({ currentModel }: { currentModel?: string }) {
           disabled={loading}
         >
           {loading && <option>Loading models...</option>}
-          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.supportsTools ? m.name : `${m.name} (no tool support)`}
+            </option>
+          ))}
         </select>
       </label>
       <label className="text-sm">Custom Model (optional)
@@ -356,8 +366,27 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
 
 function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: any[]; initialPresets?: Record<string, any> }) {
   const [servers, setServers] = useState<MCPServerConfig[]>(initialServers as MCPServerConfig[] || []);
-  const [statuses, setStatuses] = useState<Array<{ id: string; name: string; connected: boolean; toolCount: number }>>([]);
-  const [tools, setTools] = useState<Array<{ serverId: string; name: string; description: string }>>([]);
+  const [statuses, setStatuses] = useState<
+    Array<{
+      id: string;
+      name: string;
+      alias?: string;
+      enabled: boolean;
+      connected: boolean;
+      toolCount: number;
+      error?: string;
+      health?: Record<string, any>;
+    }>
+  >([]);
+  const [tools, setTools] = useState<
+    Array<{
+      serverId: string;
+      serverName: string;
+      serverAlias?: string;
+      name: string;
+      description: string;
+    }>
+  >([]);
   const [presets, setPresets] = useState<Record<string, any>>(initialPresets || {});
   const [error, setError] = useState('');
 
@@ -379,9 +408,23 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
     }
   };
 
+  const refreshStatus = async () => {
+    try {
+      const [st, t] = await Promise.all([
+        headlessGetMcpServerStatus(),
+        headlessGetMcpTools(),
+      ]);
+      setStatuses(st);
+      setTools(t);
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   useEffect(() => {
-    if (!initialServers) void loadAll();
-    const timer = setInterval(() => void loadAll(), 4000);
+    void loadAll();
+    const timer = setInterval(() => void refreshStatus(), 15000);
     return () => clearInterval(timer);
   }, []);
 
@@ -392,6 +435,7 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
       await headlessSaveMcpServer({
       id: `mcp-${key}-${Date.now()}`,
       name: preset.name || key,
+      alias: preset.alias,
       type: preset.type || 'stdio',
       command: preset.command,
       args: Array.isArray(preset.args) ? preset.args : [],
@@ -444,7 +488,13 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
             >
               <div>
                 <div className="text-sm font-medium">{server.name}</div>
-                <div className="text-xs text-text-muted">{server.type} • {status?.connected ? 'connected' : 'disabled'} • {count} tools</div>
+                <div className="text-xs text-text-muted">
+                  {server.alias ? `${server.alias} • ` : ''}
+                  {server.type} • {status?.connected ? 'connected' : server.enabled ? 'error' : 'disabled'} • {count} tools
+                </div>
+                {status?.error && (
+                  <div className="text-xs text-error mt-1">{status.error}</div>
+                )}
               </div>
               <div className="flex gap-2">
                 <button className="btn btn-secondary" onClick={() => toggleServer(server)}>{server.enabled ? 'Disable' : 'Enable'}</button>

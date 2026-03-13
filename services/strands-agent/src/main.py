@@ -14,7 +14,7 @@ from strands.hooks.events import (
 )
 from strands.hooks.registry import HookProvider, HookRegistry
 
-from agent_factory import create_agent, _build_prompt
+from agent_factory import create_agent, cleanup_created_agent, _build_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,27 @@ def _extract_tool_result_text(result: dict | None) -> str:
         elif "image" in part:
             lines.append("[image]")
     return "\n".join(lines).strip()
+
+
+def _extract_tool_result_data(result: dict | None):
+    if not isinstance(result, dict):
+        return None
+    parts = result.get("content", [])
+    if not isinstance(parts, list):
+        return None
+
+    json_parts: list[object] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if "json" in part:
+            json_parts.append(part["json"])
+        elif "document" in part:
+            json_parts.append(part["document"])
+
+    if not json_parts:
+        return None
+    return json_parts[0] if len(json_parts) == 1 else json_parts
 
 
 class StreamingHookBridge(HookProvider):
@@ -78,7 +99,9 @@ class StreamingHookBridge(HookProvider):
 
     def _after_tool_call(self, event: AfterToolCallEvent) -> None:
         output = _extract_tool_result_text(event.result)
-        status = "error" if event.exception or event.result.get("status") == "error" else "completed"
+        payload = _extract_tool_result_data(event.result)
+        result_status = event.result.get("status") if isinstance(event.result, dict) else None
+        status = "error" if event.exception or result_status == "error" else "completed"
         if event.exception and not output:
             output = str(event.exception)
         self._emit(
@@ -87,6 +110,7 @@ class StreamingHookBridge(HookProvider):
                 "toolName": event.tool_use.get("name", ""),
                 "toolUseId": event.tool_use.get("toolUseId", ""),
                 "toolOutput": output,
+                "toolResultData": payload,
                 "toolStatus": status,
             }
         )
@@ -126,7 +150,8 @@ def _invoke_sync(payload: dict) -> dict:
         if not isinstance(hooks, list):
             hooks = []
         payload = {**payload, "_hooks": hooks}
-        agent = create_agent(payload)
+        created = create_agent(payload)
+        agent = created.agent
         prompt = _build_prompt(payload.get("messages", []))
         result = agent(prompt)
         return {
@@ -139,6 +164,10 @@ def _invoke_sync(payload: dict) -> dict:
             "text": f"Error: {e}",
             "traces": [],
         }
+    finally:
+        created_ref = locals().get("created")
+        if created_ref is not None:
+            cleanup_created_agent(created_ref)
 
 
 async def _drain_events(queue: asyncio.Queue[dict[str, Any]]) -> AsyncIterator[dict[str, Any]]:
@@ -154,7 +183,9 @@ async def _invoke_stream(payload: dict):
         hooks = []
     hooks = [*hooks, StreamingHookBridge(queue)]
     payload = {**payload, "_hooks": hooks}
-    agent = create_agent(payload)
+    created = None
+    created = create_agent(payload)
+    agent = created.agent
     prompt = _build_prompt(payload.get("messages", []))
     async_task_id = app.add_async_task(
         "strands_stream",
@@ -203,6 +234,8 @@ async def _invoke_stream(payload: dict):
         }
         yield {"type": "error", "error": str(exc)}
     finally:
+        if created is not None:
+            cleanup_created_agent(created)
         app.complete_async_task(async_task_id)
 
 

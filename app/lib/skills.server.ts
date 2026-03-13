@@ -18,7 +18,7 @@ function defaultSkillRecords(): SkillConfig[] {
     {
       id: 'builtin-web-research',
       name: 'Web Research',
-      description: 'Web search/fetch/arXiv/HF capture workflow',
+      description: 'Web search/fetch and HF capture workflow',
       type: 'builtin',
       enabled: true,
       config: {
@@ -26,7 +26,6 @@ function defaultSkillRecords(): SkillConfig[] {
           'deep_research',
           'web_search',
           'web_fetch',
-          'arxiv_search',
           'hf_daily_papers',
           'hf_paper',
         ],
@@ -83,12 +82,11 @@ function builtinRuntimeSkills(): Skill[] {
         'deep_research',
         'web_search',
         'web_fetch',
-        'arxiv_search',
         'hf_daily_papers',
         'hf_paper',
       ],
       instructions:
-        'Use this skill when the task requires external research, source discovery, web retrieval, arXiv lookup, or Hugging Face paper capture. Prefer cited, source-grounded answers.',
+        'Use this skill when the task requires external research, source discovery, web retrieval, or Hugging Face paper capture. Prefer cited, source-grounded answers.',
       source: { kind: 'builtin' },
       config: {},
     },

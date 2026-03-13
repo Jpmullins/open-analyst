@@ -1,4 +1,6 @@
 import { getSettings } from '~/lib/db/queries/settings.server';
+import { getProject } from '~/lib/db/queries/projects.server';
+import { ensureTaskCollection } from '~/lib/task-collection.server';
 import {
   createTask,
   getTask,
@@ -10,6 +12,13 @@ import {
 import { createAgentProvider } from '~/lib/agent/index.server';
 import { getProjectWorkspace } from '~/lib/filesystem.server';
 import { resolveModel } from '~/lib/litellm.server';
+import {
+  applyProjectMcpContext,
+  filterLocalToolsForSelectedMcpServers,
+  getSelectedMcpServers,
+} from '~/lib/mcp.server';
+import { buildToolCatalogText, isToolCatalogQuestion } from '~/lib/tool-catalog.server';
+import { syncAnalystCollectionToTaskCollection } from '~/lib/analyst-mcp-sync.server';
 import { applyChatStreamEvent, extractFinalAssistantText } from '~/lib/chat-stream';
 import type { ContentBlock } from '~/lib/types';
 import {
@@ -41,7 +50,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   // Validate model against LiteLLM before sending to agent
-  const model = await resolveModel(settings.model);
+  const model = await resolveModel(settings.model, { requireToolSupport: true });
 
   // Build a minimal HeadlessConfig for the agent provider
   const cfg: HeadlessConfig = {
@@ -59,9 +68,12 @@ export async function action({ request }: Route.ActionArgs) {
   };
 
   const provider = createAgentProvider(cfg);
-  const workingDir = getProjectWorkspace(projectId);
+  const workingDir = await getProjectWorkspace(projectId);
   const activeSkills = listActiveSkills();
   const prompt = String(body.prompt || '').trim();
+  const pinnedMcpServerIds = Array.isArray(body.pinnedMcpServerIds)
+    ? body.pinnedMcpServerIds.map((item: unknown) => String(item)).filter(Boolean)
+    : [];
   const requestedChatMessages = requestMessages.length
     ? requestMessages
     : prompt
@@ -71,6 +83,23 @@ export async function action({ request }: Route.ActionArgs) {
     prompt,
     messages: requestedChatMessages,
   });
+  const selectedMcpServers = await getSelectedMcpServers({
+    prompt,
+    messages: requestedChatMessages,
+    pinnedServerIds: pinnedMcpServerIds,
+  });
+  const matchedToolNames = getActiveSkillToolNames(matchedSkills);
+  const fallbackToolNames = getActiveSkillToolNames(activeSkills);
+  const activeToolNames = filterLocalToolsForSelectedMcpServers(
+    matchedToolNames.length > 0 ? matchedToolNames : fallbackToolNames,
+    selectedMcpServers
+  );
+  const project = await getProject(projectId);
+  if (!project) {
+    return Response.json({ error: `Project not found: ${projectId}` }, { status: 404 });
+  }
+  const apiBaseUrl = new URL(request.url).origin;
+  const runtimeMcpServers = applyProjectMcpContext(selectedMcpServers, project, apiBaseUrl);
 
   // Reuse existing task or create new one
   let task;
@@ -87,6 +116,13 @@ export async function action({ request }: Route.ActionArgs) {
       status: 'running',
     });
   }
+
+  let taskCollection = await ensureTaskCollection(
+    task,
+    projectId,
+    String(body.collectionId || '').trim() || undefined,
+    String(body.collectionName || '').trim() || undefined
+  );
 
   const persistedMessages = requestedChatMessages.length === 0 ? await listMessages(task.id) : [];
   const chatMessages = requestedChatMessages.length
@@ -131,18 +167,54 @@ export async function action({ request }: Route.ActionArgs) {
       send('task_created', { taskId: task.id });
 
       try {
+        if (isToolCatalogQuestion({ prompt, messages: chatMessages })) {
+          const text = await buildToolCatalogText({
+            activeToolNames,
+          mcpServers: runtimeMcpServers,
+          });
+          send('text_delta', { text });
+          send('agent_end', {});
+          send('done', { taskId: task.id });
+          await appendTaskEvent(task.id, 'text_delta', { text, directResponse: true });
+          await appendTaskEvent(task.id, 'agent_end', { directResponse: true });
+          await createMessage(task.id, {
+            role: 'assistant',
+            content: [{ type: 'text', text }],
+          });
+          await updateTask(task.id, {
+            status: 'completed',
+            planSnapshot: {
+              ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+                ? (task.planSnapshot as Record<string, unknown>)
+                : {}),
+              summary: [
+                `Task: ${task.title || 'Untitled task'}`,
+                prompt ? `Latest user request: ${prompt}` : '',
+                matchedSkills.length
+                  ? `Skills used: ${matchedSkills.map((skill) => skill.name).join(', ')}`
+                  : '',
+                `Latest answer: ${text.slice(0, 1200)}`,
+              ]
+                .filter(Boolean)
+                .join('\n'),
+            },
+          });
+          return;
+        }
+
         let contentBlocks: ContentBlock[] = [];
         for await (const event of provider.stream(chatMessages, {
           projectId,
           workingDir,
           sessionId: task.id,
           taskSummary: previousSummary,
-          collectionId: String(body.collectionId || '').trim() || undefined,
-          collectionName: String(body.collectionName || '').trim() || 'Task Sources',
+          collectionId: taskCollection.id,
+          collectionName: taskCollection.name,
           deepResearch: body.deepResearch === true,
           skills: matchedSkills,
           skillCatalog: getSkillCatalog(activeSkills),
-          activeToolNames: getActiveSkillToolNames(activeSkills),
+          activeToolNames,
+          mcpServers: runtimeMcpServers,
         })) {
           send(event.type, event);
           contentBlocks = applyChatStreamEvent(contentBlocks, event);
@@ -154,9 +226,45 @@ export async function action({ request }: Route.ActionArgs) {
             toolUseId: event.toolUseId,
             toolInput: event.toolInput,
             toolOutput: event.toolOutput,
+            toolResultData: event.toolResultData,
             toolStatus: event.toolStatus,
             error: event.error,
           });
+
+          if (event.type === 'tool_call_end' && event.toolStatus !== 'error' && event.toolName) {
+            const syncResult = await syncAnalystCollectionToTaskCollection({
+              projectId,
+              task,
+              collectionId: taskCollection.id,
+              collectionName: taskCollection.name,
+              toolName: event.toolName,
+              toolResultData: event.toolResultData,
+              toolOutput: event.toolOutput,
+              mcpServers: runtimeMcpServers,
+            });
+            if (syncResult) {
+              taskCollection = {
+                id: syncResult.collectionId,
+                name: syncResult.collectionName,
+              };
+              const syncText =
+                syncResult.mirrored > 0
+                  ? `Added ${syncResult.mirrored} collected article${syncResult.mirrored === 1 ? '' : 's'} to ${syncResult.collectionName}.`
+                  : `No collected articles were added to ${syncResult.collectionName}.`;
+              const syncEvent = {
+                type: 'status' as const,
+                status: 'running' as const,
+                phase: 'collection_sync',
+                text:
+                  syncResult.skipped.length > 0
+                    ? `${syncText} Skipped: ${syncResult.skipped.join('; ')}`
+                    : syncText,
+              };
+              send(syncEvent.type, syncEvent);
+              contentBlocks = applyChatStreamEvent(contentBlocks, syncEvent);
+              await appendTaskEvent(task.id, syncEvent.type, syncEvent);
+            }
+          }
         }
 
         const fullText = extractFinalAssistantText(contentBlocks);
@@ -170,12 +278,16 @@ export async function action({ request }: Route.ActionArgs) {
         await updateTask(task.id, {
           status: 'completed',
           planSnapshot: {
+            ...(task.planSnapshot && typeof task.planSnapshot === 'object'
+              ? (task.planSnapshot as Record<string, unknown>)
+              : {}),
             summary: [
               `Task: ${task.title || 'Untitled task'}`,
               prompt ? `Latest user request: ${prompt}` : '',
               matchedSkills.length
                 ? `Skills used: ${matchedSkills.map((skill) => skill.name).join(', ')}`
                 : '',
+              `Task collection: ${taskCollection.name}`,
               fullText ? `Latest answer: ${fullText.slice(0, 1200)}` : '',
             ]
               .filter(Boolean)

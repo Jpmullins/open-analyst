@@ -124,23 +124,6 @@ const TOOL_DEFS: Array<{
   {
     type: "function",
     function: {
-      name: "arxiv_search",
-      description:
-        "Search arXiv papers and capture results into the project collection",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          max_results: { type: "number" },
-          collectionName: { type: "string" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "hf_daily_papers",
       description:
         "Fetch Hugging Face daily papers for a date (YYYY-MM-DD) and capture them",
@@ -200,6 +183,55 @@ const TOOL_DEFS: Array<{
           collectionId: { type: "string" },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "collection_artifact_metadata",
+      description:
+        "List stored artifact metadata for the active collection or project, including storage URIs and artifact links.",
+      parameters: {
+        type: "object",
+        properties: {
+          collectionId: { type: "string" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "capture_artifact",
+      description:
+        "Capture a generated workspace file into the project store and artifact backend.",
+      parameters: {
+        type: "object",
+        properties: {
+          relativePath: { type: "string" },
+          title: { type: "string" },
+          collectionId: { type: "string" },
+          collectionName: { type: "string" },
+        },
+        required: ["relativePath"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_file",
+      description:
+        "Generate a binary or structured file by running Python code with an OUTPUT_PATH target",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          python_code: { type: "string" },
+        },
+        required: ["path", "python_code"],
       },
     },
   },

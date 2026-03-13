@@ -4,6 +4,8 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { env } from "./env.server";
 import { getConfigDir } from "./helpers.server";
 import type { ArtifactRecord } from "./types";
+import type { Project } from "./db/schema";
+import { resolveProjectArtifactConfig } from "./project-storage.server";
 
 const DEFAULT_ARTIFACT_PREFIX = "open-analyst-artifacts";
 
@@ -17,32 +19,11 @@ function sanitizeFilename(value: string): string {
   );
 }
 
-function getLocalArtifactRoot(): string {
-  if (env.ARTIFACT_LOCAL_DIR) return env.ARTIFACT_LOCAL_DIR;
-  return path.join(getConfigDir(), "captures");
-}
-
-function getArtifactBackend(): "local" | "s3" {
-  return env.ARTIFACT_STORAGE_BACKEND;
-}
-
-function getS3Client(): S3Client {
+function getS3Client(input: { region?: string; endpoint?: string }): S3Client {
   return new S3Client({
-    region: env.ARTIFACT_S3_REGION,
-    endpoint: env.ARTIFACT_S3_ENDPOINT || undefined,
+    region: input.region || env.ARTIFACT_S3_REGION,
+    endpoint: input.endpoint || env.ARTIFACT_S3_ENDPOINT || undefined,
   });
-}
-
-function getS3Bucket(): string {
-  if (!env.ARTIFACT_S3_BUCKET) {
-    throw new Error("ARTIFACT_S3_BUCKET is required when ARTIFACT_STORAGE_BACKEND=s3");
-  }
-  return env.ARTIFACT_S3_BUCKET;
-}
-
-function getS3Key(projectId: string, filename: string): string {
-  const prefix = (env.ARTIFACT_S3_PREFIX || DEFAULT_ARTIFACT_PREFIX).replace(/^\/+|\/+$/g, "");
-  return `${prefix}/${projectId}/${Date.now()}-${sanitizeFilename(filename)}`;
 }
 
 function parseS3Uri(uri: string): { bucket: string; key: string } {
@@ -76,21 +57,26 @@ async function streamToBuffer(value: unknown): Promise<Buffer> {
 }
 
 export async function storeArtifact(input: {
-  projectId: string;
+  project: Project;
   filename: string;
   mimeType: string;
   buffer: Buffer;
 }): Promise<ArtifactRecord> {
-  const backend = getArtifactBackend();
+  const backend = resolveProjectArtifactConfig(input.project);
   const filename = sanitizeFilename(input.filename);
 
-  if (backend === "s3") {
-    const bucket = getS3Bucket();
-    const key = getS3Key(input.projectId, filename);
-    const client = getS3Client();
+  if (backend.backend === "s3") {
+    if (!backend.bucket) {
+      throw new Error("Artifact S3 bucket is required for this project");
+    }
+    const key = `${backend.keyPrefix || DEFAULT_ARTIFACT_PREFIX}/${Date.now()}-${filename}`.replace(/^\/+|\/+$/g, "");
+    const client = getS3Client({
+      region: backend.region,
+      endpoint: backend.endpoint,
+    });
     await client.send(
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: backend.bucket,
         Key: key,
         Body: input.buffer,
         ContentType: input.mimeType || inferMimeType(filename),
@@ -98,14 +84,14 @@ export async function storeArtifact(input: {
     );
     return {
       backend: "s3",
-      storageUri: `s3://${bucket}/${key}`,
+      storageUri: `s3://${backend.bucket}/${key}`,
       filename,
       mimeType: input.mimeType || inferMimeType(filename),
       size: input.buffer.length,
     };
   }
 
-  const dir = path.join(getLocalArtifactRoot(), input.projectId);
+  const dir = backend.localArtifactDir || path.join(getConfigDir(), "captures", input.project.id);
   await fs.mkdir(dir, { recursive: true });
   const fullPath = path.join(dir, `${Date.now()}-${filename}`);
   await fs.writeFile(fullPath, input.buffer);
@@ -128,7 +114,7 @@ export async function readArtifact(input: {
 
   if (storageUri.startsWith("s3://")) {
     const { bucket, key } = parseS3Uri(storageUri);
-    const client = getS3Client();
+    const client = getS3Client({ region: env.ARTIFACT_S3_REGION, endpoint: env.ARTIFACT_S3_ENDPOINT });
     const result = await client.send(
       new GetObjectCommand({
         Bucket: bucket,

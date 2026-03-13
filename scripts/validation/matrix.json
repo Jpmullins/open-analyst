@@ -1,0 +1,620 @@
+{
+  "schemaVersion": 1,
+  "skills": {
+    "repo": [
+      {
+        "id": "repo-skill-arlis-bulletin",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts",
+          "tests/rr7/lib/skills.server.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-content-extraction",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-docx",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts",
+          "tests/rr7/components/DocxRenderer.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-pdf",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts",
+          "tests/e2e/knowledge.spec.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-pptx",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-schedule",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-skill-creator",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts"
+        ]
+      },
+      {
+        "id": "repo-skill-xlsx",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skill-manifest.server.test.ts",
+          "tests/rr7/components/XlsxRenderer.test.ts"
+        ]
+      }
+    ],
+    "runtime": [
+      {
+        "id": "builtin-web-research",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skills.server.test.ts",
+          "services/strands-agent/tests/test_web_tools.py",
+          "services/strands-agent/tests/test_research_tools.py"
+        ]
+      },
+      {
+        "id": "builtin-code-ops",
+        "coverage": "automated-local",
+        "tests": [
+          "tests/rr7/lib/skills.server.test.ts",
+          "services/strands-agent/tests/test_file_tools.py",
+          "services/strands-agent/tests/test_command_tools.py",
+          "services/strands-agent/tests/test_generate_tools.py"
+        ]
+      }
+    ]
+  },
+  "localTools": [
+    {
+      "name": "list_directory",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py",
+        "tests/rr7/integration/api-parity.test.ts"
+      ]
+    },
+    {
+      "name": "read_file",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py",
+        "tests/rr7/routes/api.chat.stream.test.ts"
+      ]
+    },
+    {
+      "name": "write_file",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py",
+        "services/strands-agent/tests/test_project_tools.py"
+      ]
+    },
+    {
+      "name": "edit_file",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py"
+      ]
+    },
+    {
+      "name": "glob",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py"
+      ]
+    },
+    {
+      "name": "grep",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_file_tools.py"
+      ]
+    },
+    {
+      "name": "web_fetch",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_web_tools.py",
+        "tests/rr7/lib/chat-stream.test.ts"
+      ]
+    },
+    {
+      "name": "web_search",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_web_tools.py",
+        "tests/rr7/lib/agent/strands.test.ts"
+      ]
+    },
+    {
+      "name": "hf_daily_papers",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_research_tools.py"
+      ]
+    },
+    {
+      "name": "hf_paper",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_research_tools.py"
+      ]
+    },
+    {
+      "name": "deep_research",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_research_tools.py",
+        "tests/rr7/lib/agent/strands.test.ts"
+      ]
+    },
+    {
+      "name": "collection_overview",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_project_tools.py"
+      ]
+    },
+    {
+      "name": "collection_artifact_metadata",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_project_tools.py",
+        "tests/rr7/routes/api.analyst-mcp-artifact-proxy.test.ts"
+      ]
+    },
+    {
+      "name": "capture_artifact",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_auto_capture.py",
+        "tests/rr7/routes/api.artifacts.capture.test.ts"
+      ]
+    },
+    {
+      "name": "generate_file",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_generate_tools.py",
+        "services/strands-agent/tests/test_agent_factory.py"
+      ]
+    },
+    {
+      "name": "execute_command",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_command_tools.py"
+      ]
+    }
+  ],
+  "mcpTools": [
+    {
+      "name": "search_literature",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "collect_articles",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "start_collect_articles",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "get_paper",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "download_articles",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "start_download_articles",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "list_paper_artifacts",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "list_collections",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "create_collection",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "get_collection",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "add_papers_to_collection",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "remove_papers_from_collection",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "collection_search",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "collection_artifact_metadata",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "collect_collection_artifacts",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "index_collection",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "start_collect_collection_artifacts",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "get_job",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "list_jobs",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "graph_lookup",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "recommend_papers",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "rag_query",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "daily_scan_summary",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "literature_review",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "describe_capabilities",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "storage_health",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "ingest_status",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "bootstrap_preflight",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "bootstrap_openalex_snapshot",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py"
+      ]
+    },
+    {
+      "name": "bootstrap_arxiv_inventory",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    },
+    {
+      "name": "fetch_arxiv_archive_members",
+      "coverage": "automated-local",
+      "tests": [
+        "services/analyst-mcp/tests/test_mcp_tools.py",
+        "services/analyst-mcp/tests/test_services.py"
+      ]
+    }
+  ],
+  "uiSurfaces": [
+    {
+      "id": "dashboard",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/dashboard.spec.ts"
+      ]
+    },
+    {
+      "id": "topnav",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/topnav.spec.ts"
+      ]
+    },
+    {
+      "id": "sidebar",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/sidebar.spec.ts"
+      ]
+    },
+    {
+      "id": "chat-task-view",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/chat.spec.ts",
+        "tests/rr7/routes/api.chat.stream.test.ts"
+      ]
+    },
+    {
+      "id": "knowledge-workspace",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/knowledge.spec.ts",
+        "tests/rr7/routes/_app.projects.knowledge.test.ts"
+      ]
+    },
+    {
+      "id": "settings-panel",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/settings-panel-sidebar.test.ts"
+      ]
+    },
+    {
+      "id": "file-viewer-panel",
+      "coverage": "automated-local",
+      "tests": [
+        "tests/rr7/components/FileViewerPanel.test.ts",
+        "tests/rr7/components/DocxRenderer.test.ts",
+        "tests/rr7/components/XlsxRenderer.test.ts",
+        "tests/rr7/components/TextRenderer.test.ts"
+      ]
+    },
+    {
+      "id": "project-settings-dialog",
+      "coverage": "automated-local",
+      "tests": [
+        "tests/rr7/components/ProjectSettingsDialog.test.ts"
+      ]
+    }
+  ],
+  "settingsOptions": [
+    {
+      "id": "api-tab",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts"
+      ]
+    },
+    {
+      "id": "sandbox-tab",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts"
+      ]
+    },
+    {
+      "id": "credentials-crud",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/rr7/routes/api.credentials.test.ts"
+      ]
+    },
+    {
+      "id": "mcp-connectors",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/rr7/routes/_app.settings.mutations.test.ts"
+      ]
+    },
+    {
+      "id": "skills-toggle",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/rr7/routes/_app.settings.mutations.test.ts"
+      ]
+    },
+    {
+      "id": "logs-controls",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/rr7/routes/_app.settings.mutations.test.ts"
+      ]
+    },
+    {
+      "id": "project-storage-env-local-s3",
+      "coverage": "automated-local",
+      "tests": [
+        "tests/rr7/components/ProjectSettingsDialog.test.ts",
+        "tests/rr7/routes/api.projects.$projectId.test.ts"
+      ]
+    }
+  ],
+  "liveFlows": [
+    {
+      "id": "project-create-and-switch",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/topnav.spec.ts",
+        "tests/rr7/integration/api-parity.test.ts"
+      ]
+    },
+    {
+      "id": "task-chat-completion",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/chat.spec.ts"
+      ]
+    },
+    {
+      "id": "file-import-and-preview",
+      "coverage": "automated-live",
+      "tests": [
+        "tests/e2e/knowledge.spec.ts",
+        "tests/rr7/routes/api.import.file.live.test.ts"
+      ]
+    },
+    {
+      "id": "local-artifact-capture",
+      "coverage": "automated-local",
+      "tests": [
+        "services/strands-agent/tests/test_auto_capture.py",
+        "tests/rr7/routes/api.artifacts.capture.test.ts"
+      ]
+    },
+    {
+      "id": "mcp-discovery-and-tool-catalog",
+      "coverage": "automated-local",
+      "tests": [
+        "tests/rr7/lib/mcp.server.test.ts",
+        "tests/rr7/routes/api.chat.stream.test.ts"
+      ]
+    },
+    {
+      "id": "analyst-mcp-artifact-proxy",
+      "coverage": "automated-local",
+      "tests": [
+        "tests/rr7/routes/api.analyst-mcp-artifact-proxy.test.ts"
+      ]
+    },
+    {
+      "id": "strands-session-persistence-after-restart",
+      "coverage": "manual-live",
+      "tests": []
+    },
+    {
+      "id": "s3-artifact-write-read",
+      "coverage": "manual-live",
+      "tests": []
+    }
+  ]
+}

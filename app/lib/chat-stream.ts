@@ -16,6 +16,7 @@ export interface ChatStreamEvent {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
+  toolResultData?: unknown;
   toolStatus?: 'running' | 'completed' | 'error';
   error?: string;
   timestamp?: number;

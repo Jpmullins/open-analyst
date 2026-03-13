@@ -100,20 +100,34 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
           <button
             key={doc.id}
             onClick={() => {
-              if (doc.storageUri) {
+              const metadata =
+                doc.metadata && typeof doc.metadata === 'object'
+                  ? (doc.metadata as Record<string, unknown>)
+                  : {};
+              const artifactUrl =
+                typeof metadata.artifactUrl === 'string' && metadata.artifactUrl
+                  ? metadata.artifactUrl
+                  : doc.storageUri
+                    ? `/api/projects/${projectId}/documents/${doc.id}/artifact`
+                    : '';
+              if (artifactUrl) {
+                const downloadUrl =
+                  typeof metadata.downloadUrl === 'string' && metadata.downloadUrl
+                    ? metadata.downloadUrl
+                    : `${artifactUrl}?download=1`;
                 const docArtifact: ArtifactMeta = {
                   documentId: doc.id,
-                  filename: (doc.metadata?.filename as string) || doc.title,
-                  mimeType: (doc.metadata?.mimeType as string) || 'application/octet-stream',
-                  size: (doc.metadata?.bytes as number) || 0,
-                  artifactUrl: `/api/projects/${projectId}/documents/${doc.id}/artifact`,
-                  downloadUrl: `/api/projects/${projectId}/documents/${doc.id}/artifact?download=1`,
+                  filename: (metadata.filename as string) || doc.title,
+                  mimeType: (metadata.mimeType as string) || 'application/octet-stream',
+                  size: (metadata.bytes as number) || 0,
+                  artifactUrl,
+                  downloadUrl,
                   title: doc.title,
                 };
                 openFileViewer(docArtifact);
-              } else {
-                setPreviewDoc(previewDoc?.id === doc.id ? null : doc);
+                return;
               }
+              setPreviewDoc(previewDoc?.id === doc.id ? null : doc);
             }}
             className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center gap-2 transition-colors ${
               previewDoc?.id === doc.id

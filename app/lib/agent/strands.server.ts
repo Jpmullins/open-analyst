@@ -66,15 +66,20 @@ export class StrandsProvider implements AgentProvider {
         tools: skill.tools || [],
       })),
       active_tool_names: options.activeToolNames || [],
+      mcp_servers: (options.mcpServers || []).map((server) => ({
+        id: server.id,
+        name: server.name,
+        alias: server.alias || '',
+        type: server.type,
+        command: server.command || '',
+        args: server.args || [],
+        env: server.env || {},
+        url: server.url || '',
+        headers: server.headers || {},
+      })),
       model_id: this.config.model,
       litellm_base_url: env.LITELLM_BASE_URL,
       litellm_api_key: env.LITELLM_API_KEY,
-      session_s3_bucket: env.ARTIFACT_STORAGE_BACKEND === 's3' ? env.ARTIFACT_S3_BUCKET : '',
-      session_s3_region: env.ARTIFACT_STORAGE_BACKEND === 's3' ? env.ARTIFACT_S3_REGION : '',
-      session_s3_prefix:
-        env.ARTIFACT_STORAGE_BACKEND === 's3'
-          ? `${env.ARTIFACT_S3_PREFIX.replace(/\/+$/, '')}/strands-sessions`
-          : '',
       api_base_url: `http://localhost:${process.env.PORT || 5173}`,
       ...extra,
     };
@@ -173,6 +178,7 @@ export class StrandsProvider implements AgentProvider {
               toolName: data.toolName,
               toolUseId: data.toolUseId,
               toolOutput: data.toolOutput || '',
+              toolResultData: data.toolResultData,
               toolStatus: data.toolStatus || 'completed',
               timestamp: now,
             };

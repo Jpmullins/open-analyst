@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Key, Cpu, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import type { AppConfig } from '~/lib/types';
 import { headlessGetModels } from '~/lib/headless-api';
+import { supportsToolCalling } from '~/lib/model-capabilities';
 
 interface ConfigModalProps {
   isOpen: boolean;
@@ -15,7 +16,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
   const [model, setModel] = useState(initialConfig?.model || '');
   const [customModel, setCustomModel] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
-  const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; name: string; supportsTools: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -29,7 +30,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
         setModels(list);
         // Auto-select first available model only if we have no model set
         if (list.length > 0 && !model) {
-          setModel(list[0].id);
+          setModel((list.find((item) => item.supportsTools) || list[0]).id);
         }
       })
       .catch((e) => setError(`Failed to load models: ${e instanceof Error ? e.message : String(e)}`))
@@ -46,6 +47,10 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
     const finalModel = useCustomModel ? customModel.trim() : model;
     if (!finalModel) {
       setError('Select or enter a model name');
+      return;
+    }
+    if (!supportsToolCalling(finalModel)) {
+      setError('This model does not appear to support tool calling. Choose a tool-capable model such as Claude Sonnet or Opus.');
       return;
     }
 
@@ -95,7 +100,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
 
         <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
           <p className="text-sm text-text-secondary">
-            Models are served through the LiteLLM gateway. API credentials are configured via server environment variables.
+            Models are served through the LiteLLM gateway. Open Analyst requires a model that supports tool calling.
           </p>
 
           <div className="space-y-2">
@@ -120,7 +125,7 @@ export function ConfigModal({ isOpen, onClose, onSave, initialConfig, isFirstRun
               >
                 {loading && <option>Loading models...</option>}
                 {models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
+                  <option key={m.id} value={m.id}>{m.supportsTools ? m.name : `${m.name} (no tool support)`}</option>
                 ))}
               </select>
             )}
