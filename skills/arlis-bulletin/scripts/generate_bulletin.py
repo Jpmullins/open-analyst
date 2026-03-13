@@ -118,7 +118,6 @@ def make_spacer_p() -> str:
 
 def make_title_p(title: str) -> str:
     """Create the title paragraph."""
-    title = sanitize_text(title)
     return f'''<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
       <w:pPr>
         <w:spacing w:before="0" w:beforeAutospacing="off" w:after="0" w:afterAutospacing="off"/>
@@ -157,9 +156,6 @@ def make_date_p(date: str) -> str:
 
 def make_lead_p(bold_italic_text: str, context_text: str) -> str:
     """Create a lead sentence paragraph with bold+italic first part and regular second part."""
-    bold_italic_text = sanitize_text(bold_italic_text)
-    if context_text:
-        context_text = sanitize_text(context_text)
     parts = f'''<w:r>
         <w:rPr>
           <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/>
@@ -192,37 +188,8 @@ def make_lead_p(bold_italic_text: str, context_text: str) -> str:
     </w:p>'''
 
 
-def strip_inline_citations(text: str) -> str:
-    """Remove inline Unicode superscript citation numbers (e.g., ¹²³) and bracketed refs like [1] from bullet text.
-    The script adds its own endnote references, so inline ones cause duplication."""
-    import unicodedata
-    # Remove Unicode superscript digits (¹, ², ³, etc.)
-    superscript_map = str.maketrans('', '', '⁰¹²³⁴⁵⁶⁷⁸⁹')
-    text = text.translate(superscript_map)
-    # Remove trailing bracketed refs like [1], [2] etc.
-    text = re.sub(r'\s*\[\d+\]\s*$', '', text)
-    return text.rstrip()
-
-
-def sanitize_text(text: str) -> str:
-    """Clean text of problematic characters: em dashes, en dashes, double hyphens."""
-    # Replace em dashes with commas or semicolons (context-dependent, use comma as safe default)
-    text = text.replace('\u2014', ', ')  # em dash
-    text = text.replace('\u2013', '-')   # en dash -> hyphen
-    text = text.replace('--', ', ')      # double hyphen
-    # Clean up spacing around replacements
-    text = re.sub(r'\s*,\s*,\s*', ', ', text)  # collapse double commas
-    text = re.sub(r'\s+', ' ', text)  # normalize whitespace
-    return text.strip()
-
-
 def make_bullet_p(text: str, num_id: str, endnote_num: int = None) -> str:
     """Create a bullet point paragraph with optional endnote reference."""
-    # Strip any inline citation markers that would duplicate the script's own refs
-    text = strip_inline_citations(text)
-    # Sanitize dashes
-    text = sanitize_text(text)
-
     endnote_ref = ""
     if endnote_num is not None:
         endnote_ref = f'''<w:r>
@@ -468,24 +435,8 @@ def main():
     parser.add_argument('--sowhat-context', default='', help='Context sentence for the "So What" section')
     parser.add_argument('--sowhat-bullets', nargs='+', required=True, help='Supporting bullets for "So What" (3 recommended)')
     parser.add_argument('--endnotes', nargs='+', required=True, help='Endnote citations (Chicago Manual of Style)')
-    parser.add_argument('--notes-file', help='Optional path to a JSON file containing all bulletin content (overrides other content args)')
 
     args = parser.parse_args()
-
-    # If --notes-file is provided, load content from JSON
-    if args.notes_file:
-        import json
-        with open(args.notes_file, 'r') as f:
-            notes = json.load(f)
-        args.title = notes.get('title', args.title)
-        args.date = notes.get('date', args.date)
-        args.what_lead = notes.get('what_lead', args.what_lead)
-        args.what_context = notes.get('what_context', args.what_context or '')
-        args.what_bullets = notes.get('what_bullets', args.what_bullets)
-        args.sowhat_lead = notes.get('sowhat_lead', args.sowhat_lead)
-        args.sowhat_context = notes.get('sowhat_context', args.sowhat_context or '')
-        args.sowhat_bullets = notes.get('sowhat_bullets', args.sowhat_bullets)
-        args.endnotes = notes.get('endnotes', args.endnotes)
 
     generate_bulletin(
         template_path=args.template,

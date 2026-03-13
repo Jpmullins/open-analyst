@@ -1,0 +1,23 @@
+{
+  "skill_name": "arlis-bulletin",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need to write an ARLIS bulletin about the recent advances in quantum computing for cryptography. China's been making big strides with their Jiuzhang 3.0 quantum computer and there are implications for current encryption standards. Can you create a bulletin covering this? I have some notes: Jiuzhang 3.0 achieved quantum advantage in December 2025, NIST post-quantum standards finalized in August 2024, China accounts for ~40% of quantum computing patents globally, NSA warned about quantum threats to current encryption in their CNSA 2.0 guidance.",
+      "expected_output": "A complete ARLIS Insights Bulletin .docx file with proper formatting, an analytic title (not descriptive), a two-part KIQ, BLUF as bold+italic lead sentence, What section with 3 sourced bullets, So What section with 3 sourced bullets, proper endnotes in Chicago style, and all template elements preserved (logo, classification markings, boilerplate).",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Write me an ARLIS Insights Bulletin about autonomous drone swarms being developed by Iran. I know they've been using Shahed drones in Ukraine via Russia, and they recently demonstrated a 50-drone swarm at a military parade. There are concerns about proliferation to Houthi rebels and Hezbollah. The tech seems to be advancing faster than expected based on what we've seen in the Red Sea attacks.",
+      "expected_output": "A complete ARLIS bulletin with proper IC analytic writing standards - probabilistic language, clear KIQ, analytic (not descriptive) title, two-section structure, supporting evidence with citations, and full template formatting.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Can you turn these rough notes into an ARLIS bulletin? Topic: counter-UAS technology gaps in US military. Notes: - Army LIDS system only effective against small drones under 25 lbs - No integrated C-UAS solution across service branches - DARPA's SPRINT program testing AI-based drone detection but won't field until 2028 - Ukraine lessons show need for layered defense (EW + kinetic) - Current systems cost $3M per intercept vs $2000 per drone - Congress allocated $1.2B for C-UAS in FY2026 NDAA",
+      "expected_output": "A polished ARLIS bulletin that transforms the raw notes into a structured analytic product with proper KIQ, BLUF, analytic story arc, probabilistic language, and template formatting.",
+      "files": []
+    }
+  ]
+}
