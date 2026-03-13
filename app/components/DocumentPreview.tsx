@@ -40,10 +40,11 @@ export function DocumentPreview({
     typeof maxTextLength === "number" && maxTextLength > 0
       ? (document.content || "").slice(0, maxTextLength)
       : document.content || "";
+  const hasArtifact = Boolean(artifactUrl);
 
   return (
     <div className={`space-y-3 ${className}`.trim()}>
-      {isPdf && document.storageUri && (
+      {isPdf && hasArtifact && (
         <div className="rounded-lg border border-border overflow-hidden bg-background-secondary">
           <object
             data={artifactUrl}

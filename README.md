@@ -205,6 +205,13 @@ For `analyst_mcp` downloads, Open Analyst passes the active project storage cont
 /api/projects/:projectId/analyst-mcp/papers/:identifier/artifact
 ```
 
+When an analyst MCP collection tool such as `collect_articles` succeeds, Open Analyst mirrors the successful papers into a normal Open Analyst collection and documents:
+
+- the Open Analyst collection name matches the analyst collection name
+- mirrored papers appear in the Knowledge panel and `/projects/:projectId/knowledge`
+- the file viewer opens them through the Open Analyst analyst-artifact proxy route above
+- document metadata keeps both the stable app link (`artifactUrl`, `downloadUrl`) and the raw storage pointer (`storageUri`)
+
 After startup, verify the MCP service directly:
 
 ```bash

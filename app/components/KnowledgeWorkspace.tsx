@@ -370,7 +370,15 @@ export function KnowledgeWorkspace() {
                     <tr
                       key={doc.id}
                       onClick={() => {
-                        if (doc.storageUri) {
+                        const metadata =
+                          doc.metadata && typeof doc.metadata === "object"
+                            ? (doc.metadata as Record<string, unknown>)
+                            : {};
+                        const hasArtifact =
+                          (typeof metadata.artifactUrl === "string" &&
+                            metadata.artifactUrl.length > 0) ||
+                          Boolean(doc.storageUri);
+                        if (hasArtifact) {
                           setSelectedDocumentId(null);
                           openFileViewer(buildArtifactMeta(doc));
                           return;

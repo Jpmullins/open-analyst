@@ -94,7 +94,7 @@ export async function action({ request }: Route.ActionArgs) {
     type: 'chat',
     status: 'running',
   });
-  const taskCollection = await ensureTaskCollection(
+  let taskCollection = await ensureTaskCollection(
     task,
     projectId,
     collectionId || undefined,
@@ -159,7 +159,7 @@ export async function action({ request }: Route.ActionArgs) {
       onRunEvent: async (eventType: string, payload: Record<string, unknown>) => {
         await appendTaskEvent(task.id, eventType, payload);
         if (eventType === 'tool_call_end' && payload.toolStatus !== 'error' && typeof payload.toolName === 'string') {
-          await syncAnalystCollectionToTaskCollection({
+          const syncResult = await syncAnalystCollectionToTaskCollection({
             projectId,
             task,
             collectionId: taskCollection.id,
@@ -169,6 +169,12 @@ export async function action({ request }: Route.ActionArgs) {
             toolOutput: typeof payload.toolOutput === 'string' ? payload.toolOutput : undefined,
             mcpServers: runtimeMcpServers,
           });
+          if (syncResult) {
+            taskCollection = {
+              id: syncResult.collectionId,
+              name: syncResult.collectionName,
+            };
+          }
         }
       },
     });

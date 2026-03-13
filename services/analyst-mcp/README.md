@@ -187,6 +187,7 @@ s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suff
 
 - Artifact metadata includes the raw storage path or URI plus `artifact_url` and `download_url`.
 - When Open Analyst is present, those URLs point back through the Open Analyst proxy route so chat and the UI can open the stored artifact through one stable app link.
+- Open Analyst mirrors successful `collect_articles` / collection-artifact runs into a matching Open Analyst collection so Knowledge, retrieval, and the file viewer all work from Open Analyst as the source of truth.
 
 ## MCP resources
 - `time://today`
@@ -201,7 +202,7 @@ s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suff
 1. Use `search_literature` or `collect_articles` with a date window.
 2. Let the service persist only normalized metadata for search hits.
 3. Download PDFs/source files only for the selected hits.
-4. Mirror successful artifacts into Open Analyst for project knowledge indexing and retrieval.
+4. Mirror successful artifacts into a same-named Open Analyst collection for project knowledge indexing, retrieval, and file viewing.
 
 Example:
 

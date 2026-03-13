@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const documentQueryMocks = vi.hoisted(() => ({
   createDocument: vi.fn(),
+  ensureCollection: vi.fn(),
   getDocumentBySourceUri: vi.fn(),
   updateDocument: vi.fn(),
 }));
@@ -10,10 +11,19 @@ const knowledgeIndexMocks = vi.hoisted(() => ({
   refreshDocumentKnowledgeIndex: vi.fn(),
 }));
 
+const taskQueryMocks = vi.hoisted(() => ({
+  updateTask: vi.fn(),
+}));
+
 vi.mock("~/lib/db/queries/documents.server", () => ({
   createDocument: documentQueryMocks.createDocument,
+  ensureCollection: documentQueryMocks.ensureCollection,
   getDocumentBySourceUri: documentQueryMocks.getDocumentBySourceUri,
   updateDocument: documentQueryMocks.updateDocument,
+}));
+
+vi.mock("~/lib/db/queries/tasks.server", () => ({
+  updateTask: taskQueryMocks.updateTask,
 }));
 
 vi.mock("~/lib/knowledge-index.server", () => ({
@@ -26,9 +36,11 @@ describe("syncAnalystCollectionToTaskCollection", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     documentQueryMocks.createDocument.mockReset();
+    documentQueryMocks.ensureCollection.mockReset();
     documentQueryMocks.getDocumentBySourceUri.mockReset();
     documentQueryMocks.updateDocument.mockReset();
     knowledgeIndexMocks.refreshDocumentKnowledgeIndex.mockReset();
+    taskQueryMocks.updateTask.mockReset();
   });
 
   it("ignores non-analyst tools", async () => {
@@ -48,6 +60,10 @@ describe("syncAnalystCollectionToTaskCollection", () => {
 
   it("mirrors successfully collected analyst papers into project documents", async () => {
     documentQueryMocks.getDocumentBySourceUri.mockResolvedValue(null);
+    documentQueryMocks.ensureCollection.mockResolvedValue({
+      id: "collection-2",
+      name: "task-collection",
+    });
     documentQueryMocks.createDocument.mockResolvedValue({ id: "doc-1" });
     knowledgeIndexMocks.refreshDocumentKnowledgeIndex.mockResolvedValue({
       id: "doc-1",
@@ -130,13 +146,14 @@ describe("syncAnalystCollectionToTaskCollection", () => {
     expect(result).toEqual({
       mirrored: 1,
       skipped: [],
-      collectionName: "Task Sources",
+      collectionId: "collection-2",
+      collectionName: "task-collection",
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(documentQueryMocks.createDocument).toHaveBeenCalledWith(
       "project-1",
       expect.objectContaining({
-        collectionId: "collection-1",
+        collectionId: "collection-2",
         sourceType: "analyst_mcp",
         sourceUri: "analyst://paper-1",
         storageUri: "s3://bucket/projects/task-1/paper-1.pdf",
@@ -152,6 +169,14 @@ describe("syncAnalystCollectionToTaskCollection", () => {
       })
     );
     expect(documentQueryMocks.updateDocument).not.toHaveBeenCalled();
+    expect(taskQueryMocks.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        planSnapshot: expect.objectContaining({
+          taskCollection: { id: "collection-2", name: "task-collection" },
+        }),
+      })
+    );
     expect(knowledgeIndexMocks.refreshDocumentKnowledgeIndex).toHaveBeenCalledWith(
       "project-1",
       "doc-1"
@@ -160,6 +185,10 @@ describe("syncAnalystCollectionToTaskCollection", () => {
 
   it("parses JSON tool output when toolResultData is missing", async () => {
     documentQueryMocks.getDocumentBySourceUri.mockResolvedValue(null);
+    documentQueryMocks.ensureCollection.mockResolvedValue({
+      id: "collection-2",
+      name: "task-collection",
+    });
     documentQueryMocks.createDocument.mockResolvedValue({ id: "doc-1" });
     knowledgeIndexMocks.refreshDocumentKnowledgeIndex.mockResolvedValue({
       id: "doc-1",
@@ -243,7 +272,8 @@ describe("syncAnalystCollectionToTaskCollection", () => {
     expect(result).toEqual({
       mirrored: 1,
       skipped: [],
-      collectionName: "Task Sources",
+      collectionId: "collection-2",
+      collectionName: "task-collection",
     });
     expect(documentQueryMocks.createDocument).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledTimes(2);

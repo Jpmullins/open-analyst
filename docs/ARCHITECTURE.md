@@ -98,7 +98,7 @@ The Node app sends the Python service:
 - collection context
 - LiteLLM connection details
 
-The current agent runtime now uses native Strands session persistence plus a summarizing conversation manager. When S3 artifact storage is configured, the same AWS environment is also used for Strands session storage.
+The current agent runtime uses native Strands session persistence backed by PostgreSQL plus a summarizing conversation manager. Artifact storage may use local disk or S3, but Strands chat/session state is decoupled from artifact storage and stays in Postgres.
 
 ### 5a. Session and memory model
 
@@ -107,13 +107,15 @@ Chat continuity currently has two layers:
 - Strands-native session state, keyed by the task id passed as `session_id`
 - app-side task summaries stored in `tasks.plan_snapshot.summary`
 
-The React Router chat route reads the previous task summary, sends it to the agent, and rewrites it when the turn completes. The Python agent builds either an `S3SessionManager` or `FileSessionManager` and pairs it with `SummarizingConversationManager`, so recent turns remain available without replaying the full transcript every time.
+The React Router chat route reads the previous task summary, sends it to the agent, and rewrites it when the turn completes. The Python agent uses a Postgres-backed Strands session manager and pairs it with `SummarizingConversationManager`, so recent turns remain available without replaying the full transcript every time.
 
 ### 6. Retrieval and knowledge management
 
 Knowledge is stored as project documents linked to collections.
 
-The current retrieval path is lexical ranking implemented in `app/lib/db/queries/documents.server.ts`. The schema already includes an `embedding` column, but the production query path is not vector-based yet.
+Successful analyst MCP collection runs are mirrored into same-named Open Analyst collections and documents, so Knowledge and the file viewer remain Open Analyst-owned even when acquisition happened through MCP.
+
+The current retrieval path is hybrid in `app/lib/db/queries/documents.server.ts`: lexical ranking remains, and Open Analyst also maintains document embeddings for native semantic retrieval when `LITELLM_EMBEDDING_MODEL` is configured.
 
 ### 7. Local filesystem state
 

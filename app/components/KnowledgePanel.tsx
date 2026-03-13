@@ -100,15 +100,17 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
           <button
             key={doc.id}
             onClick={() => {
-              if (doc.storageUri) {
-                const metadata =
-                  doc.metadata && typeof doc.metadata === 'object'
-                    ? (doc.metadata as Record<string, unknown>)
-                    : {};
-                const artifactUrl =
-                  typeof metadata.artifactUrl === 'string' && metadata.artifactUrl
-                    ? metadata.artifactUrl
-                    : `/api/projects/${projectId}/documents/${doc.id}/artifact`;
+              const metadata =
+                doc.metadata && typeof doc.metadata === 'object'
+                  ? (doc.metadata as Record<string, unknown>)
+                  : {};
+              const artifactUrl =
+                typeof metadata.artifactUrl === 'string' && metadata.artifactUrl
+                  ? metadata.artifactUrl
+                  : doc.storageUri
+                    ? `/api/projects/${projectId}/documents/${doc.id}/artifact`
+                    : '';
+              if (artifactUrl) {
                 const downloadUrl =
                   typeof metadata.downloadUrl === 'string' && metadata.downloadUrl
                     ? metadata.downloadUrl
@@ -123,9 +125,9 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
                   title: doc.title,
                 };
                 openFileViewer(docArtifact);
-              } else {
-                setPreviewDoc(previewDoc?.id === doc.id ? null : doc);
+                return;
               }
+              setPreviewDoc(previewDoc?.id === doc.id ? null : doc);
             }}
             className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center gap-2 transition-colors ${
               previewDoc?.id === doc.id

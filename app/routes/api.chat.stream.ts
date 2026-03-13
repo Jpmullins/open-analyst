@@ -117,7 +117,7 @@ export async function action({ request }: Route.ActionArgs) {
     });
   }
 
-  const taskCollection = await ensureTaskCollection(
+  let taskCollection = await ensureTaskCollection(
     task,
     projectId,
     String(body.collectionId || '').trim() || undefined,
@@ -243,6 +243,10 @@ export async function action({ request }: Route.ActionArgs) {
               mcpServers: runtimeMcpServers,
             });
             if (syncResult) {
+              taskCollection = {
+                id: syncResult.collectionId,
+                name: syncResult.collectionName,
+              };
               const syncText =
                 syncResult.mirrored > 0
                   ? `Added ${syncResult.mirrored} collected article${syncResult.mirrored === 1 ? '' : 's'} to ${syncResult.collectionName}.`
