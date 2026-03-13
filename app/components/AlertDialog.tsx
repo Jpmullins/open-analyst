@@ -28,7 +28,6 @@ export function AlertDialog({
 }: AlertDialogProps) {
   const [inputValue, setInputValue] = useState(inputDefaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const inputId = useId();
 
   useEffect(() => {
@@ -37,16 +36,10 @@ export function AlertDialog({
 
   useEffect(() => {
     if (open) {
-      dialogRef.current?.showModal();
-      // Focus input or confirm button
       requestAnimationFrame(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
+        inputRef.current?.focus();
+        inputRef.current?.select();
       });
-    } else {
-      dialogRef.current?.close();
     }
   }, [open]);
 
@@ -65,12 +58,13 @@ export function AlertDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onCancel} onKeyDown={handleKeyDown}>
-      <dialog
-        ref={dialogRef}
-        className="bg-surface rounded-xl border border-border shadow-2xl p-0 w-full max-w-md mx-4 backdrop:bg-transparent"
-        onClose={onCancel}
+      <div
+        className="bg-surface rounded-xl border border-border shadow-2xl p-0 w-full max-w-md mx-4"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
-        <div className="p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 space-y-4">
           <h3 className="text-base font-semibold text-text-primary">{title}</h3>
           {message && <p className="text-sm text-text-secondary">{message}</p>}
 
@@ -106,7 +100,7 @@ export function AlertDialog({
             </button>
           </div>
         </div>
-      </dialog>
+      </div>
     </div>
   );
 }

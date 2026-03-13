@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { env } from "./env.server";
 import { getConfigDir } from "./helpers.server";
 import type { ArtifactRecord } from "./types";
@@ -134,4 +134,27 @@ export async function readArtifact(input: {
   const filename = input.filename || path.basename(normalized);
   const mimeType = input.mimeType || inferMimeType(filename);
   return { body, filename, mimeType, size: body.length };
+}
+
+export async function deleteArtifact(storageUri: string): Promise<void> {
+  const uri = String(storageUri || "").trim();
+  if (!uri) return;
+
+  if (uri.startsWith("s3://")) {
+    const { bucket, key } = parseS3Uri(uri);
+    const client = getS3Client({ region: env.ARTIFACT_S3_REGION, endpoint: env.ARTIFACT_S3_ENDPOINT });
+    await client.send(
+      new DeleteObjectCommand({ Bucket: bucket, Key: key })
+    );
+    return;
+  }
+
+  const normalized = uri.startsWith("file://")
+    ? uri.slice("file://".length)
+    : uri;
+  try {
+    await fs.unlink(normalized);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
 }

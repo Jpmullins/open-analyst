@@ -10,7 +10,6 @@ import {
   type HeadlessCollection,
 } from '~/lib/headless-api';
 import { KnowledgePanel } from './KnowledgePanel';
-import { FileViewerPanel } from './FileViewerPanel';
 import { Send, Square, Plus, Loader2, Plug, X, BookOpen } from 'lucide-react';
 
 interface ChatViewProps {
@@ -736,10 +735,9 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
               )}
 
               <div
-                className={`flex items-end gap-2 p-3 rounded-3xl bg-surface transition-colors ${
+                className={`flex items-end gap-2 p-3 rounded-3xl bg-surface transition-all duration-150 chat-input-container ${
                   isDragging ? 'ring-2 ring-accent bg-accent/5' : ''
                 }`}
-                style={{ border: '1px solid rgba(255, 255, 255, 0.1)' }}
               >
                 <button
                   type="button"
@@ -778,7 +776,7 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
                   placeholder="Type a message..."
                   disabled={isSubmitting}
                   rows={1}
-                  className="flex-1 resize-none bg-transparent border-none outline-none focus-visible:ring-2 focus-visible:ring-accent rounded text-text-primary placeholder:text-text-muted text-sm py-1.5"
+                  className="flex-1 resize-none bg-transparent border-none outline-none text-text-primary placeholder:text-text-muted text-sm py-1.5"
                 />
 
                 <div className="flex items-center gap-2">
@@ -823,12 +821,6 @@ export function ChatView({ taskId, taskTitle, projectId, initialMessages }: Chat
       </div>
       {knowledgePanelOpen && (
         <KnowledgePanel projectId={projectId} onClose={toggleKnowledgePanel} />
-      )}
-      {fileViewerArtifact && !knowledgePanelOpen && (
-        <FileViewerPanel onOpenKnowledge={() => {
-          closeFileViewer();
-          toggleKnowledgePanel();
-        }} />
       )}
     </div>
   );

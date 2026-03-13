@@ -2,33 +2,29 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams, useFetcher } from "react-router";
 import {
   headlessCreateCollection,
-  headlessImportUrl,
-  headlessImportFile,
+  headlessDeleteDocument,
   headlessRagQuery,
 } from "~/lib/headless-api";
 import type {
   HeadlessDocument,
   HeadlessRagResult,
 } from "~/lib/headless-api";
-import type { ArtifactMeta } from "~/lib/types";
 import {
   Database,
   Plus,
   Search,
   FileText,
-  Link2,
-  Upload,
+  Trash2,
 } from "lucide-react";
 import { useAppStore } from "~/lib/store";
-import { DocumentPreview } from "./DocumentPreview";
 import { AlertDialog } from "./AlertDialog";
-import { FileViewerPanel } from "./FileViewerPanel";
+import { AddSourceModal } from "./AddSourceModal";
 import { formatRelativeTime } from "~/lib/format";
 
 export function KnowledgeWorkspace() {
   const params = useParams();
   const projectId = params.projectId!;
-  const { openFileViewer, fileViewerArtifact, closeFileViewer } = useAppStore();
+  const { openFileViewer } = useAppStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Active collection from URL
@@ -67,12 +63,10 @@ export function KnowledgeWorkspace() {
 
   // Local UI state
   const [showAllCollections, setShowAllCollections] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState("");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [ragQuery, setRagQuery] = useState("");
+  const [showAddSourceDialog, setShowAddSourceDialog] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<HeadlessDocument | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [ragResults, setRagResults] = useState<HeadlessRagResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,46 +94,24 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const handleImportUrl = async () => {
-    const url = sourceUrl.trim();
-    if (!url || !activeCollectionId) return;
-    setUploading(true);
+  const handleDeleteDocument = async () => {
+    if (!deleteTarget) return;
     try {
-      await headlessImportUrl(projectId, url, activeCollectionId);
-      setSourceUrl("");
+      await headlessDeleteDocument(projectId, deleteTarget.id);
+      setDeleteTarget(null);
       reloadKnowledge();
     } catch (err) {
       setError(String(err));
-    } finally {
-      setUploading(false);
+      setDeleteTarget(null);
     }
   };
 
-  const handleImportFiles = async () => {
-    if (!activeCollectionId) return;
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = true;
-    input.onchange = async () => {
-      if (!input.files?.length) return;
-      setUploading(true);
-      try {
-        for (const file of Array.from(input.files)) {
-          await headlessImportFile(projectId, file, activeCollectionId);
-        }
-        reloadKnowledge();
-      } catch (err) {
-        setError(String(err));
-      } finally {
-        setUploading(false);
-      }
-    };
-    input.click();
-  };
-
-  const handleRagSearch = async () => {
-    const q = ragQuery.trim();
-    if (!q) return;
+  const handleSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setRagResults([]);
+      return;
+    }
     try {
       const response = await headlessRagQuery(
         projectId,
@@ -152,48 +124,32 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const handleOpenDocument = (doc: HeadlessDocument) => {
+    const artifactUrl = `/api/projects/${projectId}/documents/${doc.id}/artifact`;
+    const meta = doc.metadata || {};
+    openFileViewer({
+      documentId: doc.id,
+      filename: (meta.filename as string) || doc.title || "artifact",
+      mimeType: (meta.mimeType as string) || "application/octet-stream",
+      size: typeof meta.size === "number" ? meta.size : 0,
+      artifactUrl,
+      downloadUrl: `${artifactUrl}?download=1`,
+      title: doc.title || undefined,
+    });
+  };
+
   // Build collection name map for the sources table
   const collectionNameMap: Record<string, string> = {};
   for (const col of collections) {
     collectionNameMap[col.id] = col.name;
   }
 
-  // Filter documents for the All Sources table
-  const filteredDocuments = documents.filter((doc) => {
-    if (!sourceFilter) return true;
-    const lower = sourceFilter.toLowerCase();
-    const title = (doc.title || "").toLowerCase();
-    const sourceType = (doc.sourceType || "").toLowerCase();
-    const colName = (doc.collectionId ? collectionNameMap[doc.collectionId] || "" : "").toLowerCase();
-    return title.includes(lower) || sourceType.includes(lower) || colName.includes(lower);
-  });
-
-  const selectedDocument = documents.find((d) => d.id === selectedDocumentId);
-
-  const buildArtifactMeta = (doc: HeadlessDocument): ArtifactMeta => {
-    const metadata =
-      doc.metadata && typeof doc.metadata === "object"
-        ? (doc.metadata as Record<string, unknown>)
-        : {};
-    const artifactUrl =
-      typeof metadata.artifactUrl === "string" && metadata.artifactUrl
-        ? metadata.artifactUrl
-        : `/api/projects/${projectId}/documents/${doc.id}/artifact`;
-    const downloadUrl =
-      typeof metadata.downloadUrl === "string" && metadata.downloadUrl
-        ? metadata.downloadUrl
-        : `${artifactUrl}?download=1`;
-
-    return {
-      documentId: doc.id,
-      filename: (metadata.filename as string) || doc.title,
-      mimeType: (metadata.mimeType as string) || "application/octet-stream",
-      size: (metadata.bytes as number) || 0,
-      artifactUrl,
-      downloadUrl,
-      title: doc.title,
-    };
-  };
+  // When searching, show RAG results mapped back to documents; otherwise show all
+  const displayDocuments = ragResults.length > 0
+    ? ragResults
+        .map((r) => documents.find((d) => d.id === r.id))
+        .filter((d): d is HeadlessDocument => d !== undefined)
+    : documents;
 
   // Collections display: show first 10 or all
   const COLLECTION_LIMIT = 10;
@@ -254,10 +210,9 @@ export function KnowledgeWorkspace() {
                 {visibleCollections.map((col) => (
                   <button
                     key={col.id}
-                    onClick={() => setActiveCollectionId(col.id)}
-                    className={`card card-hover p-4 text-left ${
-                      activeCollectionId === col.id ? "ring-2 ring-accent" : ""
-                    }`}
+                    onClick={() => setActiveCollectionId(activeCollectionId === col.id ? null : col.id)}
+                    className={`card card-hover p-4 text-left ${activeCollectionId === col.id ? "bg-accent-muted" : ""}`}
+                    style={activeCollectionId === col.id ? { boxShadow: '0 0 0 1px rgba(249, 115, 22, 0.3)' } : undefined}
                   >
                     <div className="text-sm font-medium truncate mb-1">
                       {col.name}
@@ -296,54 +251,40 @@ export function KnowledgeWorkspace() {
 
         {/* All Sources — filterable table */}
         <section>
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-accent" />
-            All Sources
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <FileText className="w-5 h-5 text-accent" />
+              Sources
+            </h2>
+            <button
+              className="btn btn-primary text-sm"
+              onClick={() => setShowAddSourceDialog(true)}
+            >
+              <Plus className="w-4 h-4" />
+              Add Source
+            </button>
+          </div>
 
           <div className="flex items-center gap-2 mb-4">
-            <input
-              type="text"
-              className="input text-sm py-2 flex-1"
-              placeholder="Filter sources…"
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value)}
-            />
-            {activeCollectionId && (
-              <>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    className="input text-sm py-2 w-48"
-                    placeholder="Import URL…"
-                    value={sourceUrl}
-                    onChange={(e) => setSourceUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleImportUrl();
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn btn-secondary px-3"
-                    onClick={handleImportUrl}
-                    disabled={uploading}
-                    aria-label="Import URL"
-                  >
-                    <Link2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    className="btn btn-secondary px-3"
-                    onClick={handleImportFiles}
-                    disabled={uploading}
-                    aria-label="Upload files"
-                  >
-                    <Upload className="w-4 h-4" />
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
+              <input
+                type="text"
+                className="input text-sm py-2 pl-9 w-full"
+                placeholder="Search sources…"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (!e.target.value.trim()) setRagResults([]);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+              />
+            </div>
           </div>
 
           <div className="card overflow-hidden">
@@ -354,45 +295,24 @@ export function KnowledgeWorkspace() {
                   <th className="text-left px-4 py-2.5 font-medium text-text-muted">Collection</th>
                   <th className="text-left px-4 py-2.5 font-medium text-text-muted">Type</th>
                   <th className="text-left px-4 py-2.5 font-medium text-text-muted">Date Added</th>
+                  <th className="w-10" />
                 </tr>
               </thead>
               <tbody>
-                {filteredDocuments.length === 0 ? (
+                {displayDocuments.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-text-muted">
+                    <td colSpan={5} className="px-4 py-6 text-center text-text-muted">
                       {documents.length === 0
                         ? "No sources yet. Select a collection and import sources."
-                        : "No sources match your filter."}
+                        : "No sources match your search."}
                     </td>
                   </tr>
                 ) : (
-                  filteredDocuments.map((doc) => (
+                  displayDocuments.map((doc) => (
                     <tr
                       key={doc.id}
-                      onClick={() => {
-                        const metadata =
-                          doc.metadata && typeof doc.metadata === "object"
-                            ? (doc.metadata as Record<string, unknown>)
-                            : {};
-                        const hasArtifact =
-                          (typeof metadata.artifactUrl === "string" &&
-                            metadata.artifactUrl.length > 0) ||
-                          Boolean(doc.storageUri);
-                        if (hasArtifact) {
-                          setSelectedDocumentId(null);
-                          openFileViewer(buildArtifactMeta(doc));
-                          return;
-                        }
-                        closeFileViewer();
-                        setSelectedDocumentId(
-                          selectedDocumentId === doc.id ? null : doc.id
-                        );
-                      }}
-                      className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
-                        selectedDocumentId === doc.id
-                          ? "bg-accent-muted"
-                          : "hover:bg-surface-hover"
-                      }`}
+                      onClick={() => handleOpenDocument(doc)}
+                      className="group border-b border-border last:border-b-0 cursor-pointer transition-colors hover:bg-surface-hover"
                     >
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
@@ -423,6 +343,18 @@ export function KnowledgeWorkspace() {
                             })
                           : "—"}
                       </td>
+                      <td className="px-2 py-2.5">
+                        <button
+                          className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-error"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTarget(doc);
+                          }}
+                          aria-label="Delete source"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -430,80 +362,37 @@ export function KnowledgeWorkspace() {
             </table>
           </div>
 
-          {/* Document preview */}
-          {selectedDocument && (
-            <div className="card p-4 mt-4">
-              <h3 className="text-sm font-semibold mb-2">
-                {selectedDocument.title}
-              </h3>
-              <DocumentPreview
-                projectId={projectId}
-                document={selectedDocument}
-              />
-            </div>
-          )}
         </section>
 
-        {/* RAG Search */}
-        <section>
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Search className="w-5 h-5 text-accent" />
-            Search Sources
-          </h2>
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              className="input text-sm py-2"
-              placeholder="Query your knowledge base…"
-              value={ragQuery}
-              onChange={(e) => setRagQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleRagSearch();
-                }
-              }}
-            />
-            <button
-              className="btn btn-secondary px-3"
-              onClick={handleRagSearch}
-              aria-label="Search"
-            >
-              <Search className="w-4 h-4" />
-            </button>
-          </div>
-          {ragResults.length > 0 && (
-            <div className="space-y-2">
-              {ragResults.map((result, i) => (
-                <div key={i} className="card p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium">
-                      {result.title || "Untitled"}
-                    </span>
-                    <span className="badge badge-idle">
-                      {result.score?.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-text-secondary line-clamp-3">
-                    {result.snippet}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
       </div>
 
-        <AlertDialog
-          open={showCreateDialog}
-          title="Add Collection"
-          inputLabel="Collection name"
-          confirmLabel="Create"
-          onConfirm={handleCreateCollection}
-          onCancel={() => setShowCreateDialog(false)}
-        />
+      <AlertDialog
+        open={showCreateDialog}
+        title="Add Collection"
+        inputLabel="Collection name"
+        confirmLabel="Create"
+        onConfirm={handleCreateCollection}
+        onCancel={() => setShowCreateDialog(false)}
+      />
+
+      <AddSourceModal
+        open={showAddSourceDialog}
+        projectId={projectId}
+        collectionId={activeCollectionId}
+        onClose={() => setShowAddSourceDialog(false)}
+        onImported={reloadKnowledge}
+      />
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        title="Delete Source"
+        message={`Are you sure you want to delete "${deleteTarget?.title || "Untitled"}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDeleteDocument}
+        onCancel={() => setDeleteTarget(null)}
+      />
       </div>
-      {fileViewerArtifact && <FileViewerPanel />}
     </div>
   );
 }

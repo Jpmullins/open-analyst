@@ -7,6 +7,7 @@
 @layer base {
   /* Define CSS variables for theming */
   :root {
+    color-scheme: dark;
     /* Dark theme (default) */
     --color-background: #0f0f0f;
     --color-background-secondary: #1a1a1a;
@@ -26,6 +27,7 @@
 
   /* Light theme override */
   .light {
+    color-scheme: light;
     --color-background: #f5f3ee;
     --color-background-secondary: #faf9f6;
     --color-surface: #ffffff;
@@ -75,7 +77,7 @@
   /* Button styles */
   .btn {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium transition-all duration-150;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent focus:ring-opacity-30;
+    @apply focus:outline-none focus:ring-2 focus:ring-accent focus:ring-opacity-10;
   }
 
   .btn-primary {
@@ -95,8 +97,31 @@
   .input {
     @apply w-full px-4 py-3 rounded-xl bg-surface border border-border;
     @apply text-text-primary placeholder:text-text-muted;
-    @apply focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent focus:ring-opacity-10;
     @apply transition-all duration-150;
+  }
+  .input:focus,
+  .input:focus-visible {
+    outline: none;
+    --tw-ring-shadow: none;
+    border-color: rgba(249, 115, 22, 0.3);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.06), 0 0 8px rgba(249, 115, 22, 0.08);
+  }
+
+  /* Chat input container */
+  .chat-input-container {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .chat-input-container:focus-within {
+    border-color: rgba(249, 115, 22, 0.3);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.06), 0 0 8px rgba(249, 115, 22, 0.08);
+  }
+
+  .light .chat-input-container {
+    border-color: var(--color-border);
+  }
+  .light .chat-input-container:focus-within {
+    border-color: rgba(249, 115, 22, 0.3);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.06), 0 0 8px rgba(249, 115, 22, 0.08);
   }
 
   /* Card styles */

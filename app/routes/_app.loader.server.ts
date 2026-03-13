@@ -3,6 +3,11 @@ import {
   getSettings,
   upsertSettings,
 } from "~/lib/db/queries/settings.server";
+import { listTasks } from "~/lib/db/queries/tasks.server";
+import {
+  listCollections,
+  getCollectionDocumentCounts,
+} from "~/lib/db/queries/documents.server";
 import { resolveModel } from "~/lib/litellm.server";
 
 export async function loader() {
@@ -25,11 +30,27 @@ export async function loader() {
     await upsertSettings({ activeProjectId: null });
   }
 
+  // Load sidebar data for the active project (runs on every navigation via revalidate)
+  let sidebarTasks: Awaited<ReturnType<typeof listTasks>> = [];
+  let sidebarCollections: Awaited<ReturnType<typeof listCollections>> = [];
+  let sidebarDocumentCounts: Record<string, number> = {};
+  if (activeProjectId) {
+    [sidebarTasks, sidebarCollections, sidebarDocumentCounts] =
+      await Promise.all([
+        listTasks(activeProjectId),
+        listCollections(activeProjectId),
+        getCollectionDocumentCounts(activeProjectId),
+      ]);
+  }
+
   return {
     projects,
     activeProjectId,
     workingDir: settings.workingDir || "",
     model: resolvedModel,
     isConfigured: true,
+    sidebarTasks,
+    sidebarCollections,
+    sidebarDocumentCounts,
   };
 }

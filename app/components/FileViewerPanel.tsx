@@ -162,17 +162,16 @@ export function FileViewerPanel({ onOpenKnowledge }: FileViewerPanelProps) {
 
   return (
     <div
-      className="border-l border-border bg-surface flex flex-col overflow-hidden shrink-0 relative"
+      className="border-l border-border bg-surface flex flex-col shrink-0 relative"
       style={{ width }}
     >
-      {/* Drag handle on left edge */}
+      {/* Drag handle overlaid on the divider */}
       <div
         onMouseDown={handleMouseDown}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 group flex items-center"
+        className="absolute -left-3 top-0 bottom-0 w-6 cursor-col-resize z-20 flex items-center justify-center"
       >
-        <div className="absolute inset-0 hover:bg-accent/20 transition-colors" />
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-text-muted">
-          <GripVertical className="w-3 h-3" />
+        <div className="w-4 h-8 rounded bg-surface border border-border shadow-sm flex items-center justify-center hover:bg-surface-hover hover:border-accent/40 transition-colors">
+          <GripVertical className="w-3 h-3 text-text-muted" />
         </div>
       </div>
 

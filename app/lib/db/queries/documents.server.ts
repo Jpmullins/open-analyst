@@ -284,6 +284,19 @@ export async function updateDocumentEmbedding(
   return doc;
 }
 
+export async function deleteDocument(
+  projectId: string,
+  documentId: string
+): Promise<Document | undefined> {
+  const [deleted] = await db
+    .delete(documents)
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  return deleted;
+}
+
 // --- RAG query (in-memory TF-IDF, same as before) ---
 
 export interface RagResult {

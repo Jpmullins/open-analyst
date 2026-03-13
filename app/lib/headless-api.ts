@@ -388,6 +388,16 @@ export async function headlessCreateDocument(
   return response.document;
 }
 
+export async function headlessDeleteDocument(
+  projectId: string,
+  documentId: string
+): Promise<void> {
+  await requestJson(
+    `/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+    { method: 'DELETE' }
+  );
+}
+
 export async function headlessImportUrl(
   projectId: string,
   url: string,
