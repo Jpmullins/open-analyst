@@ -1,10 +1,60 @@
 import json
 import os
 import sys
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+_stubbed_module_names: list[str] = []
+
+
+def _install_stub(name: str, module: types.ModuleType) -> None:
+    if name in sys.modules:
+        return
+    sys.modules[name] = module
+    _stubbed_module_names.append(name)
+
+
+strands_mod = types.ModuleType("strands")
+_install_stub("strands", strands_mod)
+
+strands_session_mod = types.ModuleType("strands.session")
+_install_stub("strands.session", strands_session_mod)
+
+repo_session_manager_mod = types.ModuleType("strands.session.repository_session_manager")
+
+
+class _FakeRepositorySessionManager:
+    pass
+
+
+repo_session_manager_mod.RepositorySessionManager = _FakeRepositorySessionManager
+_install_stub("strands.session.repository_session_manager", repo_session_manager_mod)
+
+session_repository_mod = types.ModuleType("strands.session.session_repository")
+
+
+class _FakeSessionRepository:
+    pass
+
+
+session_repository_mod.SessionRepository = _FakeSessionRepository
+_install_stub("strands.session.session_repository", session_repository_mod)
+
+exceptions_mod = types.ModuleType("strands.types.exceptions")
+exceptions_mod.SessionException = Exception
+_install_stub("strands.types.exceptions", exceptions_mod)
+
+session_types_mod = types.ModuleType("strands.types.session")
+session_types_mod.Session = object
+session_types_mod.SessionAgent = object
+session_types_mod.SessionMessage = object
+_install_stub("strands.types.session", session_types_mod)
+
 from postgres_session_manager import compact_session_message_payload
+
+for _module_name in reversed(_stubbed_module_names):
+    sys.modules.pop(_module_name, None)
 
 
 def test_compact_session_message_payload_summarizes_large_search_results():

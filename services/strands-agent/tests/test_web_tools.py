@@ -9,6 +9,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+_stubbed_module_names: list[str] = []
+
+
+def _install_stub(name: str, module: types.ModuleType) -> None:
+    if name in sys.modules:
+        return
+    sys.modules[name] = module
+    _stubbed_module_names.append(name)
+
 strands_mod = types.ModuleType("strands")
 def _mock_tool(fn=None, *, name=None, **_kw):
     def decorator(func):
@@ -20,7 +29,7 @@ def _mock_tool(fn=None, *, name=None, **_kw):
     return decorator
 
 strands_mod.tool = _mock_tool
-sys.modules.setdefault("strands", strands_mod)
+_install_stub("strands", strands_mod)
 
 bs4_mod = types.ModuleType("bs4")
 
@@ -43,9 +52,12 @@ class _FakeSoup:
 
 
 bs4_mod.BeautifulSoup = _FakeSoup
-sys.modules.setdefault("bs4", bs4_mod)
+_install_stub("bs4", bs4_mod)
 
 from tools.web_tools import web_fetch, web_search
+
+for _module_name in reversed(_stubbed_module_names):
+    sys.modules.pop(_module_name, None)
 
 
 def _mock_response(text="", status_code=200, content_type="text/html", content=b""):

@@ -9,6 +9,15 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+_stubbed_module_names: list[str] = []
+
+
+def _install_stub(name: str, module: types.ModuleType) -> None:
+    if name in sys.modules:
+        return
+    sys.modules[name] = module
+    _stubbed_module_names.append(name)
+
 strands_mod = types.ModuleType("strands")
 
 
@@ -25,10 +34,13 @@ def _mock_tool(fn=None, *, name=None, **_kw):
 
 strands_mod.tool = _mock_tool
 strands_mod.Agent = object
-sys.modules.setdefault("strands", strands_mod)
+_install_stub("strands", strands_mod)
 
 from tools.project_tools import collection_artifact_metadata, collection_overview
 from tools import create_project_tools
+
+for _module_name in reversed(_stubbed_module_names):
+    sys.modules.pop(_module_name, None)
 
 
 class TestCollectionOverview:

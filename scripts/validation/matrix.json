@@ -349,43 +349,6 @@
       ]
     },
     {
-      "name": "graph_lookup",
-      "coverage": "automated-local",
-      "tests": [
-        "services/analyst-mcp/tests/test_mcp_tools.py"
-      ]
-    },
-    {
-      "name": "recommend_papers",
-      "coverage": "automated-local",
-      "tests": [
-        "services/analyst-mcp/tests/test_mcp_tools.py"
-      ]
-    },
-    {
-      "name": "rag_query",
-      "coverage": "automated-local",
-      "tests": [
-        "services/analyst-mcp/tests/test_mcp_tools.py",
-        "services/analyst-mcp/tests/test_services.py"
-      ]
-    },
-    {
-      "name": "daily_scan_summary",
-      "coverage": "automated-local",
-      "tests": [
-        "services/analyst-mcp/tests/test_mcp_tools.py"
-      ]
-    },
-    {
-      "name": "literature_review",
-      "coverage": "automated-local",
-      "tests": [
-        "services/analyst-mcp/tests/test_mcp_tools.py",
-        "services/analyst-mcp/tests/test_services.py"
-      ]
-    },
-    {
       "name": "describe_capabilities",
       "coverage": "automated-local",
       "tests": [

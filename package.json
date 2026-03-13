@@ -3,10 +3,10 @@
   "version": "2.0.0",
   "description": "Remote-first analyst application with headless agent runtime",
   "scripts": {
-    "dev": "cross-env PORT=3000 react-router dev --host 0.0.0.0 --port 3000",
-    "dev:polling": "cross-env PORT=3000 CHOKIDAR_USEPOLLING=1 react-router dev --host 0.0.0.0 --port 3000",
+    "dev": "cross-env PORT=5173 react-router dev --host 0.0.0.0 --port 5173",
+    "dev:polling": "cross-env PORT=5173 CHOKIDAR_USEPOLLING=1 react-router dev --host 0.0.0.0 --port 5173",
     "build": "react-router build",
-    "start": "cross-env HOST=0.0.0.0 PORT=3000 DOTENV_CONFIG_PATH=.env node -r dotenv/config ./node_modules/@react-router/serve/dist/cli.js build/server/index.js",
+    "start": "cross-env HOST=0.0.0.0 PORT=5173 DOTENV_CONFIG_PATH=.env node -r dotenv/config ./node_modules/@react-router/serve/dist/cli.js build/server/index.js",
     "setup:agent": "bash scripts/python-service.sh setup agent",
     "setup:analyst-mcp": "bash scripts/python-service.sh setup analyst-mcp",
     "setup:python": "pnpm setup:agent && pnpm setup:analyst-mcp",

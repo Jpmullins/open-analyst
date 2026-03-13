@@ -7,6 +7,15 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ.setdefault("LITELLM_API_KEY", "test-key")
 
+_stubbed_module_names: list[str] = []
+
+
+def _install_stub(name: str, module: types.ModuleType) -> None:
+    if name in sys.modules:
+        return
+    sys.modules[name] = module
+    _stubbed_module_names.append(name)
+
 strands_mod = types.ModuleType("strands")
 strands_mod.Agent = object
 def _mock_tool(fn=None, *, name=None, **_kw):
@@ -19,19 +28,19 @@ def _mock_tool(fn=None, *, name=None, **_kw):
     return decorator
 
 strands_mod.tool = _mock_tool
-sys.modules.setdefault("strands", strands_mod)
+_install_stub("strands", strands_mod)
 
 strands_models_mod = types.ModuleType("strands.models")
 strands_models_mod.LiteLLMModel = object
-sys.modules.setdefault("strands.models", strands_models_mod)
+_install_stub("strands.models", strands_models_mod)
 
 strands_tools_mod = types.ModuleType("strands.tools")
 strands_tools_mod.__path__ = []
-sys.modules.setdefault("strands.tools", strands_tools_mod)
+_install_stub("strands.tools", strands_tools_mod)
 
 strands_tools_mcp_mod = types.ModuleType("strands.tools.mcp")
 strands_tools_mcp_mod.__path__ = []
-sys.modules.setdefault("strands.tools.mcp", strands_tools_mcp_mod)
+_install_stub("strands.tools.mcp", strands_tools_mcp_mod)
 
 mcp_client_mod = types.ModuleType("strands.tools.mcp.mcp_client")
 
@@ -52,41 +61,41 @@ class FakeMCPClient:
 
 
 mcp_client_mod.MCPClient = FakeMCPClient
-sys.modules.setdefault("strands.tools.mcp.mcp_client", mcp_client_mod)
+_install_stub("strands.tools.mcp.mcp_client", mcp_client_mod)
 
 conversation_mod = types.ModuleType("strands.agent.conversation_manager")
 conversation_mod.SummarizingConversationManager = object
-sys.modules.setdefault("strands.agent.conversation_manager", conversation_mod)
+_install_stub("strands.agent.conversation_manager", conversation_mod)
 
 session_mod = types.ModuleType("strands.session")
 session_mod.FileSessionManager = object
 session_mod.S3SessionManager = object
-sys.modules.setdefault("strands.session", session_mod)
+_install_stub("strands.session", session_mod)
 
 litellm_mod = types.ModuleType("litellm")
 litellm_mod.modify_params = False
-sys.modules.setdefault("litellm", litellm_mod)
+_install_stub("litellm", litellm_mod)
 
 mcp_mod = types.ModuleType("mcp")
 mcp_mod.__path__ = []
-sys.modules.setdefault("mcp", mcp_mod)
+_install_stub("mcp", mcp_mod)
 
 mcp_client_pkg = types.ModuleType("mcp.client")
 mcp_client_pkg.__path__ = []
-sys.modules.setdefault("mcp.client", mcp_client_pkg)
+_install_stub("mcp.client", mcp_client_pkg)
 
 mcp_client_sse = types.ModuleType("mcp.client.sse")
 mcp_client_sse.sse_client = lambda *args, **kwargs: None
-sys.modules.setdefault("mcp.client.sse", mcp_client_sse)
+_install_stub("mcp.client.sse", mcp_client_sse)
 
 mcp_client_stdio = types.ModuleType("mcp.client.stdio")
 mcp_client_stdio.StdioServerParameters = lambda **kwargs: kwargs
 mcp_client_stdio.stdio_client = lambda *args, **kwargs: None
-sys.modules.setdefault("mcp.client.stdio", mcp_client_stdio)
+_install_stub("mcp.client.stdio", mcp_client_stdio)
 
 mcp_client_http = types.ModuleType("mcp.client.streamable_http")
 mcp_client_http.streamablehttp_client = lambda *args, **kwargs: None
-sys.modules.setdefault("mcp.client.streamable_http", mcp_client_http)
+_install_stub("mcp.client.streamable_http", mcp_client_http)
 
 postgres_session_manager_mod = types.ModuleType("postgres_session_manager")
 
@@ -98,7 +107,7 @@ class FakePostgresSessionManager:
 
 
 postgres_session_manager_mod.PostgresSessionManager = FakePostgresSessionManager
-sys.modules.setdefault("postgres_session_manager", postgres_session_manager_mod)
+_install_stub("postgres_session_manager", postgres_session_manager_mod)
 
 from agent_factory import (
     _build_active_skill_prompt,
@@ -109,6 +118,9 @@ from agent_factory import (
     _collect_allowed_tools,
 )
 from config import settings
+
+for _module_name in reversed(_stubbed_module_names):
+    sys.modules.pop(_module_name, None)
 
 
 def test_build_skill_catalog_prompt_includes_enabled_skill_summaries():
