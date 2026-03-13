@@ -50,6 +50,27 @@ This stores MCP server definitions, enabled skills, and related app configuratio
 - Strands agent: `GET /ping`
 - Analyst MCP: `GET /health`
 
+## Bedrock quota behavior
+
+Production incidents showing `429` from the Strands service have so far mapped to Bedrock token-throughput throttling on `bedrock-claude-sonnet-4`.
+
+Important nuance:
+
+- this is not only about the raw user prompt size
+- the Strands request can grow substantially after skill instructions, reference excerpts, task summaries, research-worker output, and project retrieval context are injected into the system prompt
+- a single user turn may also trigger many sequential model completions as the agent plans and executes tool-heavy workflows
+
+In practice, the highest-risk turns are long iterative tasks such as bulletin/report generation, repeated file-generation retries, and `deepResearch` runs with multiple matched skills.
+
+Current operational guidance:
+
+- keep `deepResearch` disabled unless the turn really needs a separate research pass
+- treat document-generation and other multi-tool loops as high quota consumers
+- inspect `strands-agent` logs for `agent_request_shape ... system_prompt_chars=...` and repeated `LiteLLM completion()` lines when diagnosing a 429
+- do not assume container health issues when this happens; the common cause is per-turn model workload, not a frozen service
+
+This behavior is currently documented, not fully remediated.
+
 ## Production storage defaults
 
 Recommended production layout:

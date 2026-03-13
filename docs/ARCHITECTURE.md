@@ -131,6 +131,8 @@ Per-project working files are stored in workspace folders created by `app/lib/fi
 
 Repository skill bundles under `skills/` are part of the runtime as well. The Node app discovers them from disk, matches them against the current request, and forwards the selected skill instructions plus resolved reference/script paths into the Strands prompt.
 
+This is also one of the main current quota tradeoffs: selected skills are injected directly into the Strands system prompt, so a short user message can still become a very large model request if several heavy skills match or if a skill includes long reference excerpts.
+
 ## Main User Flows
 
 ### Project dashboard flow
@@ -146,6 +148,8 @@ Repository skill bundles under `skills/` are part of the runtime as well. The No
 3. `ChatView` streams responses from `/api/chat/stream`.
 4. The browser renders structured status/tool progress blocks plus the final answer during the run.
 5. The server persists task events, the structured assistant message, and a compact task summary for continuity on later turns.
+
+One user turn is not necessarily one model call. Tool-heavy runs can trigger several sequential Sonnet completions as the agent plans, evaluates tool output, and continues the loop. That distinction matters for Bedrock token-throughput throttling.
 
 ### Knowledge flow
 

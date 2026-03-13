@@ -19,6 +19,31 @@ When `deep_research` is enabled:
 
 If the worker fails, the primary agent continues without it.
 
+## Current cost and quota tradeoff
+
+The current runtime favors capability over strict token efficiency.
+
+Today the primary agent system prompt may include:
+
+- matched skill instructions
+- selected skill reference excerpts
+- compact task memory
+- optional research-worker evidence
+- project retrieval snippets
+
+That keeps the agent effective on complex tasks, but it also means the Strands request size can grow well beyond the raw user message. Combined with multi-step tool workflows, one user turn may consume several sequential Sonnet completions.
+
+Known consequence:
+
+- Bedrock `429` incidents on this stack are currently more correlated with prompt inflation plus multi-step tool loops than with simple per-request chat volume
+
+Highest-risk workflows:
+
+- `deep_research`
+- report or bulletin generation
+- repeated file-generation / retry loops
+- turns that match several heavy repo skills at once
+
 ## Why this shape
 
 This repo benefits from specialization on research-heavy tasks, but it does not yet need a general-purpose agent swarm.
@@ -33,6 +58,7 @@ This repo benefits from specialization on research-heavy tasks, but it does not 
 - Keep session memory on the primary agent only.
 - Keep research-worker memory ephemeral and request-scoped.
 - Pass only a compact brief into the worker and a compact evidence bundle back out.
+- Track request-shape growth in `agent_request_shape` logs before adding more prompt-side context.
 - Add more specialists only when a task class is frequent, clearly separable, and measurably improves latency or answer quality.
 
 ## Future expansion

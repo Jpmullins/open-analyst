@@ -244,6 +244,28 @@ Useful chat tools for stored artifacts:
 - local project artifacts: `collection_artifact_metadata`
 - analyst collections with artifact links: `mcp__analyst__collection_artifact_metadata`
 
+## Bedrock 429 Notes
+
+If chat turns fail with a `429` from the LiteLLM or Bedrock path, the current failure mode is usually token-throughput pressure, not a simple HTTP request-rate problem.
+
+What we observed in production:
+
+- the ordinary baseline system prompt is moderate, but some turns expand dramatically after skill injection
+- matched skill instructions, reference excerpts, task summaries, research-worker output, and project retrieval snippets are all appended to the Strands system prompt
+- one user turn can trigger many sequential Sonnet completions as the agent plans, calls tools, revises, and tries again
+- `deepResearch` increases pressure further because it runs a separate research-worker agent before the primary agent
+
+This means a short user request can still produce a very large Strands request. The live agent logs currently emit `agent_request_shape ... system_prompt_chars=...`, which is the fastest way to verify whether a failing turn had prompt inflation.
+
+Operational guidance for now:
+
+- expect the highest 429 risk on document-generation, bulletin, and other tool-heavy iterative tasks
+- if a turn is not explicitly research-heavy, leave `deepResearch` off
+- prefer narrower skill matches and fewer pinned connectors when troubleshooting a quota issue
+- if you need to diagnose a specific run, inspect the Strands logs for `system_prompt_chars` and repeated `LiteLLM completion()` entries in the same turn
+
+This is a known issue in the current architecture and is documented for follow-up work rather than fully mitigated yet.
+
 ## Resetting Chat State
 
 To clear Open Analyst chat history, Strands session rows, local file-based Strands sessions, and old `strands-sessions` S3 objects:
