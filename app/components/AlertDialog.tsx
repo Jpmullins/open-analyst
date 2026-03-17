@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 interface AlertDialogProps {
   open: boolean;
@@ -26,13 +26,8 @@ export function AlertDialog({
   onConfirm,
   onCancel,
 }: AlertDialogProps) {
-  const [inputValue, setInputValue] = useState(inputDefaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
-
-  useEffect(() => {
-    setInputValue(inputDefaultValue);
-  }, [inputDefaultValue, open]);
 
   useEffect(() => {
     if (open) {
@@ -46,7 +41,7 @@ export function AlertDialog({
   if (!open) return null;
 
   const handleConfirm = () => {
-    onConfirm(inputLabel ? inputValue : undefined);
+    onConfirm(inputLabel ? inputRef.current?.value ?? inputDefaultValue : undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -72,12 +67,12 @@ export function AlertDialog({
             <div className="space-y-1">
               <label htmlFor={inputId} className="text-sm text-text-secondary">{inputLabel}</label>
               <input
+                key={`${inputId}:${inputDefaultValue}`}
                 id={inputId}
                 ref={inputRef}
                 type="text"
                 className="input w-full"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                defaultValue={inputDefaultValue}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();

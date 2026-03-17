@@ -497,14 +497,13 @@ export async function getSelectedMcpServers(
   if (enabledServers.length === 0) return [];
 
   const pinned = new Set((input.pinnedServerIds || []).map((id) => String(id)));
-  const prompt = String(input.prompt || '').toLowerCase();
-  const userText = Array.isArray(input.messages)
-    ? input.messages
-        .filter((message) => message?.role === 'user')
-        .map((message) => String(message?.content || '').toLowerCase())
-        .join('\n')
-    : '';
-  const fullText = [prompt, userText].filter(Boolean).join('\n');
+  const prompt = String(input.prompt || '').trim().toLowerCase();
+  const latestUserText = Array.isArray(input.messages)
+    ? [...input.messages]
+        .reverse()
+        .find((message) => message?.role === 'user' && String(message?.content || '').trim())
+    : null;
+  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
 
   const inspected = await Promise.all(
     enabledServers.map(async (server) => ({

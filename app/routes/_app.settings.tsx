@@ -1,27 +1,20 @@
-import { useLoaderData, useNavigate, useSearchParams } from "react-router";
-import { SettingsPanel } from "~/components/SettingsPanel";
-
-export { loader } from "./_app.settings.loader.server";
+import { useEffect } from "react";
+import { useNavigate } from "react-router";
+import { useAppStore } from "~/lib/store";
 
 export default function SettingsRoute() {
-  const data = useLoaderData<typeof import("./_app.settings.loader.server").loader>();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") as
-    | "api"
-    | "sandbox"
-    | "credentials"
-    | "connectors"
-    | "skills"
-    | "logs") || "api";
+  const activeProjectId = useAppStore((state) => state.activeProjectId);
 
-  return (
-    <SettingsPanel
-      isOpen={true}
-      onClose={() => navigate(-1)}
-      activeTab={activeTab}
-      onTabChange={(tab) => setSearchParams({ tab }, { replace: true })}
-      initialData={data}
-    />
-  );
+  useEffect(() => {
+    if (activeProjectId) {
+      navigate(`/projects/${activeProjectId}?panel=settings&tab=runtime`, {
+        replace: true,
+      });
+      return;
+    }
+    navigate("/", { replace: true });
+  }, [activeProjectId, navigate]);
+
+  return null;
 }

@@ -1,70 +1,94 @@
 # Agent Architecture
 
-Open Analyst now uses a conservative multi-agent structure:
+## Runtime Foundation
 
-- `primary chat agent`: owns the user session, tool orchestration, and final answer
-- `research worker`: optional specialist for `deep_research` turns
-- `analyst-mcp`: remains a tool service, not an autonomous peer agent
+The runtime in [`services/langgraph-runtime`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime) is built around:
 
-## Current delegation model
+- `deepagents.create_deep_agent`
+- LangGraph checkpoints for short-term thread continuity
+- LangGraph Postgres store for durable memory
+- explicit native tools for retrieval, artifacts, canvas, skills, and capability inspection
+- specialist subagents for research, drafting, and critique
 
-The browser and web app contract does not change. Requests still flow through the React Router server into the Strands service.
+This is an agentic system, not a thin chat wrapper around tools.
 
-When `deep_research` is enabled:
+## Agent Responsibilities
 
-1. The primary agent invokes a bounded research worker first.
-2. The worker receives a narrowed tool set focused on web, paper, and MCP research tools.
-3. The worker returns a compact evidence bundle.
-4. The primary agent uses that evidence to produce the final answer.
+### Main Agent
 
-If the worker fails, the primary agent continues without it.
+The main analyst agent owns:
 
-## Current cost and quota tradeoff
+- turn interpretation
+- plan generation
+- skill selection
+- tool selection
+- subagent delegation
+- answer synthesis
+- memory proposal generation
 
-The current runtime favors capability over strict token efficiency.
+### Specialist Subagents
 
-Today the primary agent system prompt may include:
+- `researcher`: literature search, project retrieval, connector-aware discovery
+- `drafter`: output drafting and canvas updates
+- `critic`: review, evidence-gap detection, and quality control
 
-- matched skill instructions
-- selected skill reference excerpts
-- compact task memory
-- optional research-worker evidence
-- project retrieval snippets
+## Memory Model
 
-That keeps the agent effective on complex tasks, but it also means the Strands request size can grow well beyond the raw user message. Combined with multi-step tool workflows, one user turn may consume several sequential Sonnet completions.
+### Short-Term Memory
 
-Known consequence:
+- persisted via LangGraph checkpointer
+- scoped to the active thread
+- supports continuation across turns
 
-- Bedrock `429` incidents on this stack are currently more correlated with prompt inflation plus multi-step tool loops than with simple per-request chat volume
+### Long-Term Memory
 
-Highest-risk workflows:
+- stored in the LangGraph Postgres store
+- mirrored from approved app memory records
+- queried through runtime memory retrieval
 
-- `deep_research`
-- report or bulletin generation
-- repeated file-generation / retry loops
-- turns that match several heavy repo skills at once
+### Retrieval Corpus
 
-## Why this shape
+- project documents embedded into pgvector
+- promoted project memories
+- external literature fetched on demand from Analyst MCP
 
-This repo benefits from specialization on research-heavy tasks, but it does not yet need a general-purpose agent swarm.
+## Skill Model
 
-- Reliability: one agent still owns the conversation and persistence.
-- Efficiency: delegation happens only on explicitly research-oriented turns.
-- Resilience: worker failure degrades to the existing single-agent path.
-- Containment: tools remain deterministic capabilities instead of autonomous peers.
+Repo `skills/*` are loaded into Deep Agents as runtime skills.
 
-## Near-term guidance
+Current runtime behavior:
 
-- Keep session memory on the primary agent only.
-- Keep research-worker memory ephemeral and request-scoped.
-- Pass only a compact brief into the worker and a compact evidence bundle back out.
-- Track request-shape growth in `agent_request_shape` logs before adding more prompt-side context.
-- Add more specialists only when a task class is frequent, clearly separable, and measurably improves latency or answer quality.
+- project/thread-pinned skills are passed from the app
+- matched skills are included in runtime context
+- skills are available to the main agent and subagents as configured
 
-## Future expansion
+`skill-creator` remains excluded from normal end-user runtime behavior.
 
-If the system needs more specialization later, add workers in this order:
+## Tooling Model
 
-1. `research worker` for breadth-first evidence gathering
-2. `execution worker` only if long-running deterministic tool workflows become common
-3. Avoid peer-to-peer autonomous agent meshes until there is a concrete eval-backed need
+The runtime exposes explicit tools for:
+
+- project document retrieval
+- project memory retrieval
+- literature search through Analyst MCP
+- capability inspection
+- canvas listing/saving
+- workspace-file publication into artifact storage
+- project memory proposal
+
+The app also exposes connector/tool metadata to the runtime, but runtime behavior should flow through the actual tool bindings rather than route-level shortcuts.
+
+## Research Routing
+
+Research-heavy turns now have extra guardrails:
+
+- higher recursion limit than normal chat turns
+- research prompts prefer `search_literature` and retrieval tools first
+- filesystem and shell tools are blocked for research turns
+- literature results are compacted before being returned to the model
+
+This prevents the earlier failure mode where the agent re-read huge evicted tool dumps and exhausted the model token budget.
+
+## Interrupts
+
+The runtime currently interrupts on explicit artifact publication. That keeps externally visible writes gated even though ordinary analysis and retrieval remain autonomous.

@@ -1,85 +1,52 @@
-# Operations Guide
+# Analyst MCP Operations
 
-This guide collects the main operational workflows.
+## Local Service Operations
 
-## Local Stack
-
-Start:
+Start the service:
 
 ```bash
-docker compose up -d --build
+pnpm dev:analyst-mcp
 ```
 
-Check:
+Check health:
 
 ```bash
-docker compose ps
 curl http://localhost:8000/health
-curl http://localhost:8000/providers
+curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/details
 ```
 
-## Daily Sync
+## Search
 
-Run one manual sync:
+Direct API search:
 
 ```bash
-docker compose exec api analyst-mcp sync --sources arxiv,openalex
+curl -H "x-api-key: $ANALYST_MCP_API_KEY" \
+  "http://localhost:8000/api/search?query=embodied%20ai&limit=5"
 ```
 
-The scheduler container runs this automatically using:
-
-- `SYNC_INTERVAL_SECONDS`
-- `SYNC_SOURCES`
-
-Daily behavior:
-
-- arXiv `src` and `pdf` manifest refresh when AWS credentials are configured
-- recent arXiv API metadata refresh
-- recent OpenAlex metadata refresh
-
-## Selective Article Collection
-
-Example:
+CLI examples:
 
 ```bash
-docker compose exec api analyst-mcp collect-articles "autonomous UAS OR embodied AI" --sources arxiv,openalex --date-from 2025-03-07 --limit 25
+analyst-mcp collect-articles "embodied AI" --sources arxiv,openalex --date-from 2025-01-01 --limit 10
+analyst-mcp literature-review "embodied AI for mobile robots" --sources arxiv,openalex --limit 10 --collect
 ```
 
-## Full arXiv Manifest Awareness
+## Database
 
-Load both manifests once:
+Analyst MCP can share the same AWS Postgres instance as the web app and runtime. When it does, it uses its own schema and metadata tables while the app continues using the public schema and LangGraph tables.
 
-```bash
-docker compose exec api analyst-mcp bootstrap-arxiv --kind src
-docker compose exec api analyst-mcp bootstrap-arxiv --kind pdf
-```
+## Storage
 
-These are cheap compared with downloading the archive corpus itself.
+When Open Analyst calls Analyst MCP with project headers, artifacts land in the active project storage namespace.
 
-## On-Demand arXiv Bulk Extraction
+Use this to verify S3-backed operation:
 
-```bash
-docker compose exec api analyst-mcp fetch-arxiv-members 2401.01234 --kind src
-docker compose exec api analyst-mcp fetch-arxiv-members 2401.01234 --kind pdf
-```
+1. Set the project or env backend to `s3`.
+2. Run a paper collection or download workflow.
+3. Confirm the resulting artifact resolves under the expected project prefix.
 
-## Database Checks
+## Operational Guidance
 
-```bash
-docker compose exec postgres psql -U analyst -d analyst -c "select count(*) as papers from papers;"
-docker compose exec postgres psql -U analyst -d analyst -c "select count(*) as chunks from article_chunks;"
-```
-
-## Graph Checks
-
-Open Neo4j Browser:
-
-- `http://localhost:7474`
-
-Run:
-
-```cypher
-MATCH (p:Paper)-[r]-(n)
-RETURN p, r, n
-LIMIT 50
-```
+- Prefer selective collection over indiscriminate bulk download.
+- Keep article acquisition project-scoped when working through Open Analyst.
+- Verify LiteLLM connectivity separately from Analyst MCP if search or review flows appear degraded.

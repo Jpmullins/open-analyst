@@ -1,4 +1,5 @@
 import {
+  customType,
   pgTable,
   uuid,
   varchar,
@@ -10,6 +11,35 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+const vector = (dimensions: number) =>
+  customType<{ data: number[] | null; driverData: string | null }>({
+    dataType() {
+      return `vector(${dimensions})`;
+    },
+    toDriver(value) {
+      if (!Array.isArray(value) || value.length === 0) {
+        return null;
+      }
+      const numbers = value
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item));
+      if (!numbers.length) {
+        return null;
+      }
+      return `[${numbers.join(",")}]`;
+    },
+    fromDriver(value) {
+      if (typeof value !== "string" || !value.trim()) {
+        return null;
+      }
+      return value
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((item) => Number(item.trim()))
+        .filter((item) => Number.isFinite(item));
+    },
+  });
 
 // --- projects ---
 
@@ -79,6 +109,7 @@ export const documents = pgTable(
     content: text("content"),
     metadata: jsonb("metadata").default({}),
     embedding: jsonb("embedding").$type<number[] | null>(),
+    embeddingVector: vector(1024)("embedding_vector"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -101,6 +132,7 @@ export const tasks = pgTable(
     type: varchar("type", { length: 50 }).default("chat"),
     status: varchar("status", { length: 50 }).default("idle"),
     cwd: text("cwd"),
+    context: jsonb("context").default({}),
     planSnapshot: jsonb("plan_snapshot"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -383,6 +415,38 @@ export const evidenceItems = pgTable(
   ]
 );
 
+// --- project_memories ---
+
+export const projectMemories = pgTable(
+  "project_memories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    memoryType: varchar("memory_type", { length: 100 }).notNull().default("note"),
+    status: varchar("status", { length: 32 }).notNull().default("proposed"),
+    title: varchar("title", { length: 500 }).notNull().default("Untitled memory"),
+    summary: text("summary").default(""),
+    content: text("content").notNull().default(""),
+    metadata: jsonb("metadata").default({}),
+    provenance: jsonb("provenance").default({}),
+    embeddingVector: vector(1024)("embedding_vector"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("project_memories_project_updated_idx").on(table.projectId, table.updatedAt),
+    index("project_memories_project_status_idx").on(table.projectId, table.status),
+    index("project_memories_task_idx").on(table.taskId),
+  ]
+);
+
 // --- canvas_documents ---
 
 export const canvasDocuments = pgTable(
@@ -440,5 +504,7 @@ export type ArtifactVersion = typeof artifactVersions.$inferSelect;
 export type NewArtifactVersion = typeof artifactVersions.$inferInsert;
 export type EvidenceItem = typeof evidenceItems.$inferSelect;
 export type NewEvidenceItem = typeof evidenceItems.$inferInsert;
+export type ProjectMemory = typeof projectMemories.$inferSelect;
+export type NewProjectMemory = typeof projectMemories.$inferInsert;
 export type CanvasDocument = typeof canvasDocuments.$inferSelect;
 export type NewCanvasDocument = typeof canvasDocuments.$inferInsert;

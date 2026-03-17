@@ -1,11 +1,14 @@
 import { getProject } from "~/lib/db/queries/projects.server";
-import { getProjectProfile } from "~/lib/db/queries/workspace.server";
 import type { RuntimeProjectContext } from "~/lib/runtime-client.server";
+import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
-export async function buildRuntimeProjectContext(projectId: string): Promise<RuntimeProjectContext> {
-  const [project, profile] = await Promise.all([
+export async function buildRuntimeProjectContext(
+  projectId: string,
+  taskId?: string
+): Promise<RuntimeProjectContext> {
+  const [project, workspaceContext] = await Promise.all([
     getProject(projectId),
-    getProjectProfile(projectId),
+    buildWorkspaceContext(projectId, taskId),
   ]);
 
   if (!project) {
@@ -15,24 +18,30 @@ export async function buildRuntimeProjectContext(projectId: string): Promise<Run
   return {
     project_id: project.id,
     project_name: project.name,
-    brief: profile?.brief || project.description || "",
-    retrieval_policy:
-      profile?.retrievalPolicy && typeof profile.retrievalPolicy === "object"
-        ? (profile.retrievalPolicy as Record<string, unknown>)
-        : {},
-    memory_profile:
-      profile?.memoryProfile && typeof profile.memoryProfile === "object"
-        ? (profile.memoryProfile as Record<string, unknown>)
-        : {},
-    templates: Array.isArray(profile?.templates)
-      ? (profile?.templates as Array<Record<string, unknown>>)
-      : [],
-    agent_policies:
-      profile?.agentPolicies && typeof profile.agentPolicies === "object"
-        ? (profile.agentPolicies as Record<string, unknown>)
-        : {},
-    connector_ids: Array.isArray(profile?.defaultConnectorIds)
-      ? profile.defaultConnectorIds.map((value) => String(value))
-      : [],
+    brief: workspaceContext.profile.brief || project.description || "",
+    retrieval_policy: workspaceContext.profile.retrievalPolicy,
+    memory_profile: workspaceContext.profile.memoryProfile,
+    templates: [],
+    agent_policies: workspaceContext.profile.agentPolicies,
+    connector_ids: workspaceContext.profile.defaultConnectorIds,
+    active_connector_ids: workspaceContext.activeConnectorIds,
+    available_tools: workspaceContext.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      source: tool.source,
+      server_id: tool.serverId,
+      server_name: tool.serverName,
+      active: tool.active,
+    })),
+    available_skills: workspaceContext.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      enabled: skill.enabled,
+      pinned: skill.pinned,
+      tools: skill.tools,
+      source_kind: skill.sourceKind,
+    })),
+    pinned_skill_ids: workspaceContext.pinnedSkillIds,
   };
 }

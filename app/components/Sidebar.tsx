@@ -1,10 +1,11 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
+  MessageSquare,
   Settings,
 } from "lucide-react";
 
-interface SidebarRun {
+interface SidebarTask {
   id: string;
   title: string | null;
   status: string | null;
@@ -18,22 +19,28 @@ interface SidebarCollection {
 }
 
 interface SidebarProps {
-  runs: SidebarRun[];
+  tasks: SidebarTask[];
   collections: SidebarCollection[];
   documentCounts: Record<string, number>;
 }
 
-export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
+function buildWorkspacePath(projectId: string, taskId: string | null): string {
+  return taskId ? `/projects/${projectId}/tasks/${taskId}` : `/projects/${projectId}`;
+}
+
+export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
   const { sidebarCollapsed, isConfigured } = useAppStore();
   const navigate = useNavigate();
   const params = useParams();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const activeProjectId = params.projectId || null;
-  const isKnowledgeRoute = location.pathname.endsWith("/knowledge");
+  const activeTaskId = params.taskId || null;
+  const activePanel = searchParams.get("panel");
+  const isSourcesView = activePanel === "sources" || location.pathname.endsWith("/knowledge");
+  const isWorkspaceHome = !activeTaskId && !isSourcesView;
 
   // Determine active IDs from URL
-  const activeRunId = params.runId || null;
   const activeCollectionId = searchParams.get("collection") || null;
 
   const handleCollectionClick = (collectionId: string) => {
@@ -54,8 +61,27 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
           sidebarCollapsed ? "px-1 py-2" : "p-3"
         }`}
       >
-        {/* === KNOWLEDGE ROUTE: Collections list === */}
-        {!sidebarCollapsed && activeProjectId && isKnowledgeRoute && (
+        {!sidebarCollapsed && activeProjectId && (
+          <div className="space-y-1 mb-4">
+            <button
+              type="button"
+              onClick={() => navigate(buildWorkspacePath(activeProjectId, null))}
+              className={`w-full text-left px-2 py-2 rounded-lg border transition-colors ${
+                isWorkspaceHome
+                  ? "border-accent/40 bg-accent-muted"
+                  : "border-transparent hover:bg-surface-hover"
+              }`}
+            >
+              <div className="flex items-center gap-2 text-sm">
+                <MessageSquare className="w-4 h-4" />
+                Workspace
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* === SOURCES VIEW: Collections list === */}
+        {!sidebarCollapsed && activeProjectId && isSourcesView && (
           <div className="space-y-1">
             <div className="mb-2">
               <div className="text-xs uppercase tracking-wide text-text-muted px-1">
@@ -88,7 +114,7 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
           </div>
         )}
 
-        {sidebarCollapsed && activeProjectId && isKnowledgeRoute && (
+        {sidebarCollapsed && activeProjectId && isSourcesView && (
           <div className="flex flex-col items-center gap-1">
             {collections.slice(0, 8).map((col) => (
               <button
@@ -108,24 +134,23 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
           </div>
         )}
 
-        {/* === NON-KNOWLEDGE ROUTE: Run list === */}
-        {!sidebarCollapsed && activeProjectId && !isKnowledgeRoute && (
+        {!sidebarCollapsed && activeProjectId && !isSourcesView && (
           <div className="space-y-1">
             <div className="mb-2">
               <div className="text-xs uppercase tracking-wide text-text-muted px-1">
-                Runs
+                Threads
               </div>
             </div>
-            {runs.length === 0 ? (
+            {tasks.length === 0 ? (
               <div className="text-sm text-text-muted px-1 py-2">
-                No runs yet.
+                No threads yet.
               </div>
             ) : (
-              runs.map((task) => (
+              tasks.map((task) => (
                 <div
                   key={task.id}
                   className={`group flex items-center gap-2 px-2 py-2 rounded-lg border transition-colors cursor-pointer ${
-                    activeRunId === task.id
+                    activeTaskId === task.id
                       ? "border-accent/40 bg-accent-muted"
                       : "border-transparent hover:border-accent/30 hover:bg-surface-hover"
                   }`}
@@ -134,7 +159,7 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
                     className="flex-1 text-left min-w-0"
                     onClick={() =>
                       navigate(
-                        `/projects/${activeProjectId}/runs/${task.id}`
+                        `/projects/${activeProjectId}/tasks/${task.id}`
                       )
                     }
                   >
@@ -149,22 +174,22 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
 
         {!sidebarCollapsed && !activeProjectId && (
           <div className="text-sm text-text-muted px-1 py-4 text-center">
-            Select a project to see runs.
+            Select a project to see threads.
           </div>
         )}
 
-        {sidebarCollapsed && activeProjectId && !isKnowledgeRoute && (
+        {sidebarCollapsed && activeProjectId && !isSourcesView && (
           <div className="flex flex-col items-center gap-1">
-            {runs.slice(0, 8).map((task) => (
+            {tasks.slice(0, 8).map((task) => (
               <button
                 key={task.id}
                 onClick={() =>
                   navigate(
-                    `/projects/${activeProjectId}/runs/${task.id}`
+                    `/projects/${activeProjectId}/tasks/${task.id}`
                   )
                 }
                 className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium ${
-                  activeRunId === task.id
+                  activeTaskId === task.id
                     ? "bg-accent-muted text-accent"
                     : "hover:bg-surface-hover text-text-muted"
                 }`}
@@ -181,7 +206,15 @@ export function Sidebar({ runs, collections, documentCounts }: SidebarProps) {
       {/* Footer */}
       <div className="p-2 border-t border-border">
         <button
-          onClick={() => navigate("/settings")}
+          onClick={() => {
+            if (!activeProjectId) {
+              navigate("/settings");
+              return;
+            }
+            const next = new URLSearchParams(searchParams);
+            next.set("panel", "settings");
+            navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
+          }}
           className={`w-full flex items-center ${
             sidebarCollapsed ? "justify-center" : "gap-3"
           } px-2 py-2 rounded-lg hover:bg-surface-hover transition-colors group`}

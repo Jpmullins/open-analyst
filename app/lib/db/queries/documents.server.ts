@@ -274,6 +274,26 @@ export async function updateDocumentEmbedding(
     .update(documents)
     .set({
       embedding,
+      embeddingVector: embedding,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
+    )
+    .returning();
+  if (!doc) throw new Error(`Document not found: ${documentId}`);
+  return doc;
+}
+
+export async function updateDocumentEmbeddingVector(
+  projectId: string,
+  documentId: string,
+  embeddingVector: number[] | null
+): Promise<Document> {
+  const [doc] = await db
+    .update(documents)
+    .set({
+      embeddingVector,
       updatedAt: new Date(),
     })
     .where(
@@ -440,7 +460,25 @@ export async function queryDocuments(
   }
 
   if (queryEmbedding) {
+    const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
+      limit: Math.max(limit * 2, 12),
+      collectionId: options.collectionId,
+    });
+    const vectorScores = new Map(vectorRows.map((row) => [row.id, row.score]));
+
     for (const doc of docs) {
+      const vectorScore = vectorScores.get(doc.id);
+      if (vectorScore && vectorScore > 0) {
+        const existing = aggregated.get(doc.id) || {
+          doc,
+          score: 0,
+          snippetTokens: tokenizeQuery(query),
+        };
+        existing.score = Math.max(existing.score, vectorScore);
+        aggregated.set(doc.id, existing);
+        continue;
+      }
+
       const embedding = Array.isArray(doc.embedding) ? doc.embedding : null;
       if (!embedding?.length) continue;
       const semanticScore = cosineSimilarity(queryEmbedding, embedding);
@@ -474,4 +512,41 @@ export async function queryDocuments(
     totalCandidates: docs.length,
     results: scored,
   };
+}
+
+async function queryDocumentsByVector(
+  projectId: string,
+  embedding: number[],
+  options: { limit?: number; collectionId?: string } = {}
+): Promise<Array<{ id: string; score: number }>> {
+  const normalized = normalizeEmbedding(embedding);
+  if (!normalized.length) {
+    return [];
+  }
+  const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
+  const vectorLiteral = sql.raw(`'${toVectorLiteral(normalized)}'::vector`);
+  const clauses = [eq(documents.projectId, projectId), sql`${documents.embeddingVector} is not null`];
+  if (options.collectionId) {
+    clauses.push(eq(documents.collectionId, options.collectionId));
+  }
+  const rows = await db
+    .select({
+      id: documents.id,
+      score: sql<number>`greatest(0, (1 - (${documents.embeddingVector} <=> ${vectorLiteral})) * 8)`,
+    })
+    .from(documents)
+    .where(and(...clauses))
+    .orderBy(sql`${documents.embeddingVector} <=> ${vectorLiteral}`)
+    .limit(limit);
+  return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
+}
+
+function normalizeEmbedding(values: number[]): number[] {
+  return values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+function toVectorLiteral(values: number[]): string {
+  return `[${normalizeEmbedding(values).join(",")}]`;
 }

@@ -333,17 +333,12 @@ export function selectMatchedSkills(
   const prompt = String(input.prompt || '')
     .trim()
     .toLowerCase();
-  const userTexts = Array.isArray(input.messages)
-    ? input.messages
-        .filter((message) => message?.role === 'user')
-        .map((message) =>
-          String(message?.content || '')
-            .trim()
-            .toLowerCase()
-        )
-        .filter(Boolean)
-    : [];
-  const fullText = [prompt, ...userTexts].filter(Boolean).join('\n');
+  const latestUserText = Array.isArray(input.messages)
+    ? [...input.messages]
+        .reverse()
+        .find((message) => message?.role === 'user' && String(message?.content || '').trim())
+    : null;
+  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
   const normalizedPrompt = normalizeText(prompt);
   const normalizedFullText = normalizeText(fullText);
 

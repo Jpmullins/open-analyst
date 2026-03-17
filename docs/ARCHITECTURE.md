@@ -1,60 +1,81 @@
 # Architecture
 
-Open Analyst v3 is a project-native analyst workspace built around project runs rather than task chat sessions.
+## System Shape
 
-## Core Services
+Open Analyst has three active services:
 
-- `app/`: React Router 7 application, UI surfaces, and same-origin `/api/*` routes.
-- `services/langgraph-runtime/`: Python runtime that executes project runs with LangGraph.
-- `services/analyst-mcp/`: acquisition and research service for literature search, collection, and downloads.
-- PostgreSQL: system of record for projects, runs, evidence, artifacts, and canvas documents.
+- `web`: React Router application and same-origin API layer
+- `langgraph-runtime`: Deep Agents orchestration runtime
+- `analyst-mcp`: external acquisition and literature workflow service
 
-## Runtime Flow
+The runtime is the core agent system. The web app persists product state and streams runtime events to the browser. Analyst MCP is a specialized connector service used when research requires external article search, collection, or artifact acquisition.
 
-1. A user starts or resumes a run from a project workspace.
-2. The web app persists the run and calls the LangGraph runtime.
-3. The runtime executes bounded graph nodes such as planning, research, drafting, and review.
-4. Large intermediate outputs are kept in persisted run state or project storage instead of being re-injected into prompts.
-5. Evidence, artifact versions, approvals, and run steps are written back to the app database.
-6. The UI streams progress into the Runs workspace and related evidence or canvas surfaces.
+## Request Flow
 
-## Product Model
+1. The browser sends a prompt to the web app.
+2. The web app persists the user message on a task/thread.
+3. The web app builds project, connector, skill, and memory context.
+4. The web app calls the runtime `/invoke` endpoint in streaming mode.
+5. The runtime executes a Deep Agents thread with LangGraph checkpoint/store persistence.
+6. Runtime events stream back as:
+   - `status`
+   - `tool_call_start`
+   - `tool_call_end`
+   - `memory_proposal`
+   - `text_delta`
+   - `error`
+7. The web app stores those events, persists the assistant message, and updates the task summary.
+
+## User-Facing Model
 
 - `projects`: top-level workspace boundary
-- `project_profiles`: project brief, retrieval policy, memory profile, templates, and agent policies
-- `project_threads`: analyst-facing conversation or work threads
-- `project_runs`: executable runs within a project
-- `run_steps`: timeline events and specialist activity
-- `approvals`: human-in-the-loop checkpoints
-- `evidence_items`: normalized research evidence with provenance
-- `artifacts`: generated or imported deliverables
-- `artifact_versions`: version history for artifacts
-- `canvas_documents`: editable workspace documents
+- `tasks`: the persisted chat thread object currently used by the UI
+- `messages`: user and assistant turns on a task
+- `task_events`: structured runtime stream events
+- `project_memories`: approval and UI-facing durable memory records
+- `documents`: indexed project documents
+- `artifacts` and `artifact_versions`: stored outputs
+- `canvas_documents`: editable markdown-first workspace documents
 
-Legacy `tasks`, `messages`, and `task_events` may still exist in older databases during migration windows, but they are no longer the active product model.
+The current codebase still uses `tasks/messages/task_events` as the active user-facing thread model. Older run-first docs are obsolete.
 
-## API Shape
+## Persistence Layers
 
-The run model centers on project-scoped APIs such as:
+### Postgres
 
-- `POST /api/projects/:projectId/runs`
-- `GET /api/projects/:projectId/runs/:runId/stream`
-- `GET /api/projects/:projectId/runs/:runId/steps`
-- `POST /api/projects/:projectId/runs/:runId/interrupt`
-- `POST /api/projects/:projectId/runs/:runId/approve`
-- `GET /api/projects/:projectId/evidence`
-- `POST /api/projects/:projectId/canvas-documents`
-- `POST /api/projects/:projectId/artifacts/:artifactId/versions`
+Used for:
 
-## Observability
+- application tables via Drizzle
+- pgvector document retrieval
+- LangGraph checkpointer state
+- LangGraph store-backed long-term memory
+- Analyst MCP schema and metadata
 
-The runtime is instrumented around OpenTelemetry-friendly spans for:
+### S3 Or Local Artifact Storage
 
-- run lifecycle
-- graph node execution
-- retrieval and connector calls
-- approvals
-- artifact creation
-- persistence
+Artifact routing works like this:
 
-LangSmith is the primary evaluation and tracing destination, with room for other OpenTelemetry-compatible backends.
+- blank `ARTIFACT_STORAGE_BACKEND` -> local artifact storage
+- `ARTIFACT_STORAGE_BACKEND=s3` -> S3 artifact storage
+- project settings can override the backend per project
+
+### Workspace Files
+
+The UI and app maintain project workspace roots and artifact metadata. The runtime no longer relies on browsing the repo filesystem for research behavior. Research turns now favor explicit retrieval and connector tools instead.
+
+## Retrieval
+
+There are two primary retrieval paths:
+
+- project documents via pgvector-backed search
+- project long-term memories via the LangGraph store, with app memory records synced into that store
+
+Research-heavy turns can additionally use Analyst MCP literature search through explicit runtime tools.
+
+## UI Shell
+
+- left panel: workspace navigation, settings, skills, connectors, memory
+- center: interactive chat thread
+- right panel: source preview, artifacts, canvas
+
+The app is no longer intended to be run-first. The chat thread is the primary control surface.

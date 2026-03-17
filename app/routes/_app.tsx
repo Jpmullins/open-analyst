@@ -1,13 +1,13 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { Outlet, useLoaderData, useLocation, useRevalidator } from 'react-router';
 import { useAppStore } from '~/lib/store';
 import { applyTheme, setTheme, getTheme } from '~/lib/theme';
+import { ProjectLeftPanel } from '~/components/ProjectLeftPanel';
 import { Sidebar } from '~/components/Sidebar';
 import { PermissionDialog } from '~/components/PermissionDialog';
 import { ConfigModal } from '~/components/ConfigModal';
 import { TopNav } from '~/components/TopNav';
-import { SandboxSyncToast } from '~/components/SandboxSyncToast';
-import { FileViewerPanel } from '~/components/FileViewerPanel';
+import { ProjectContextPanel } from '~/components/ProjectContextPanel';
 import type { AppConfig } from '~/lib/types';
 import { getBrowserConfig, saveBrowserConfig } from '~/lib/browser-config';
 import { headlessSaveConfig } from '~/lib/headless-api';
@@ -21,7 +21,6 @@ export default function AppLayout() {
     showConfigModal,
     isConfigured,
     appConfig,
-    sandboxSyncStatus,
     updateSettings,
     setShowConfigModal,
     setIsConfigured,
@@ -36,7 +35,7 @@ export default function AppLayout() {
   const location = useLocation();
 
   // Bridge: sync loader data into Zustand
-  const [hydrated, setHydrated] = useState(false);
+  const hydrated = Boolean(loaderData);
   useEffect(() => {
     if (loaderData) {
       setProjects(loaderData.projects);
@@ -50,7 +49,6 @@ export default function AppLayout() {
           setAppConfig({ ...current, model: loaderData.model });
         }
       }
-      setHydrated(true);
     }
   }, [loaderData, setProjects, setActiveProjectId, setWorkingDir, setIsConfigured, setAppConfig]);
 
@@ -103,16 +101,18 @@ export default function AppLayout() {
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
-          runs={loaderData?.sidebarRuns ?? []}
+          tasks={loaderData?.sidebarTasks ?? []}
           collections={loaderData?.sidebarCollections ?? []}
           documentCounts={loaderData?.sidebarDocumentCounts ?? {}}
         />
+
+        <ProjectLeftPanel />
 
         <main className="flex-1 flex flex-col overflow-hidden bg-background">
           <Outlet />
         </main>
 
-        <FileViewerPanel />
+        <ProjectContextPanel />
       </div>
 
       {pendingPermission && <PermissionDialog permission={pendingPermission} />}
@@ -125,7 +125,6 @@ export default function AppLayout() {
         isFirstRun={!isConfigured}
       />
 
-      <SandboxSyncToast status={sandboxSyncStatus} />
     </div>
   );
 }

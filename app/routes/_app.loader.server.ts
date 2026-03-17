@@ -3,7 +3,7 @@ import {
   getSettings,
   upsertSettings,
 } from "~/lib/db/queries/settings.server";
-import { listRuns } from "~/lib/db/queries/runs.server";
+import { listTasks } from "~/lib/db/queries/tasks.server";
 import {
   listCollections,
   getCollectionDocumentCounts,
@@ -30,14 +30,14 @@ export async function loader() {
     await upsertSettings({ activeProjectId: null });
   }
 
-  // Load sidebar data for the active project (runs on every navigation via revalidate)
-  let sidebarRuns: Awaited<ReturnType<typeof listRuns>> = [];
+  // Load sidebar data for the active project (tasks on every navigation via revalidate)
+  let sidebarTasks: Awaited<ReturnType<typeof listTasks>> = [];
   let sidebarCollections: Awaited<ReturnType<typeof listCollections>> = [];
   let sidebarDocumentCounts: Record<string, number> = {};
   if (activeProjectId) {
-    [sidebarRuns, sidebarCollections, sidebarDocumentCounts] =
+    [sidebarTasks, sidebarCollections, sidebarDocumentCounts] =
       await Promise.all([
-        listRuns(activeProjectId),
+        listTasks(activeProjectId),
         listCollections(activeProjectId),
         getCollectionDocumentCounts(activeProjectId),
       ]);
@@ -49,7 +49,7 @@ export async function loader() {
     workingDir: settings.workingDir || "",
     model: resolvedModel,
     isConfigured: true,
-    sidebarRuns,
+    sidebarTasks,
     sidebarCollections,
     sidebarDocumentCounts,
   };

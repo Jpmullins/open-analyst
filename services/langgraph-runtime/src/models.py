@@ -22,6 +22,13 @@ class RuntimeProjectContext(BaseModel):
     templates: list[dict[str, Any]] = Field(default_factory=list)
     agent_policies: dict[str, Any] = Field(default_factory=dict)
     connector_ids: list[str] = Field(default_factory=list)
+    active_connector_ids: list[str] = Field(default_factory=list)
+    available_tools: list[dict[str, Any]] = Field(default_factory=list)
+    available_skills: list[dict[str, Any]] = Field(default_factory=list)
+    pinned_skill_ids: list[str] = Field(default_factory=list)
+    matched_skill_ids: list[str] = Field(default_factory=list)
+    api_base_url: str = ""
+    collection_id: str | None = None
 
 
 class RuntimeRunRequest(BaseModel):
@@ -59,11 +66,14 @@ class RuntimeState(BaseModel):
     project: RuntimeProjectContext
     messages: list[Message] = Field(default_factory=list)
     status: RunStatus = "queued"
+    active_skill_ids: list[str] = Field(default_factory=list)
     active_plan: list[RuntimePlanItem] = Field(default_factory=list)
     evidence_bundle: list[RuntimeEvidenceItem] = Field(default_factory=list)
-    draft: str = ""
+    source_briefs: list[dict[str, Any]] = Field(default_factory=list)
+    memory_briefs: list[dict[str, Any]] = Field(default_factory=list)
     final_text: str = ""
     approvals: list[dict[str, Any]] = Field(default_factory=list)
+    memory_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RuntimeInvocationResult(BaseModel):
@@ -72,6 +82,7 @@ class RuntimeInvocationResult(BaseModel):
     active_plan: list[RuntimePlanItem] = Field(default_factory=list)
     evidence_bundle: list[RuntimeEvidenceItem] = Field(default_factory=list)
     approvals: list[dict[str, Any]] = Field(default_factory=list)
+    memory_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RuntimeEvent(BaseModel):
@@ -80,6 +91,12 @@ class RuntimeEvent(BaseModel):
     phase: str = ""
     status: str = "running"
     actor: str = "supervisor"
+    toolUseId: str | None = None
+    toolName: str | None = None
+    toolInput: dict[str, Any] | None = None
+    toolOutput: str | None = None
+    toolStatus: str | None = None
     plan: list[dict[str, Any]] | None = None
     evidence: list[dict[str, Any]] | None = None
+    memoryCandidates: list[dict[str, Any]] | None = None
     error: str | None = None

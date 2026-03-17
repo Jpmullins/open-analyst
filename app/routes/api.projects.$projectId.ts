@@ -6,6 +6,7 @@ import {
   listProjects,
 } from "~/lib/db/queries/projects.server";
 import { upsertSettings } from "~/lib/db/queries/settings.server";
+import { upsertProjectProfile } from "~/lib/db/queries/workspace.server";
 import { resolveProjectWorkspace } from "~/lib/project-storage.server";
 import type { Route } from "./+types/api.projects.$projectId";
 
@@ -26,7 +27,41 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method === "PATCH") {
     const body = await request.json();
     try {
-      const project = await updateProject(projectId, body);
+      const {
+        brief,
+        retrievalPolicy,
+        memoryProfile,
+        agentPolicies,
+        defaultConnectorIds,
+        ...projectUpdates
+      } = body as Record<string, unknown>;
+      const project = await updateProject(projectId, projectUpdates);
+      if (
+        brief !== undefined ||
+        retrievalPolicy !== undefined ||
+        memoryProfile !== undefined ||
+        agentPolicies !== undefined ||
+        defaultConnectorIds !== undefined
+      ) {
+        await upsertProjectProfile(projectId, {
+          brief: typeof brief === "string" ? brief : undefined,
+          retrievalPolicy:
+            retrievalPolicy && typeof retrievalPolicy === "object"
+              ? (retrievalPolicy as Record<string, unknown>)
+              : undefined,
+          memoryProfile:
+            memoryProfile && typeof memoryProfile === "object"
+              ? (memoryProfile as Record<string, unknown>)
+              : undefined,
+          agentPolicies:
+            agentPolicies && typeof agentPolicies === "object"
+              ? (agentPolicies as Record<string, unknown>)
+              : undefined,
+          defaultConnectorIds: Array.isArray(defaultConnectorIds)
+            ? defaultConnectorIds.map((value) => String(value))
+            : undefined,
+        });
+      }
       await mkdir(resolveProjectWorkspace(project), { recursive: true });
       return Response.json({ project });
     } catch (err) {

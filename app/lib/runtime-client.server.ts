@@ -9,6 +9,28 @@ export interface RuntimeProjectContext {
   templates: Array<Record<string, unknown>>;
   agent_policies: Record<string, unknown>;
   connector_ids: string[];
+  active_connector_ids: string[];
+  available_tools: Array<{
+    name: string;
+    description: string;
+    source: string;
+    server_id?: string;
+    server_name?: string;
+    active: boolean;
+  }>;
+  available_skills?: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    pinned: boolean;
+    tools: string[];
+    source_kind?: string;
+  }>;
+  pinned_skill_ids?: string[];
+  matched_skill_ids?: string[];
+  api_base_url?: string;
+  collection_id?: string;
 }
 
 export interface RuntimeMessage {

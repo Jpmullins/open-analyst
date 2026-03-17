@@ -32,19 +32,33 @@ export function SandboxSyncToast({ status }: Props) {
 
   useEffect(() => {
     if (status && status.phase !== 'ready') {
-      setIsVisible(true);
-      setFadeOut(false);
+      const frame = requestAnimationFrame(() => {
+        setIsVisible(true);
+        setFadeOut(false);
+      });
+      return () => cancelAnimationFrame(frame);
     } else if (status?.phase === 'ready') {
       // Show completion briefly then fade out
+      const frame = requestAnimationFrame(() => {
+        setIsVisible(true);
+        setFadeOut(false);
+      });
       const timer = setTimeout(() => {
         setFadeOut(true);
         setTimeout(() => {
           setIsVisible(false);
         }, 300);
       }, 1500);
-      return () => clearTimeout(timer);
+      return () => {
+        cancelAnimationFrame(frame);
+        clearTimeout(timer);
+      };
     } else {
-      setIsVisible(false);
+      const frame = requestAnimationFrame(() => {
+        setIsVisible(false);
+        setFadeOut(false);
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [status]);
 

@@ -29,6 +29,13 @@
       "when": 1778716800000,
       "tag": "0003_v3_clean_slate",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779840000000,
+      "tag": "0004_agentic_workspace",
+      "breakpoints": true
     }
   ]
 }

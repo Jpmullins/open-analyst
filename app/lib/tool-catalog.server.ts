@@ -5,14 +5,13 @@ import type { McpServerConfig } from './types';
 const CORE_TOOL_NAMES = ['collection_overview', 'collection_artifact_metadata', 'capture_artifact'];
 
 export function isToolCatalogQuestion(input: { prompt?: string; messages?: Array<{ role?: string; content?: unknown }> }): boolean {
-  const prompt = String(input.prompt || '').toLowerCase();
-  const userText = Array.isArray(input.messages)
-    ? input.messages
-        .filter((message) => message?.role === 'user')
-        .map((message) => String(message?.content || '').toLowerCase())
-        .join('\n')
-    : '';
-  const fullText = [prompt, userText].filter(Boolean).join('\n');
+  const prompt = String(input.prompt || '').trim().toLowerCase();
+  const latestUserText = Array.isArray(input.messages)
+    ? [...input.messages]
+        .reverse()
+        .find((message) => message?.role === 'user' && String(message?.content || '').trim())
+    : null;
+  const fullText = prompt || String(latestUserText?.content || '').trim().toLowerCase();
   return (
     (fullText.includes('what tools') || fullText.includes('which tools') || fullText.includes('available tools')) ||
     ((fullText.includes('tool') || fullText.includes('connector') || fullText.includes('mcp')) &&

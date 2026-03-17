@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useFetcher, useLocation, useNavigate, useParams } from "react-router";
+import { useFetcher, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   ChevronDown,
@@ -28,6 +28,7 @@ export function TopNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
+  const [searchParams] = useSearchParams();
   const createFetcher = useFetcher();
   const projectMutationFetcher = useFetcher();
 
@@ -45,7 +46,11 @@ export function TopNav() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeProjectId = params.projectId || null;
+  const activeTaskId = params.taskId || null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
+
+  const buildWorkspacePath = (projectId: string, taskId?: string | null) =>
+    taskId ? `/projects/${projectId}/tasks/${taskId}` : `/projects/${projectId}`;
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -66,9 +71,11 @@ export function TopNav() {
     if (createFetcher.state === "idle" && createFetcher.data) {
       const data = createFetcher.data as any;
       if (data?.project?.id) {
-        navigate(`/projects/${data.project.id}`);
-        setDropdownOpen(false);
-        setNewProjectName("");
+        queueMicrotask(() => {
+          navigate(`/projects/${data.project.id}`);
+          setDropdownOpen(false);
+          setNewProjectName("");
+        });
       }
     }
   }, [createFetcher.state, createFetcher.data, navigate]);
@@ -79,8 +86,10 @@ export function TopNav() {
     }
     const data = projectMutationFetcher.data as any;
     if (data?.project?.id) {
-      upsertProject(data.project);
-      setProjectSettingsOpen(false);
+      queueMicrotask(() => {
+        upsertProject(data.project);
+        setProjectSettingsOpen(false);
+      });
     }
   }, [projectMutationFetcher.state, projectMutationFetcher.data, upsertProject]);
 
@@ -153,8 +162,14 @@ export function TopNav() {
   };
 
   // Determine which section tab is active
-  const isKnowledge = location.pathname.endsWith("/knowledge");
-  const isDashboard = activeProjectId && !isKnowledge;
+  const activePanel = searchParams.get("panel");
+  const isSources = activePanel === "sources" || location.pathname.endsWith("/knowledge");
+  const isCanvas = activePanel === "canvas" || location.pathname.endsWith("/canvas");
+  const isWorkspace =
+    Boolean(activeProjectId) &&
+    !isSources &&
+    !isCanvas &&
+    !location.pathname.endsWith("/settings");
 
   return (
     <>
@@ -283,26 +298,42 @@ export function TopNav() {
             <div className="w-px h-5 bg-border" />
             <div className="flex items-center gap-0.5">
               <button
-                onClick={() => navigate(`/projects/${activeProjectId}`)}
+                onClick={() => navigate(buildWorkspacePath(activeProjectId, activeTaskId))}
                 className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isDashboard
+                  isWorkspace
                     ? "text-accent font-medium bg-accent-muted"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
                 }`}
               >
-                Dashboard
+                Workspace
               </button>
               <button
-                onClick={() =>
-                  navigate(`/projects/${activeProjectId}/knowledge`)
-                }
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("panel", "sources");
+                  navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
+                }}
                 className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isKnowledge
+                  isSources
                     ? "text-accent font-medium bg-accent-muted"
                     : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
                 }`}
               >
-                Knowledge
+                Sources
+              </button>
+              <button
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("panel", "canvas");
+                  navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
+                }}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  isCanvas
+                    ? "text-accent font-medium bg-accent-muted"
+                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
+                }`}
+              >
+                Canvas
               </button>
             </div>
           </>
@@ -345,7 +376,15 @@ export function TopNav() {
             )}
           </button>
           <button
-            onClick={() => navigate("/settings")}
+            onClick={() => {
+              if (!activeProjectId) {
+                navigate("/settings");
+                return;
+              }
+              const next = new URLSearchParams(searchParams);
+              next.set("panel", "settings");
+              navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
+            }}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-secondary"
             aria-label="Settings"
           >
@@ -374,6 +413,7 @@ export function TopNav() {
         onCancel={() => setDeleteDialog(null)}
       />
       <ProjectSettingsDialog
+        key={`${activeProject?.id ?? "none"}:${projectSettingsOpen ? "open" : "closed"}`}
         open={projectSettingsOpen}
         project={activeProject || null}
         isSaving={projectMutationFetcher.state !== "idle"}

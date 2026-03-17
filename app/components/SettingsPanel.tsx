@@ -45,7 +45,7 @@ import {
   headlessValidateSkillPath,
 } from '~/lib/headless-api';
 
-interface SettingsInitialData {
+export interface SettingsInitialData {
   credentials?: any[];
   mcpServers?: any[];
   mcpPresets?: Record<string, any>;
@@ -60,6 +60,7 @@ interface SettingsPanelProps {
   activeTab?: 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
   onTabChange?: (tab: TabId) => void;
   initialData?: SettingsInitialData;
+  variant?: 'modal' | 'sidebar';
 }
 
 type TabId = 'api' | 'sandbox' | 'credentials' | 'connectors' | 'skills' | 'logs';
@@ -90,6 +91,10 @@ type MCPServerConfig = {
   enabled: boolean;
 };
 
+type SettingsPresetServer = Partial<MCPServerConfig> & {
+  name?: string;
+};
+
 const TABS: Array<{ id: TabId; label: string; description: string; icon: any }> = [
   { id: 'api', label: 'API', description: 'Provider, model, and key setup', icon: Settings },
   { id: 'sandbox', label: 'Sandbox', description: 'Runtime isolation guidance', icon: Shield },
@@ -99,18 +104,29 @@ const TABS: Array<{ id: TabId; label: string; description: string; icon: any }> 
   { id: 'logs', label: 'Logs', description: 'Service diagnostics and export', icon: Database },
 ];
 
+function buildPresetServerId(key: string): string {
+  return `mcp-${key}`;
+}
+
 export function SettingsPanel({
   isOpen,
   onClose,
   activeTab = 'api',
   onTabChange,
   initialData,
+  variant = 'modal',
 }: SettingsPanelProps) {
 
   if (!isOpen) return null;
 
   const content = (
-    <div className="bg-surface rounded-2xl shadow-2xl w-full max-w-5xl mx-auto my-4 max-h-[88vh] overflow-hidden border border-border flex">
+    <div
+      className={
+        variant === 'sidebar'
+          ? 'w-[420px] max-w-[48vw] h-full border-l border-border bg-surface flex overflow-hidden shrink-0'
+          : 'bg-surface rounded-2xl shadow-2xl w-full max-w-5xl mx-auto my-4 max-h-[88vh] overflow-hidden border border-border flex'
+      }
+    >
       <div className="w-72 border-r border-border p-3 space-y-1">
         {TABS.map((tab) => (
           <button
@@ -148,7 +164,7 @@ export function SettingsPanel({
   return content;
 }
 
-function APISettingsTab({ currentModel }: { currentModel?: string }) {
+export function APISettingsTab({ currentModel }: { currentModel?: string }) {
   const setAppConfig = useAppStore((state) => state.setAppConfig);
   const setIsConfigured = useAppStore((state) => state.setIsConfigured);
   const [config, setConfig] = useState<AppConfig>(() => getBrowserConfig());
@@ -254,7 +270,7 @@ function SandboxTab() {
   );
 }
 
-function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
+export function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
   const [items, setItems] = useState<Credential[]>(initialItems as Credential[] || []);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<Partial<Credential>>({ type: 'api' });
@@ -364,7 +380,13 @@ function CredentialsTab({ initialItems }: { initialItems?: any[] }) {
   );
 }
 
-function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: any[]; initialPresets?: Record<string, any> }) {
+export function ConnectorsTab({
+  initialServers,
+  initialPresets,
+}: {
+  initialServers?: MCPServerConfig[];
+  initialPresets?: Record<string, SettingsPresetServer>;
+}) {
   const [servers, setServers] = useState<MCPServerConfig[]>(initialServers as MCPServerConfig[] || []);
   const [statuses, setStatuses] = useState<
     Array<{
@@ -423,9 +445,14 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
   };
 
   useEffect(() => {
-    void loadAll();
-    const timer = setInterval(() => void refreshStatus(), 15000);
-    return () => clearInterval(timer);
+    const loadTimer = setTimeout(() => {
+      void loadAll();
+    }, 0);
+    const refreshTimer = setInterval(() => void refreshStatus(), 15000);
+    return () => {
+      clearTimeout(loadTimer);
+      clearInterval(refreshTimer);
+    };
   }, []);
 
   const addPreset = async (key: string) => {
@@ -433,17 +460,17 @@ function ConnectorsTab({ initialServers, initialPresets }: { initialServers?: an
     if (!preset) return;
     try {
       await headlessSaveMcpServer({
-      id: `mcp-${key}-${Date.now()}`,
-      name: preset.name || key,
-      alias: preset.alias,
-      type: preset.type || 'stdio',
-      command: preset.command,
-      args: Array.isArray(preset.args) ? preset.args : [],
-      env: preset.env || {},
-      url: preset.url,
-      headers: preset.headers || {},
-      enabled: true,
-    } as any);
+        id: buildPresetServerId(key),
+        name: preset.name || key,
+        alias: preset.alias,
+        type: preset.type || 'stdio',
+        command: preset.command,
+        args: Array.isArray(preset.args) ? preset.args : [],
+        env: preset.env || {},
+        url: preset.url,
+        headers: preset.headers || {},
+        enabled: true,
+      } as MCPServerConfig);
       await loadAll();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -528,7 +555,15 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
     }
   };
 
-  useEffect(() => { if (!initialSkills) void load(); }, []);
+  useEffect(() => {
+    if (initialSkills) {
+      return;
+    }
+    const loadTimer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(loadTimer);
+  }, [initialSkills]);
 
   const install = async (folderPath?: string) => {
     setShowInstallDialog(false);
@@ -608,7 +643,7 @@ function SkillsTab({ initialSkills }: { initialSkills?: any[] }) {
   );
 }
 
-function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
+export function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
   const [files, setFiles] = useState<Array<{ name: string; path: string; size: number; mtime: string | Date }>>([]);
   const [dir, setDir] = useState('');
   const [enabled, setEnabled] = useState(initialEnabled ?? true);
@@ -628,9 +663,14 @@ function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
   };
 
   useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), 3000);
-    return () => clearInterval(timer);
+    const loadTimer = setTimeout(() => {
+      void load();
+    }, 0);
+    const pollTimer = setInterval(() => void load(), 3000);
+    return () => {
+      clearTimeout(loadTimer);
+      clearInterval(pollTimer);
+    };
   }, []);
 
   const toggleEnabled = async () => {
@@ -680,7 +720,7 @@ function LogsTab({ initialEnabled }: { initialEnabled?: boolean }) {
   );
 }
 
-function Banner({ tone, text }: { tone: 'error' | 'success' | 'info'; text: string }) {
+export function Banner({ tone, text }: { tone: 'error' | 'success' | 'info'; text: string }) {
   const style = tone === 'error'
     ? 'bg-error/10 text-error'
     : tone === 'success'

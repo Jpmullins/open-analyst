@@ -1,56 +1,70 @@
 # Validation
 
-Open Analyst now has a repo-backed validation matrix and a report generator so the full surface area is accounted for in one place.
+## Main Commands
 
-## Commands
+Run these from the repo root.
 
-- `pnpm validate:inventory`
-  - Checks that the validation matrix matches the current repo skills, local tool catalog, and `analyst_mcp` tool surface.
-- `pnpm validate:full`
-  - Runs the inventory check, the full Vitest suite, the Strands agent pytest suite, and the `analyst_mcp` pytest suite.
-  - Writes JSON and Markdown reports to `test-results/validation/`.
-- `pnpm validate:full:live`
-  - Runs everything in `validate:full` and then the Playwright UI suite.
-  - Use this when you want the live browser/UI rundown as well.
+### Web/App
 
-## Matrix
+```bash
+pnpm lint
+pnpm build
+pnpm test -- --run
+```
 
-The source of truth is [scripts/validation/matrix.json](/home/ubuntu/code/ARLIS/open-analyst/scripts/validation/matrix.json).
+### Runtime
 
-It inventories:
+```bash
+pnpm test:runtime
+```
 
-- built-in repo skills
-- runtime built-in skills
-- local Strands tools
-- `analyst_mcp` MCP tools
-- UI surfaces
-- settings/options
-- live integration flows
+### Analyst MCP
 
-Each item is marked as one of:
+```bash
+pnpm test:analyst-mcp
+```
 
-- `automated-local`
-- `automated-live`
-- `manual-only`
-- `manual-live`
+### Browser
 
-## Reports
+```bash
+pnpm test:e2e
+```
 
-`pnpm validate:full` and `pnpm validate:full:live` generate:
+## Recommended Validation Order
 
-- `test-results/validation/validation-report.json`
-- `test-results/validation/validation-report.md`
+1. `pnpm lint`
+2. `pnpm build`
+3. `pnpm test -- --run`
+4. `pnpm test:runtime`
+5. `pnpm test:analyst-mcp`
+6. `pnpm test:e2e` when a real browser stack is available
 
-The report includes:
+## Manual Checks
 
-- inventory counts
-- inventory sync issues
-- test command results and durations
-- overall pass/fail state
+Use these when validating the full system:
 
-## Manual Live Checklist
+1. Start the stack with `pnpm dev:all`.
+2. Create or select a project.
+3. Send a normal chat prompt.
+4. Send a research-heavy prompt and confirm:
+   - literature search tools are used
+   - no repo filesystem wandering occurs
+   - the response completes cleanly
+5. Open settings from the left panel.
+6. Open a source preview or canvas on the right panel.
+7. Promote a memory and confirm it appears in runtime-backed memory retrieval.
+8. Capture or generate an artifact and confirm it lands in local storage or S3 depending on backend configuration.
 
-These checks are intentionally kept manual because they depend on long-running runtime state or external infrastructure behavior:
+## Infrastructure Checks
 
-1. Restart the Strands agent and confirm an existing `session_id` continues the conversation correctly.
-2. With S3 artifact storage enabled, import or capture a file and confirm the stored artifact opens through the app link and the raw `storageUri` resolves to S3.
+```bash
+curl http://localhost:5173/api/health
+curl http://localhost:8081/health
+curl http://localhost:8000/health
+curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
+```
+
+## Notes
+
+- Playwright and some integration tests may require Docker or a working browser runtime.
+- Runtime issues that look like LiteLLM failures can still be generic runtime exceptions; inspect runtime error events and logs rather than assuming model connectivity is the cause.

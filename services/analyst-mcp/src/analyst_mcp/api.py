@@ -150,6 +150,25 @@ def create_app() -> FastAPI:
         papers = await analyst_service.list_papers(query=query, provider=provider, limit=limit)
         return {"papers": [paper.model_dump(mode="json") for paper in papers], "count": len(papers)}
 
+    @app.get("/api/search")
+    async def api_search_literature(
+        query: str,
+        sources: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = Query(default=10, ge=1, le=50),
+    ):
+        analyst_service: AnalystService = app.state.service
+        return (
+            await analyst_service.search_literature(
+                query=query,
+                sources=sources,
+                date_from=date_from,
+                date_to=date_to,
+                limit=limit,
+            )
+        ).model_dump(mode="json")
+
     @app.get("/api/collections")
     async def api_list_collections():
         analyst_service: AnalystService = app.state.service

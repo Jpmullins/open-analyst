@@ -48,10 +48,6 @@ export function ProjectSettingsDialog({
   const s3PrefixId = useId();
 
   useEffect(() => {
-    setForm(toInitialState(project));
-  }, [project, open]);
-
-  useEffect(() => {
     if (open) {
       dialogRef.current?.showModal();
     } else {
