@@ -1,6 +1,6 @@
 import { useAppStore } from '~/lib/store';
 import type { ArtifactMeta } from '~/lib/types';
-import { X, Download, FileText, FileSpreadsheet, Image, BookOpen, FileAudio, FileVideo } from 'lucide-react';
+import { X, Download, FileText, FileSpreadsheet, Image, BookOpen, FileAudio, FileVideo, Loader2 } from 'lucide-react';
 import { DocxRenderer } from '~/components/file-renderers/DocxRenderer';
 import { XlsxRenderer } from '~/components/file-renderers/XlsxRenderer';
 import { TextRenderer } from '~/components/file-renderers/TextRenderer';
@@ -114,17 +114,31 @@ function MetadataPreview({ artifact }: { artifact: ArtifactMeta }) {
 }
 
 function FileContent({ artifact }: { artifact: ArtifactMeta }) {
+  const lowerFilename = artifact.filename.toLowerCase();
+  const isPdf = artifact.mimeType === 'application/pdf';
+  const isImage = artifact.mimeType.startsWith('image/');
+  const isDocx = isDocxMime(artifact);
+  const isXlsx = isXlsxMime(artifact);
+  const isHtml = isHtmlMime(artifact.mimeType, lowerFilename);
+  const isAudio = isAudioMime(artifact.mimeType);
+  const isVideo = isVideoMime(artifact.mimeType);
+  const isText = isTextMime(artifact.mimeType);
   const needsObjectUrl =
-    artifact.mimeType === 'application/pdf' ||
-    artifact.mimeType.startsWith('image/') ||
-    isHtmlMime(artifact.mimeType, artifact.filename.toLowerCase()) ||
-    isAudioMime(artifact.mimeType) ||
-    isVideoMime(artifact.mimeType);
+    isPdf || isImage || isDocx || isXlsx || isHtml || isAudio || isVideo || isText;
   const objectUrl = useArtifactObjectUrl(artifact.artifactUrl, needsObjectUrl);
-  const previewUrl = objectUrl || artifact.artifactUrl;
+  const previewUrl = needsObjectUrl ? objectUrl : artifact.artifactUrl;
+
+  if (needsObjectUrl && !previewUrl) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-text-muted">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Loading preview...
+      </div>
+    );
+  }
 
   // PDF
-  if (artifact.mimeType === 'application/pdf') {
+  if (isPdf) {
     return (
       <iframe
         src={previewUrl}
@@ -135,7 +149,7 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   // Image
-  if (artifact.mimeType.startsWith('image/')) {
+  if (isImage) {
     return (
       <div className="flex items-center justify-center p-4 overflow-auto h-full">
         <img
@@ -148,20 +162,20 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   // DOCX
-  if (isDocxMime(artifact)) {
-    return <DocxRenderer url={artifact.artifactUrl} />;
+  if (isDocx) {
+    return <DocxRenderer url={previewUrl} />;
   }
 
   // XLSX / XLS / CSV
-  if (isXlsxMime(artifact)) {
-    return <XlsxRenderer url={artifact.artifactUrl} />;
+  if (isXlsx) {
+    return <XlsxRenderer url={previewUrl} />;
   }
 
-  if (isHtmlMime(artifact.mimeType, artifact.filename.toLowerCase())) {
+  if (isHtml) {
     return <iframe src={previewUrl} className="w-full h-full border-0 bg-white" title={artifact.filename} />;
   }
 
-  if (isAudioMime(artifact.mimeType)) {
+  if (isAudio) {
     return (
       <div className="h-full flex items-center justify-center p-6">
         <audio controls src={previewUrl} className="w-full max-w-xl" />
@@ -169,7 +183,7 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
     );
   }
 
-  if (isVideoMime(artifact.mimeType)) {
+  if (isVideo) {
     return (
       <div className="h-full flex items-center justify-center p-4 bg-black/10">
         <video controls src={previewUrl} className="max-w-full max-h-full" />
@@ -178,8 +192,8 @@ function FileContent({ artifact }: { artifact: ArtifactMeta }) {
   }
 
   // Text-based
-  if (isTextMime(artifact.mimeType)) {
-    return <TextRenderer url={artifact.artifactUrl} />;
+  if (isText) {
+    return <TextRenderer url={previewUrl} />;
   }
 
   return <MetadataPreview artifact={artifact} />;

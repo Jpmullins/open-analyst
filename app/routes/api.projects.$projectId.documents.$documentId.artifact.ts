@@ -1,5 +1,6 @@
 import { getDocument } from "~/lib/db/queries/documents.server";
 import { readArtifact } from "~/lib/artifacts.server";
+import { inferMimeType } from "~/lib/artifacts.server";
 
 function getMetadataValue(
   metadata: unknown,
@@ -14,6 +15,14 @@ function getMetadataValue(
 
 function encodeDispositionFilename(filename: string): string {
   return filename.replace(/["\\]/g, "_");
+}
+
+function normalizeMimeType(filename: string, mimeType: string): string {
+  const value = String(mimeType || "").trim().toLowerCase();
+  if (!value || value === "application/octet-stream" || value === "binary/octet-stream") {
+    return inferMimeType(filename);
+  }
+  return mimeType;
 }
 
 export async function loader({
@@ -48,7 +57,7 @@ export async function loader({
 
     return new Response(artifact.body, {
       headers: {
-        "Content-Type": artifact.mimeType,
+        "Content-Type": normalizeMimeType(artifact.filename, artifact.mimeType),
         "Content-Length": String(artifact.size),
         "Cache-Control": "private, max-age=60",
         "Content-Disposition": `${disposition}; filename="${encodeDispositionFilename(

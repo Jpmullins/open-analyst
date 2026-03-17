@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useFetcher, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { useFetcher, useNavigate, useParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   ChevronDown,
@@ -7,7 +7,6 @@ import {
   Moon,
   PackageOpen,
   Plus,
-  Settings,
   Sun,
   Menu,
 } from "lucide-react";
@@ -26,9 +25,7 @@ export function TopNav() {
     isConfigured,
   } = useAppStore();
   const navigate = useNavigate();
-  const location = useLocation();
   const params = useParams();
-  const [searchParams] = useSearchParams();
   const createFetcher = useFetcher();
   const projectMutationFetcher = useFetcher();
 
@@ -46,11 +43,7 @@ export function TopNav() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeProjectId = params.projectId || null;
-  const activeTaskId = params.taskId || null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
-
-  const buildWorkspacePath = (projectId: string, taskId?: string | null) =>
-    taskId ? `/projects/${projectId}/tasks/${taskId}` : `/projects/${projectId}`;
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -160,16 +153,6 @@ export function TopNav() {
       encType: "application/json",
     });
   };
-
-  // Determine which section tab is active
-  const activePanel = searchParams.get("panel");
-  const isSources = activePanel === "sources" || location.pathname.endsWith("/knowledge");
-  const isCanvas = activePanel === "canvas" || location.pathname.endsWith("/canvas");
-  const isWorkspace =
-    Boolean(activeProjectId) &&
-    !isSources &&
-    !isCanvas &&
-    !location.pathname.endsWith("/settings");
 
   return (
     <>
@@ -292,53 +275,6 @@ export function TopNav() {
           )}
         </div>
 
-        {/* Section tabs */}
-        {activeProjectId && (
-          <>
-            <div className="w-px h-5 bg-border" />
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => navigate(buildWorkspacePath(activeProjectId, activeTaskId))}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isWorkspace
-                    ? "text-accent font-medium bg-accent-muted"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                Workspace
-              </button>
-              <button
-                onClick={() => {
-                  const next = new URLSearchParams(searchParams);
-                  next.set("panel", "sources");
-                  navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
-                }}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isSources
-                    ? "text-accent font-medium bg-accent-muted"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                Sources
-              </button>
-              <button
-                onClick={() => {
-                  const next = new URLSearchParams(searchParams);
-                  next.set("panel", "canvas");
-                  navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
-                }}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  isCanvas
-                    ? "text-accent font-medium bg-accent-muted"
-                    : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
-                }`}
-              >
-                Canvas
-              </button>
-            </div>
-          </>
-        )}
-
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -374,21 +310,6 @@ export function TopNav() {
             ) : (
               <Moon className="w-4 h-4" />
             )}
-          </button>
-          <button
-            onClick={() => {
-              if (!activeProjectId) {
-                navigate("/settings");
-                return;
-              }
-              const next = new URLSearchParams(searchParams);
-              next.set("panel", "settings");
-              navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
-            }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-hover text-text-secondary"
-            aria-label="Settings"
-          >
-            <Settings className="w-4 h-4" />
           </button>
         </div>
       </nav>

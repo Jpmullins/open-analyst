@@ -1,8 +1,17 @@
 import { readArtifact } from "~/lib/artifacts.server";
+import { inferMimeType } from "~/lib/artifacts.server";
 import { getArtifact } from "~/lib/db/queries/workspace.server";
 
 function encodeDispositionFilename(filename: string): string {
   return filename.replace(/["\\]/g, "_");
+}
+
+function normalizeMimeType(filename: string, mimeType: string): string {
+  const value = String(mimeType || "").trim().toLowerCase();
+  if (!value || value === "application/octet-stream" || value === "binary/octet-stream") {
+    return inferMimeType(filename);
+  }
+  return mimeType;
 }
 
 export async function loader({
@@ -35,7 +44,7 @@ export async function loader({
       new URL(request.url).searchParams.get("download") === "1" ? "attachment" : "inline";
     return new Response(file.body, {
       headers: {
-        "Content-Type": file.mimeType,
+        "Content-Type": normalizeMimeType(file.filename, file.mimeType),
         "Content-Length": String(file.size),
         "Cache-Control": "private, max-age=60",
         "Content-Disposition": `${disposition}; filename="${encodeDispositionFilename(file.filename)}"`,
