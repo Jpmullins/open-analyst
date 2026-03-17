@@ -96,14 +96,20 @@ export async function buildWorkspaceContext(
     task?.context && typeof task.context === "object"
       ? (task.context as Record<string, unknown>)
       : {};
+  const enabledConnectorIds = serverConfigs
+    .filter((server) => server.enabled)
+    .map((server) => String(server.id));
   const activeConnectorIds = Array.isArray(taskContext.activeConnectorIds)
     ? taskContext.activeConnectorIds.map((value) => String(value))
     : Array.isArray(profile?.defaultConnectorIds)
       ? profile.defaultConnectorIds.map((value) => String(value))
-      : [];
+      : enabledConnectorIds;
+  const enabledSkillIds = activeSkills
+    .filter((skill) => skill.enabled)
+    .map((skill) => String(skill.id));
   const pinnedSkillIds = Array.isArray(taskContext.pinnedSkillIds)
     ? taskContext.pinnedSkillIds.map((value) => String(value))
-    : [];
+    : enabledSkillIds;
   const activeConnectorSet = new Set(activeConnectorIds);
   const pinnedSkillSet = new Set(pinnedSkillIds);
   const statusById = new Map(statuses.map((status) => [status.id, status]));

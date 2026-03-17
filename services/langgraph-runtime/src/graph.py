@@ -15,6 +15,7 @@ import httpx
 
 from config import settings
 from models import (
+    ExecutionPhase,
     Message,
     RuntimeEvent,
     RuntimeEvidenceItem,
@@ -67,11 +68,15 @@ CURRENT_MEMORY_CANDIDATES: contextvars.ContextVar[list[dict[str, Any]] | None] =
     "open_analyst_memory_candidates",
     default=None,
 )
+CURRENT_EXECUTION_PHASE: contextvars.ContextVar[ExecutionPhase] = contextvars.ContextVar(
+    "open_analyst_execution_phase",
+    default="analyze",
+)
 AGENT_CACHE: dict[str, Any] = {}
 CHECKPOINTER: Any | None = None
 STORE: Any | None = None
 HTML_TAG_RE = re.compile(r"<[^>]+>")
-RESEARCH_BLOCKED_TOOLS = {
+ARTIFACT_TOOL_NAMES = {
     "ls",
     "list_directory",
     "read_file",
@@ -82,9 +87,62 @@ RESEARCH_BLOCKED_TOOLS = {
     "execute",
     "execute_command",
     "capture_artifact",
+    "save_canvas_markdown",
+    "publish_canvas_document",
+    "publish_workspace_file",
 }
-DOCUMENT_GENERATION_BLOCKED_TOOLS = {
+ACQUIRE_TOOL_NAMES = {
+    "search_literature",
+    "stage_literature_collection",
+    "stage_web_source",
+    "list_active_connectors",
+}
+ANALYZE_TOOL_NAMES = {
+    "search_project_documents",
+    "search_project_memories",
+    "list_active_skills",
+    "describe_runtime_capabilities",
+    "list_canvas_documents",
+    "propose_project_memory",
+}
+REVIEW_TOOL_NAMES = {
+    "propose_project_memory",
+}
+DISABLED_TOOL_NAMES = {
     "task",
+}
+SKILL_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "arlis-bulletin": {
+        "phases": ["artifact", "review"],
+        "workspace_write": True,
+        "command_execution": True,
+        "artifact_publish": True,
+    },
+    "docx": {
+        "phases": ["artifact", "review"],
+        "workspace_write": True,
+        "command_execution": True,
+        "artifact_publish": True,
+    },
+    "pdf": {
+        "phases": ["artifact", "review"],
+        "workspace_write": True,
+        "command_execution": True,
+    },
+    "pptx": {
+        "phases": ["artifact", "review"],
+        "workspace_write": True,
+        "command_execution": True,
+    },
+    "xlsx": {
+        "phases": ["artifact", "review"],
+        "workspace_write": True,
+        "command_execution": True,
+    },
+    "content-extraction": {
+        "phases": ["analyze", "artifact"],
+        "workspace_write": True,
+    },
 }
 
 
@@ -112,33 +170,104 @@ def _fallback_plan(prompt: str, skills: list[str]) -> list[RuntimePlanItem]:
     ]
 
 
-class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
-    """Block filesystem and shell tools during research-heavy turns."""
+def _has_artifact_intent(request: RuntimeRunRequest) -> bool:
+    prompt = str(request.prompt or "").strip().lower()
+    if _is_document_generation_request(request):
+        return True
+    return any(
+        phrase in prompt
+        for phrase in [
+            "save to canvas",
+            "save the canvas",
+            "write a file",
+            "create a file",
+            "save to file",
+            "publish",
+            "export",
+            "generate a document",
+            "draft a memo",
+            "draft a bulletin",
+            "create a report",
+            "produce a report",
+        ]
+    )
+
+
+def _initial_execution_phase(request: RuntimeRunRequest) -> ExecutionPhase:
+    if _is_collection_request(request) or _is_web_capture_request(request):
+        return "acquire"
+    if _is_document_generation_request(request) or _has_artifact_intent(request):
+        return "artifact"
+    if _is_research_prompt(request):
+        return "acquire"
+    return "analyze"
+
+
+def _phase_for_tool_name(tool_name: str, request: RuntimeRunRequest | None) -> ExecutionPhase:
+    name = str(tool_name or "").strip()
+    if name in ACQUIRE_TOOL_NAMES:
+        return "acquire"
+    if name in ARTIFACT_TOOL_NAMES:
+        return "artifact"
+    if name in REVIEW_TOOL_NAMES:
+        return "review"
+    if name in ANALYZE_TOOL_NAMES:
+        return "analyze"
+    if request is not None and _is_document_generation_request(request):
+        return "artifact"
+    return CURRENT_EXECUTION_PHASE.get()
+
+
+def _phase_transition_allowed(
+    request: RuntimeRunRequest,
+    *,
+    tool_name: str,
+    target_phase: ExecutionPhase,
+) -> bool:
+    if tool_name in DISABLED_TOOL_NAMES:
+        return False
+    if target_phase != "artifact":
+        return True
+
+    capabilities = _active_skill_capabilities(request)
+    if _has_artifact_intent(request):
+        return True
+    if capabilities["workspace_write"] or capabilities["command_execution"] or capabilities["artifact_publish"]:
+        return True
+    return False
+
+
+def _tool_block_message(request: RuntimeRunRequest, tool_name: str, target_phase: ExecutionPhase) -> str:
+    if tool_name in DISABLED_TOOL_NAMES:
+        return (
+            f"{tool_name} is disabled in this runtime. "
+            "Use the bound skills and workspace tools directly instead of recursive task spawning."
+        )
+    if target_phase == "artifact":
+        return (
+            f"{tool_name} is only available once the turn has explicit drafting or artifact intent. "
+            "First gather evidence or make the deliverable explicit, then transition into artifact work."
+        )
+    return (
+        f"{tool_name} is not available in the current execution phase. "
+        "Use retrieval, research, or review tools first."
+    )
+
+
+class PhaseToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
+    """Route tools by live execution phase instead of a prompt-wide research lock."""
 
     def _block_tool(self, request: Any) -> Any:
         tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
         tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
         current_request = CURRENT_REQUEST.get()
-        if (
-            current_request is not None
-            and _is_document_generation_request(current_request)
-            and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
-        ):
-            return ToolMessage(
-                content=(
-                    f"{tool_name} is disabled for document-generation turns. "
-                    "Use the bound workspace tools and the active bulletin/docx skill instructions directly."
-                ),
-                name=tool_name,
-                tool_call_id=tool_call_id,
-                status="error",
-            )
+        target_phase = _phase_for_tool_name(tool_name, current_request)
+        if current_request is None:
+            message = f"{tool_name} is unavailable because no runtime request context is active."
+        else:
+            message = _tool_block_message(current_request, tool_name, target_phase)
         return ToolMessage(
-            content=(
-                f"{tool_name} is disabled for research-mode turns. "
-                "Use search_literature, search_project_documents, search_project_memories, "
-                "or active connector tools instead."
-            ),
+            content=message,
             name=tool_name,
             tool_call_id=tool_call_id,
             status="error",
@@ -154,18 +283,15 @@ class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not No
         if (
             ToolMessage is not None
             and current_request is not None
-            and (
-                (
-                    _is_research_prompt(current_request)
-                    and tool_name in RESEARCH_BLOCKED_TOOLS
-                )
-                or (
-                    _is_document_generation_request(current_request)
-                    and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
-                )
+            and not _phase_transition_allowed(
+                current_request,
+                tool_name=tool_name,
+                target_phase=_phase_for_tool_name(tool_name, current_request),
             )
         ):
             return self._block_tool(request)
+        if current_request is not None:
+            CURRENT_EXECUTION_PHASE.set(_phase_for_tool_name(tool_name, current_request))
         return handler(request)
 
     async def awrap_tool_call(
@@ -178,18 +304,15 @@ class ResearchToolRoutingMiddleware(AgentMiddleware if AgentMiddleware is not No
         if (
             ToolMessage is not None
             and current_request is not None
-            and (
-                (
-                    _is_research_prompt(current_request)
-                    and tool_name in RESEARCH_BLOCKED_TOOLS
-                )
-                or (
-                    _is_document_generation_request(current_request)
-                    and tool_name in DOCUMENT_GENERATION_BLOCKED_TOOLS
-                )
+            and not _phase_transition_allowed(
+                current_request,
+                tool_name=tool_name,
+                target_phase=_phase_for_tool_name(tool_name, current_request),
             )
         ):
             return self._block_tool(request)
+        if current_request is not None:
+            CURRENT_EXECUTION_PHASE.set(_phase_for_tool_name(tool_name, current_request))
         return await handler(request)
 
 
@@ -197,8 +320,12 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _skills_root() -> Path:
+    return _repo_root() / "skills"
+
+
 def _skill_paths() -> list[str]:
-    skills_root = _repo_root() / "skills"
+    skills_root = _skills_root()
     if not skills_root.exists():
         return []
     paths: list[str] = []
@@ -227,6 +354,38 @@ def _active_skill_summaries(request: RuntimeRunRequest) -> list[dict[str, Any]]:
     active = set(_active_skill_ids(request))
     skills = request.project.available_skills or []
     return [skill for skill in skills if str(skill.get("id") or "") in active]
+
+
+def _active_skill_names(request: RuntimeRunRequest) -> set[str]:
+    return {
+        str(skill.get("name") or "").strip().lower()
+        for skill in _active_skill_summaries(request)
+        if str(skill.get("name") or "").strip()
+    }
+
+
+def _active_skill_capabilities(request: RuntimeRunRequest) -> dict[str, Any]:
+    capabilities = {
+        "phases": set(),
+        "workspace_write": False,
+        "command_execution": False,
+        "artifact_publish": False,
+    }
+    for skill_name in _active_skill_names(request):
+        skill_caps = SKILL_CAPABILITIES.get(skill_name)
+        if not skill_caps:
+            continue
+        capabilities["phases"].update(skill_caps.get("phases") or [])
+        capabilities["workspace_write"] = capabilities["workspace_write"] or bool(
+            skill_caps.get("workspace_write")
+        )
+        capabilities["command_execution"] = capabilities["command_execution"] or bool(
+            skill_caps.get("command_execution")
+        )
+        capabilities["artifact_publish"] = capabilities["artifact_publish"] or bool(
+            skill_caps.get("artifact_publish")
+        )
+    return capabilities
 
 
 def _tool_catalog_text(request: RuntimeRunRequest) -> str:
@@ -273,6 +432,37 @@ def _tool_catalog_payload(request: RuntimeRunRequest) -> dict[str, Any]:
     }
 
 
+def _artifact_meta_sentinel(payload: dict[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    artifact_url = metadata.get("artifactUrl")
+    download_url = metadata.get("downloadUrl")
+    if not isinstance(artifact_url, str) or not artifact_url.strip():
+        return json.dumps(payload or {})
+    artifact_meta = {
+        "artifactId": str(payload.get("id") or "").strip() or None,
+        "filename": str(metadata.get("filename") or payload.get("title") or "artifact").strip() or "artifact",
+        "mimeType": str(payload.get("mimeType") or metadata.get("mimeType") or "application/octet-stream"),
+        "size": int(metadata.get("bytes") or 0),
+        "artifactUrl": artifact_url,
+        "downloadUrl": str(download_url or f"{artifact_url}?download=1"),
+        "title": str(payload.get("title") or "").strip() or None,
+        "storageUri": str(payload.get("storageUri") or "").strip() or None,
+        "metadata": metadata,
+        "textPreview": str(metadata.get("textPreview") or ""),
+    }
+    summary = {
+        "artifactId": artifact_meta["artifactId"],
+        "title": artifact_meta["title"],
+        "filename": artifact_meta["filename"],
+        "mimeType": artifact_meta["mimeType"],
+        "storageUri": artifact_meta["storageUri"],
+    }
+    return (
+        f"{json.dumps(summary, ensure_ascii=False)}\n"
+        f"<!-- ARTIFACT_META {json.dumps(artifact_meta, ensure_ascii=False)} -->"
+    )
+
+
 def _skill_catalog_text(request: RuntimeRunRequest) -> str:
     active_skills = _active_skill_summaries(request)
     if not active_skills:
@@ -316,8 +506,8 @@ def _build_user_prompt(request: RuntimeRunRequest) -> str:
         if str(skill.get("name") or "").strip()
     ) or "(none)"
     research_note = (
-        "This is a research-heavy request. Start with search_literature, then use project document/memory retrieval or active connector tools only if needed. "
-        "Filesystem and shell tools are not available for research turns. After one or two targeted searches, synthesize the answer instead of re-reading raw tool dumps.\n\n"
+        "This request starts in acquisition mode. Begin with search_literature, then use project document/memory retrieval or active connector tools as needed. "
+        "Only transition into artifact work when the user explicitly wants a draft, file, canvas update, or published deliverable. After one or two targeted searches, synthesize instead of re-reading raw tool dumps.\n\n"
         if _is_research_prompt(request)
         else ""
     )
@@ -335,6 +525,8 @@ def _build_user_prompt(request: RuntimeRunRequest) -> str:
         f"Active skills:\n{active_skills}\n\n"
         "Runtime note:\n"
         "Use the bound tools directly when they help. "
+        "When you need the full text of a project source, use read_project_document(document_id). "
+        "Do not use read_file on artifact URLs or API routes.\n"
         "Do not restate the tool catalog unless the user explicitly asks about tools, skills, or connectors.\n\n"
         f"{research_note}"
         f"{collection_note}"
@@ -378,10 +570,7 @@ def _is_research_prompt(request: RuntimeRunRequest) -> bool:
     ]
     if any(keyword in prompt for keyword in keywords):
         return True
-    active_skill_names = {
-        str(skill.get("name") or "").strip().lower()
-        for skill in _active_skill_summaries(request)
-    }
+    active_skill_names = _active_skill_names(request)
     return "web research" in active_skill_names
 
 
@@ -402,10 +591,7 @@ def _is_document_generation_request(request: RuntimeRunRequest) -> bool:
         ]
     ):
         return True
-    active_skill_names = {
-        str(skill.get("name") or "").strip().lower()
-        for skill in _active_skill_summaries(request)
-    }
+    active_skill_names = _active_skill_names(request)
     return bool({"arlis-bulletin", "docx"} & active_skill_names)
 
 
@@ -778,9 +964,9 @@ def _workspace_root(request: RuntimeRunRequest) -> Path:
 def _resolve_virtual_or_workspace_path(request: RuntimeRunRequest, input_path: str) -> Path:
     raw = str(input_path or ".").strip()
     if raw.startswith("/skills/skills/"):
-        return (_repo_root() / "skills" / raw.removeprefix("/skills/skills/")).resolve()
+        return (_skills_root() / raw.removeprefix("/skills/skills/")).resolve()
     if raw.startswith("/skills/"):
-        return (_repo_root() / raw.removeprefix("/skills/")).resolve()
+        return (_skills_root() / raw.removeprefix("/skills/")).resolve()
     if raw.startswith("/memories/"):
         return (_repo_root() / raw.removeprefix("/")).resolve()
     return _resolve_workspace_path(request, raw)
@@ -797,6 +983,17 @@ def _resolve_workspace_path(request: RuntimeRunRequest, relative_path: str) -> P
 def _workspace_relative_path(request: RuntimeRunRequest, target: Path) -> str:
     workspace = _workspace_root(request)
     return str(target.resolve().relative_to(workspace)).replace("\\", "/")
+
+
+def _display_path(request: RuntimeRunRequest, target: Path) -> str:
+    resolved = target.resolve()
+    skills_root = _skills_root().resolve()
+    if resolved == skills_root or skills_root in resolved.parents:
+        return f"/skills/{resolved.relative_to(skills_root).as_posix()}".rstrip("/") or "/skills"
+    workspace = _workspace_root(request)
+    if resolved == workspace or workspace in resolved.parents:
+        return str(resolved.relative_to(workspace)).replace("\\", "/") or "."
+    return str(resolved)
 
 
 def _coerce_text_file(path: Path) -> str:
@@ -845,11 +1042,11 @@ def _map_command_parts(request: RuntimeRunRequest, parts: list[str]) -> list[str
     for part in parts:
         if part.startswith("/skills/skills/"):
             mapped.append(
-                str((_repo_root() / "skills" / part.removeprefix("/skills/skills/")).resolve())
+                str((_skills_root() / part.removeprefix("/skills/skills/")).resolve())
             )
             continue
         if part.startswith("/skills/"):
-            mapped.append(str((_repo_root() / part.removeprefix("/skills/")).resolve()))
+            mapped.append(str((_skills_root() / part.removeprefix("/skills/")).resolve()))
             continue
         if part.startswith("/workspace/"):
             mapped.append(str(_resolve_workspace_path(request, part.removeprefix("/workspace/"))))
@@ -877,7 +1074,7 @@ def _build_tools() -> list[Any]:
                 [
                     {
                         "name": target.name,
-                        "path": _workspace_relative_path(request, target),
+                        "path": _display_path(request, target),
                         "type": "file",
                         "size": stat.st_size,
                     }
@@ -889,7 +1086,7 @@ def _build_tools() -> list[Any]:
             entries.append(
                 {
                     "name": child.name,
-                    "path": _workspace_relative_path(request, child),
+                    "path": _display_path(request, child),
                     "type": "directory" if child.is_dir() else "file",
                     "size": stat.st_size if child.is_file() else None,
                 }
@@ -950,6 +1147,8 @@ def _build_tools() -> list[Any]:
             title=title or target.stem,
             collection_name=collectionName,
         )
+        if isinstance(document, dict):
+            return _artifact_meta_sentinel(document)
         return json.dumps(document or {})
 
     @tool
@@ -965,6 +1164,19 @@ def _build_tools() -> list[Any]:
             limit=max(1, min(int(limit or 6), 8)),
         )
         return json.dumps(results)
+
+    @tool
+    async def read_project_document(document_id: str, max_chars: int = 12000) -> str:
+        """Read the extracted text and metadata for a project document by document id."""
+        request = CURRENT_REQUEST.get()
+        if request is None:
+            return "{}"
+        result = await retrieval_service.read_project_document(
+            request.project.project_id,
+            document_id=document_id,
+            max_chars=max(1000, min(int(max_chars or 12000), 40000)),
+        )
+        return json.dumps(result or {})
 
     @tool
     async def search_project_memories(query: str, limit: int = 6) -> str:
@@ -1106,6 +1318,10 @@ def _build_tools() -> list[Any]:
             add_to_sources=add_to_sources,
             change_summary=change_summary,
         )
+        if isinstance(document, dict):
+            artifact_payload = document.get("artifact") if isinstance(document.get("artifact"), dict) else None
+            if artifact_payload:
+                return _artifact_meta_sentinel(artifact_payload)
         return json.dumps(document or {})
 
     @tool
@@ -1124,6 +1340,8 @@ def _build_tools() -> list[Any]:
             title=title,
             collection_name=collection_name,
         )
+        if isinstance(document, dict):
+            return _artifact_meta_sentinel(document)
         return json.dumps(document or {})
 
     @tool
@@ -1151,6 +1369,7 @@ def _build_tools() -> list[Any]:
     return [
         list_directory,
         search_project_documents,
+        read_project_document,
         search_project_memories,
         search_literature,
         stage_literature_collection,
@@ -1183,11 +1402,12 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["stage_literature_collection"],
                 tool_map["stage_web_source"],
                 tool_map["search_project_documents"],
+                tool_map["read_project_document"],
                 tool_map["search_project_memories"],
                 tool_map["list_active_connectors"],
                 tool_map["describe_runtime_capabilities"],
             ],
-            "middleware": [ResearchToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
             "skills": [path for path in _skill_paths() if not path.endswith("arlis-bulletin")],
         },
         {
@@ -1207,7 +1427,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["publish_workspace_file"],
                 tool_map["list_canvas_documents"],
             ],
-            "middleware": [ResearchToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
             "skills": _skill_paths(),
         },
         {
@@ -1222,9 +1442,10 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["search_project_memories"],
                 tool_map["list_active_skills"],
+                tool_map["read_project_document"],
                 tool_map["describe_runtime_capabilities"],
             ],
-            "middleware": [ResearchToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+            "middleware": [PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
             "skills": _skill_paths(),
         },
     ]
@@ -1254,7 +1475,7 @@ def _build_backend() -> Any:
         ),
         routes={
             "/memories/": StoreBackend(runtime, namespace=namespace),
-            "/skills/": FilesystemBackend(root_dir=_repo_root(), virtual_mode=True),
+            "/skills/": FilesystemBackend(root_dir=_skills_root(), virtual_mode=True),
         },
     )
 
@@ -1273,7 +1494,7 @@ def _build_agent() -> Any | None:
         name="open-analyst",
         system_prompt=_system_prompt(),
         tools=tools,
-        middleware=[ResearchToolRoutingMiddleware()] if AgentMiddleware is not None else [],
+        middleware=[PhaseToolRoutingMiddleware()] if AgentMiddleware is not None else [],
         skills=_skill_paths(),
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, tool_map),
@@ -1291,12 +1512,15 @@ def _has_live_model() -> bool:
 
 
 def build_initial_state(request: RuntimeRunRequest) -> RuntimeState:
+    initial_phase = _initial_execution_phase(request)
     return RuntimeState(
         run_id=request.run_id,
         prompt=request.prompt,
         mode=request.mode,
         project=request.project,
         messages=request.messages or [Message(role="user", content=request.prompt)],
+        phase=initial_phase,
+        phase_history=[initial_phase],
         active_skill_ids=_active_skill_ids(request),
     )
 
@@ -1326,6 +1550,7 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
             approvals=[],
         )
 
+    phase_token = CURRENT_EXECUTION_PHASE.set(state.phase)
     token = CURRENT_REQUEST.set(request)
     memory_token = CURRENT_MEMORY_CANDIDATES.set([])
     try:
@@ -1348,15 +1573,17 @@ async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
             memory_candidates=_build_memory_candidates(final_text, request),
         )
     finally:
+        CURRENT_EXECUTION_PHASE.reset(phase_token)
         CURRENT_REQUEST.reset(token)
         CURRENT_MEMORY_CANDIDATES.reset(memory_token)
 
 
 async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
     plan = _extract_plan(request.prompt, request)
+    initial_phase = _initial_execution_phase(request)
     yield RuntimeEvent(
         type="status",
-        phase="supervisor",
+        phase=initial_phase,
         status="running",
         actor="supervisor",
         text="Planning analysis with the deep agent runtime",
@@ -1383,6 +1610,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
         )
         return
 
+    phase_token = CURRENT_EXECUTION_PHASE.set(initial_phase)
     token = CURRENT_REQUEST.set(request)
     memory_token = CURRENT_MEMORY_CANDIDATES.set([])
     tool_run_ids: dict[str, str] = {}
@@ -1401,9 +1629,10 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                     tool_name = str(event.get("name") or "tool")
                     tool_use_id = str(uuid.uuid4())
                     tool_run_ids[run_id] = tool_use_id
+                    tool_phase = _phase_for_tool_name(tool_name, request)
                     yield RuntimeEvent(
                         type="tool_call_start",
-                        phase="tools",
+                        phase=tool_phase,
                         status="running",
                         actor="supervisor",
                         text=f"Running {tool_name}",
@@ -1417,6 +1646,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                     run_id = str(event.get("run_id") or "")
                     tool_use_id = tool_run_ids.get(run_id, str(uuid.uuid4()))
                     tool_name = str(event.get("name") or "tool")
+                    tool_phase = _phase_for_tool_name(tool_name, request)
                     output = ""
                     if isinstance(event.get("data"), dict):
                         output = json.dumps(
@@ -1426,7 +1656,7 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
                         )
                     yield RuntimeEvent(
                         type="tool_call_end",
-                        phase="tools",
+                        phase=tool_phase,
                         status="completed",
                         actor="supervisor",
                         text=f"Completed {tool_name}",
@@ -1484,5 +1714,6 @@ async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
             text="Analysis complete",
         )
     finally:
+        CURRENT_EXECUTION_PHASE.reset(phase_token)
         CURRENT_REQUEST.reset(token)
         CURRENT_MEMORY_CANDIDATES.reset(memory_token)

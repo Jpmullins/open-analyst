@@ -19,15 +19,36 @@ export function ArtifactsWorkspaceView() {
   const [versionsByArtifactId, setVersionsByArtifactId] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    headlessGetArtifacts(projectId)
-      .then((response) => {
+    let cancelled = false;
+
+    const loadArtifacts = async () => {
+      try {
+        const response = await headlessGetArtifacts(projectId);
+        if (cancelled) return;
         setArtifacts(response.artifacts);
         setVersionsByArtifactId(response.versionsByArtifactId);
-      })
-      .catch(() => {
+      } catch {
+        if (cancelled) return;
         setArtifacts([]);
         setVersionsByArtifactId({});
-      });
+      }
+    };
+
+    const handleFocus = () => {
+      void loadArtifacts();
+    };
+
+    void loadArtifacts();
+    const intervalId = window.setInterval(() => {
+      void loadArtifacts();
+    }, 5000);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [projectId]);
 
   return (

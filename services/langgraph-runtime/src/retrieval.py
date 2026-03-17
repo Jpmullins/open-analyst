@@ -77,8 +77,6 @@ class RuntimeRetrievalService:
                         "publishedAt": str(metadata.get("publishedAt") or "").strip() or None,
                         "venue": str(metadata.get("venue") or "").strip() or None,
                         "doi": str(metadata.get("doi") or "").strip() or None,
-                        "artifactUrl": str(metadata.get("artifactUrl") or "").strip() or None,
-                        "downloadUrl": str(metadata.get("downloadUrl") or "").strip() or None,
                         "authors": [
                             str(author).strip()
                             for author in (metadata.get("authors") if isinstance(metadata.get("authors"), list) else [])[:4]
@@ -90,6 +88,46 @@ class RuntimeRetrievalService:
             if len(results) >= effective_limit:
                 break
         return results
+
+    async def read_project_document(
+        self,
+        project_id: str,
+        *,
+        document_id: str,
+        max_chars: int = 12000,
+    ) -> dict[str, Any] | None:
+        rows = await self._fetch(
+            """
+            SELECT id, title, source_uri AS "sourceUri", content, metadata
+            FROM documents
+            WHERE project_id = %s AND id = %s
+            LIMIT 1
+            """,
+            [project_id, document_id],
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        content = str(row.get("content") or "").strip()
+        return {
+            "id": str(row.get("id")),
+            "title": str(row.get("title") or "Source").strip(),
+            "sourceUri": str(row.get("sourceUri") or "").strip() or None,
+            "content": content[:max_chars],
+            "truncated": len(content) > max_chars,
+            "metadata": {
+                "provider": str(metadata.get("provider") or "").strip() or None,
+                "publishedAt": str(metadata.get("publishedAt") or "").strip() or None,
+                "venue": str(metadata.get("venue") or "").strip() or None,
+                "doi": str(metadata.get("doi") or "").strip() or None,
+                "authors": [
+                    str(author).strip()
+                    for author in (metadata.get("authors") if isinstance(metadata.get("authors"), list) else [])[:8]
+                    if str(author).strip()
+                ],
+            },
+        }
 
     async def search_project_memories(
         self,

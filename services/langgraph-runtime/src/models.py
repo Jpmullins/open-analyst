@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 RunStatus = Literal["queued", "running", "waiting_for_approval", "completed", "failed", "cancelled"]
+ExecutionPhase = Literal["acquire", "ingest", "analyze", "artifact", "review"]
 
 
 class Message(BaseModel):
@@ -68,6 +69,8 @@ class RuntimeState(BaseModel):
     project: RuntimeProjectContext
     messages: list[Message] = Field(default_factory=list)
     status: RunStatus = "queued"
+    phase: ExecutionPhase = "analyze"
+    phase_history: list[ExecutionPhase] = Field(default_factory=list)
     active_skill_ids: list[str] = Field(default_factory=list)
     active_plan: list[RuntimePlanItem] = Field(default_factory=list)
     evidence_bundle: list[RuntimeEvidenceItem] = Field(default_factory=list)

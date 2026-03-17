@@ -238,12 +238,15 @@ export async function action({ request }: Route.ActionArgs) {
           }
         }
 
+        const fullText = extractFinalAssistantText(contentBlocks);
         await createMessage(task.id, {
           role: "assistant",
-          content: [{ type: "text", text: extractFinalAssistantText(contentBlocks) }],
+          content:
+            contentBlocks.length > 0
+              ? contentBlocks
+              : [{ type: "text", text: fullText }],
         });
 
-        const fullText = extractFinalAssistantText(contentBlocks);
         await updateTask(task.id, {
           status: "completed",
           planSnapshot: {

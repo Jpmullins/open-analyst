@@ -88,6 +88,24 @@ function appendToolStart(blocks: ContentBlock[], event: ChatStreamEvent): Conten
 
 const ARTIFACT_META_RE = /<!-- ARTIFACT_META (.*?) -->/g;
 
+function parseArtifactMetaJson(raw: string): ArtifactMeta | null {
+  const candidates = [
+    raw,
+    raw.replace(/\\"/g, '"'),
+    raw.replace(/\\\\/g, "\\").replace(/\\"/g, '"'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as ArtifactMeta;
+    } catch {
+      // Try the next normalization pass.
+    }
+  }
+
+  return null;
+}
+
 export function extractArtifactMeta(output: string): {
   cleanOutput: string;
   artifacts: ArtifactMeta[];
@@ -95,10 +113,9 @@ export function extractArtifactMeta(output: string): {
   const artifacts: ArtifactMeta[] = [];
   const cleanOutput = output
     .replace(ARTIFACT_META_RE, (_match, json) => {
-      try {
-        artifacts.push(JSON.parse(json) as ArtifactMeta);
-      } catch {
-        // Ignore malformed sentinels.
+      const parsed = parseArtifactMetaJson(json);
+      if (parsed) {
+        artifacts.push(parsed);
       }
       return "";
     })
