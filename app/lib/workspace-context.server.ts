@@ -69,10 +69,13 @@ export async function buildWorkspaceContext(
   projectId: string
 ): Promise<WorkspaceContextData> {
   const fetchStoreMemories = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
       const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           namespace_prefix: ["open-analyst", "projects", projectId, "memories"],
           limit: 50,
@@ -83,6 +86,8 @@ export async function buildWorkspaceContext(
       return Array.isArray(data.items) ? data.items : [];
     } catch {
       return [];
+    } finally {
+      clearTimeout(timeout);
     }
   };
 

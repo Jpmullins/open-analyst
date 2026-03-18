@@ -173,7 +173,6 @@ export const artifacts = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    runId: uuid("run_id"),
     title: varchar("title", { length: 500 }).notNull().default("Untitled Artifact"),
     kind: varchar("kind", { length: 100 }).notNull().default("note"),
     mimeType: varchar("mime_type", { length: 255 }).notNull().default("text/markdown"),
@@ -184,7 +183,6 @@ export const artifacts = pgTable(
   },
   (table) => [
     index("artifacts_project_updated_idx").on(table.projectId, table.updatedAt),
-    index("artifacts_run_updated_idx").on(table.runId, table.updatedAt),
   ]
 );
 
@@ -220,7 +218,6 @@ export const evidenceItems = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    runId: uuid("run_id"),
     collectionId: uuid("collection_id").references(() => collections.id, {
       onDelete: "set null",
     }),
@@ -243,7 +240,6 @@ export const evidenceItems = pgTable(
   },
   (table) => [
     index("evidence_items_project_updated_idx").on(table.projectId, table.updatedAt),
-    index("evidence_items_run_created_idx").on(table.runId, table.createdAt),
     index("evidence_items_collection_created_idx").on(table.collectionId, table.createdAt),
   ]
 );

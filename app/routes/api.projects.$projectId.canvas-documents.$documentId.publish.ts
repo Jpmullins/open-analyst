@@ -13,16 +13,7 @@ import {
   buildProjectArtifactUrls,
   buildProjectStandaloneArtifactUrls,
 } from "~/lib/project-storage.server";
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "canvas")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "canvas"
-  );
-}
+import { sanitizeFilename } from "~/lib/file-utils";
 
 function getMarkdown(content: unknown): string {
   if (!content || typeof content !== "object") return "";

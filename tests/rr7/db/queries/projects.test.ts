@@ -5,8 +5,9 @@ import {
   projects,
   collections,
   documents,
-  tasks,
-  messages,
+  artifacts,
+  evidenceItems,
+  sourceIngestBatches,
 } from "~/lib/db/schema";
 
 let testDb: TestDb;
@@ -82,7 +83,7 @@ describe("projects queries", () => {
     );
   });
 
-  it("cascade deletes collections, documents, and tasks when project is deleted", async () => {
+  it("cascade deletes collections, documents, artifacts, evidence, and source batches when project is deleted", async () => {
     // Create project
     const [project] = await testDb.db
       .insert(projects)
@@ -103,16 +104,21 @@ describe("projects queries", () => {
       content: "test content",
     });
 
-    // Create task with message
-    const [task] = await testDb.db
-      .insert(tasks)
-      .values({ projectId: project.id, title: "Test Task" })
-      .returning();
+    // Create artifact
+    await testDb.db.insert(artifacts).values({
+      projectId: project.id,
+      title: "Test Artifact",
+    });
 
-    await testDb.db.insert(messages).values({
-      taskId: task.id,
-      role: "user",
-      content: [{ type: "text", text: "hello" }],
+    // Create evidence item
+    await testDb.db.insert(evidenceItems).values({
+      projectId: project.id,
+      title: "Test Evidence",
+    });
+
+    // Create source ingest batch
+    await testDb.db.insert(sourceIngestBatches).values({
+      projectId: project.id,
     });
 
     // Delete project
@@ -131,16 +137,22 @@ describe("projects queries", () => {
       .where(eq(documents.projectId, project.id));
     expect(remainingDocs).toHaveLength(0);
 
-    const remainingTasks = await testDb.db
+    const remainingArtifacts = await testDb.db
       .select()
-      .from(tasks)
-      .where(eq(tasks.projectId, project.id));
-    expect(remainingTasks).toHaveLength(0);
+      .from(artifacts)
+      .where(eq(artifacts.projectId, project.id));
+    expect(remainingArtifacts).toHaveLength(0);
 
-    const remainingMessages = await testDb.db
+    const remainingEvidence = await testDb.db
       .select()
-      .from(messages)
-      .where(eq(messages.taskId, task.id));
-    expect(remainingMessages).toHaveLength(0);
+      .from(evidenceItems)
+      .where(eq(evidenceItems.projectId, project.id));
+    expect(remainingEvidence).toHaveLength(0);
+
+    const remainingBatches = await testDb.db
+      .select()
+      .from(sourceIngestBatches)
+      .where(eq(sourceIngestBatches.projectId, project.id));
+    expect(remainingBatches).toHaveLength(0);
   });
 });

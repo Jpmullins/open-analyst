@@ -1,4 +1,5 @@
 import { ensureCollection } from "~/lib/db/queries/documents.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.collections.ensure";
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -6,7 +7,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const name = String(body.name || "").trim();
   if (!name) {
     return Response.json(

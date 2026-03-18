@@ -26,10 +26,13 @@ interface SidebarThread {
 }
 
 async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
     const res = await fetch(`${RUNTIME_URL}/threads/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({ metadata: { project_id: projectId }, limit: 20 }),
     });
     if (!res.ok) return [];
@@ -43,6 +46,8 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
   } catch {
     // Agent Server unreachable — return empty list
     return [];
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

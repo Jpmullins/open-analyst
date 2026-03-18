@@ -10,42 +10,9 @@ import {
   buildProjectStandaloneArtifactUrls,
 } from "~/lib/project-storage.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
+import { sanitizeFilename, inferMimeType, inferExtension } from "~/lib/file-utils";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.artifacts.capture";
-
-function inferExtension(contentType: string): string {
-  const value = String(contentType || "").toLowerCase();
-  if (value.includes("pdf")) return ".pdf";
-  if (value.includes("json")) return ".json";
-  if (value.includes("html")) return ".html";
-  if (value.includes("xml")) return ".xml";
-  if (value.includes("markdown")) return ".md";
-  if (value.includes("plain")) return ".txt";
-  if (value.includes("wordprocessingml")) return ".docx";
-  return ".bin";
-}
-
-function inferMimeType(filename: string, fallback = "application/octet-stream"): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".docx")) {
-    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  }
-  if (lower.endsWith(".json")) return "application/json";
-  if (lower.endsWith(".txt")) return "text/plain; charset=utf-8";
-  if (lower.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html; charset=utf-8";
-  return fallback;
-}
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "artifact")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "artifact"
-  );
-}
 
 function inferTextFromBuffer(
   buffer: Buffer,
@@ -88,7 +55,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const projectId = params.projectId;
   const project = await getProject(projectId);
   if (!project) {
@@ -126,7 +94,6 @@ export async function action({ request, params }: Route.ActionArgs) {
   });
 
   const artifactRecord = await createArtifact(projectId, {
-    runId: typeof body.runId === "string" ? body.runId : null,
     title:
       String(body.title || "").trim() ||
       path.basename(requestedFilename || workspacePath),

@@ -87,7 +87,6 @@ export async function getArtifact(
 export async function createArtifact(
   projectId: string,
   input: {
-    runId?: string | null;
     title?: string;
     kind?: string;
     mimeType?: string;
@@ -99,7 +98,6 @@ export async function createArtifact(
     .insert(artifacts)
     .values({
       projectId,
-      runId: input.runId || null,
       title: String(input.title || "Untitled Artifact").trim(),
       kind: String(input.kind || "note"),
       mimeType: String(input.mimeType || "text/markdown"),
@@ -147,6 +145,26 @@ export async function createArtifactVersion(
     .where(eq(artifacts.id, artifactId));
 
   return version;
+}
+
+export async function getArtifactVersionCounts(
+  projectId: string
+): Promise<Record<string, number>> {
+  const rows = await db
+    .select({
+      artifactId: artifactVersions.artifactId,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(artifactVersions)
+    .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
+    .where(eq(artifacts.projectId, projectId))
+    .groupBy(artifactVersions.artifactId);
+
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    counts[row.artifactId] = Number(row.count);
+  }
+  return counts;
 }
 
 export async function listArtifactVersions(

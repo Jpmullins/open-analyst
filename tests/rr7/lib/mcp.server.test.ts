@@ -13,16 +13,25 @@ describe('mcp.server', () => {
   let tempDir: string;
   let originalAnalystMcpApiKey: string | undefined;
   let originalAnalystMcpPort: string | undefined;
+  let originalAnalystMcpHost: string | undefined;
 
   beforeEach(() => {
     tempDir = createTempDataDir();
     originalAnalystMcpApiKey = process.env.ANALYST_MCP_API_KEY;
     originalAnalystMcpPort = process.env.ANALYST_MCP_PORT;
+    originalAnalystMcpHost = process.env.ANALYST_MCP_HOST;
+    // Reset host to default so tests get predictable 'localhost' URLs
+    delete process.env.ANALYST_MCP_HOST;
   });
 
   afterEach(() => {
     process.env.ANALYST_MCP_API_KEY = originalAnalystMcpApiKey;
     process.env.ANALYST_MCP_PORT = originalAnalystMcpPort;
+    if (originalAnalystMcpHost !== undefined) {
+      process.env.ANALYST_MCP_HOST = originalAnalystMcpHost;
+    } else {
+      delete process.env.ANALYST_MCP_HOST;
+    }
     cleanupTempDataDir(tempDir);
   });
 

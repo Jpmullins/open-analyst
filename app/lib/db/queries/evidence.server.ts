@@ -7,10 +7,9 @@ import {
 
 export async function listEvidenceItems(
   projectId: string,
-  options: { runId?: string; collectionId?: string } = {}
+  options: { collectionId?: string } = {}
 ): Promise<EvidenceItem[]> {
   const clauses = [eq(evidenceItems.projectId, projectId)];
-  if (options.runId) clauses.push(eq(evidenceItems.runId, options.runId));
   if (options.collectionId) clauses.push(eq(evidenceItems.collectionId, options.collectionId));
 
   return db
@@ -23,7 +22,6 @@ export async function listEvidenceItems(
 export async function createEvidenceItem(
   projectId: string,
   input: {
-    runId?: string | null;
     collectionId?: string | null;
     documentId?: string | null;
     artifactId?: string | null;
@@ -41,7 +39,6 @@ export async function createEvidenceItem(
     .insert(evidenceItems)
     .values({
       projectId,
-      runId: input.runId || null,
       collectionId: input.collectionId || null,
       documentId: input.documentId || null,
       artifactId: input.artifactId || null,

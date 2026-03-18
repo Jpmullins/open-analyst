@@ -40,6 +40,11 @@ vi.mock('lucide-react', () => {
   };
 });
 
+// Mock useArtifactObjectUrl to return the URL directly (no fetch/blob in jsdom)
+vi.mock('~/components/file-renderers/useArtifactObjectUrl', () => ({
+  useArtifactObjectUrl: (url: string, enabled = true) => (enabled && url ? url : ''),
+}));
+
 // Mock the renderers
 vi.mock('~/components/file-renderers/DocxRenderer', () => ({
   DocxRenderer: (props: any) => null,

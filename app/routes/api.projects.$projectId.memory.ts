@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.memory";
 
 const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
@@ -49,7 +50,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const memoryId = uuidv4();
   const memoryPayload = {
     title: typeof body.title === "string" ? body.title : "Untitled memory",

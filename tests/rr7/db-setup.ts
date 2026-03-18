@@ -66,38 +66,117 @@ CREATE TABLE documents (
   storage_uri text,
   content text,
   metadata jsonb DEFAULT '{}'::jsonb,
-  embedding vector(1536),
+  embedding jsonb,
+  embedding_vector vector(1024),
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE tasks (
+CREATE TABLE project_profiles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  title varchar(500) DEFAULT 'New Task',
-  type varchar(50) DEFAULT 'chat',
-  status varchar(50) DEFAULT 'idle',
-  cwd text,
-  plan_snapshot jsonb,
+  brief text DEFAULT '',
+  retrieval_policy jsonb DEFAULT '{}'::jsonb,
+  memory_profile jsonb DEFAULT '{}'::jsonb,
+  templates jsonb DEFAULT '[]'::jsonb,
+  agent_policies jsonb DEFAULT '{}'::jsonb,
+  default_connector_ids jsonb DEFAULT '[]'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE UNIQUE INDEX ON project_profiles (project_id);
+
+CREATE TABLE artifacts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title varchar(500) NOT NULL DEFAULT 'Untitled Artifact',
+  kind varchar(100) NOT NULL DEFAULT 'note',
+  mime_type varchar(255) NOT NULL DEFAULT 'text/markdown',
+  storage_uri text,
+  metadata jsonb DEFAULT '{}'::jsonb,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE messages (
+CREATE TABLE artifact_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  role varchar(20) NOT NULL,
-  content jsonb NOT NULL,
-  token_usage jsonb,
-  timestamp timestamptz DEFAULT now()
+  artifact_id uuid NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+  version integer NOT NULL,
+  title varchar(500) NOT NULL DEFAULT 'Untitled Version',
+  change_summary text DEFAULT '',
+  storage_uri text,
+  content_text text DEFAULT '',
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+CREATE UNIQUE INDEX ON artifact_versions (artifact_id, version);
+
+CREATE TABLE evidence_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  collection_id uuid REFERENCES collections(id) ON DELETE SET NULL,
+  document_id uuid REFERENCES documents(id) ON DELETE SET NULL,
+  artifact_id uuid REFERENCES artifacts(id) ON DELETE SET NULL,
+  title varchar(500) NOT NULL DEFAULT 'Untitled Evidence',
+  evidence_type varchar(100) NOT NULL DEFAULT 'note',
+  source_uri text,
+  citation_text text DEFAULT '',
+  extracted_text text DEFAULT '',
+  confidence varchar(20) DEFAULT 'medium',
+  provenance jsonb DEFAULT '{}'::jsonb,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
-CREATE TABLE task_events (
+CREATE TABLE source_ingest_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id uuid NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  type varchar(100) NOT NULL,
-  payload jsonb DEFAULT '{}'::jsonb,
-  timestamp timestamptz DEFAULT now()
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  collection_id uuid REFERENCES collections(id) ON DELETE SET NULL,
+  collection_name varchar(255) DEFAULT 'Research Inbox',
+  origin varchar(32) NOT NULL DEFAULT 'literature',
+  status varchar(32) NOT NULL DEFAULT 'staged',
+  query text DEFAULT '',
+  summary text DEFAULT '',
+  requested_count integer NOT NULL DEFAULT 0,
+  imported_count integer NOT NULL DEFAULT 0,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  approved_at timestamptz,
+  completed_at timestamptz,
+  rejected_at timestamptz
+);
+
+CREATE TABLE source_ingest_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id uuid NOT NULL REFERENCES source_ingest_batches(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  document_id uuid REFERENCES documents(id) ON DELETE SET NULL,
+  external_id text,
+  source_url text,
+  title varchar(500) NOT NULL DEFAULT 'Untitled Source',
+  mime_type_hint varchar(255),
+  target_filename varchar(255),
+  normalized_metadata jsonb DEFAULT '{}'::jsonb,
+  storage_uri text,
+  status varchar(32) NOT NULL DEFAULT 'staged',
+  error text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  imported_at timestamptz
+);
+
+CREATE TABLE canvas_documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  artifact_id uuid REFERENCES artifacts(id) ON DELETE SET NULL,
+  title varchar(500) NOT NULL DEFAULT 'Untitled Canvas',
+  document_type varchar(100) NOT NULL DEFAULT 'markdown',
+  content jsonb DEFAULT '{}'::jsonb,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
 CREATE TABLE settings (

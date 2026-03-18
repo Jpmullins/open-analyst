@@ -1,11 +1,13 @@
 import { setSkillEnabled } from "~/lib/skills.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.skills.$id.enabled";
 
 export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const enabled = body.enabled !== false;
   const skill = setSkillEnabled(params.id, enabled);
   if (!skill) {

@@ -11,13 +11,6 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-STORE: Any | None = None
-
-
-def configure_retrieval_store(store: Any | None) -> None:
-    global STORE
-    STORE = store
-
 
 class RuntimeRetrievalService:
     async def search_project_documents(
@@ -137,12 +130,15 @@ class RuntimeRetrievalService:
         project_id: str,
         query: str,
         limit: int | None = None,
+        *,
+        store: Any | None = None,
     ) -> list[dict[str, Any]]:
         effective_limit = limit or settings.retrieval_limit
         store_memories = await self._search_store_memories(
             project_id,
             query,
             limit=effective_limit,
+            store=store,
         )
         if store_memories:
             return store_memories
@@ -197,19 +193,27 @@ class RuntimeRetrievalService:
         project_id: str,
         memory_id: str,
         value: dict[str, Any],
+        *,
+        store: Any | None = None,
     ) -> None:
-        if STORE is None:
+        if store is None:
             return
-        await STORE.aput(
+        await store.aput(
             self._memory_namespace(project_id),
             memory_id,
             value,
         )
 
-    async def delete_store_memory(self, project_id: str, memory_id: str) -> None:
-        if STORE is None:
+    async def delete_store_memory(
+        self,
+        project_id: str,
+        memory_id: str,
+        *,
+        store: Any | None = None,
+    ) -> None:
+        if store is None:
             return
-        await STORE.adelete(self._memory_namespace(project_id), memory_id)
+        await store.adelete(self._memory_namespace(project_id), memory_id)
 
     async def _embed_query(self, query: str) -> list[float]:
         if not query.strip():
@@ -273,12 +277,14 @@ class RuntimeRetrievalService:
         project_id: str,
         query: str,
         limit: int,
+        *,
+        store: Any | None = None,
     ) -> list[dict[str, Any]]:
-        if STORE is None:
+        if store is None:
             return []
 
         try:
-            items = await STORE.asearch(
+            items = await store.asearch(
                 self._memory_namespace(project_id),
                 query=query.strip() or None,
                 limit=limit,

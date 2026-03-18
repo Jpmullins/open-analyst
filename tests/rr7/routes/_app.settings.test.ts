@@ -1,30 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTempDataDir, cleanupTempDataDir } from "../setup";
+/**
+ * @vitest-environment jsdom
+ */
+import { describe, expect, it, vi } from "vitest";
+
+// Mock dependencies used by the route component
+vi.mock("react-router", () => ({
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("~/lib/store", () => ({
+  useAppStore: (selector: (s: any) => any) => {
+    const state = { activeProjectId: null };
+    return selector(state);
+  },
+}));
 
 describe("_app.settings route", () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = createTempDataDir();
-  });
-
-  afterEach(() => {
-    cleanupTempDataDir(tempDir);
-  });
-
-  it("exports a loader function", async () => {
+  it("exports a default component (client redirect, no loader)", async () => {
     const mod = await import("../../../app/routes/_app.settings");
-    expect(typeof mod.loader).toBe("function");
+    expect(typeof mod.default).toBe("function");
+    // This route no longer exports a loader — it uses a client-side redirect
+    expect(mod).not.toHaveProperty("loader");
   });
 
-  it("loader returns settings data on fresh data dir", async () => {
-    const { loader } = await import("../../../app/routes/_app.settings");
-    const data = await loader();
-    expect(data).toHaveProperty("credentials");
-    expect(data).toHaveProperty("mcpServers");
-    expect(data).toHaveProperty("mcpPresets");
-    expect(data).toHaveProperty("skills");
-    expect(data).toHaveProperty("logsEnabled");
-    expect(Array.isArray(data.credentials)).toBe(true);
+  it("default export is a React component (redirect happens in useEffect)", async () => {
+    const mod = await import("../../../app/routes/_app.settings");
+    // The component is a function that uses hooks, so we verify it's a named function
+    expect(mod.default.name).toBe("SettingsRoute");
   });
 });

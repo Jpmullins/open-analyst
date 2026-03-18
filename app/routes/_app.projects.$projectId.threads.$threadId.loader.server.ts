@@ -9,9 +9,12 @@ export async function loader({
   params: { projectId: string; threadId: string };
 }) {
   // Verify thread exists by fetching its state from Agent Server
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
     const res = await fetch(`${RUNTIME_URL}/threads/${params.threadId}`, {
       headers: { "Accept": "application/json" },
+      signal: controller.signal,
     });
     if (!res.ok) {
       throw redirect(`/projects/${params.projectId}`);
@@ -19,13 +22,15 @@ export async function loader({
     const thread = await res.json();
     // Verify this thread belongs to this project via metadata
     const metadata = thread.metadata || {};
-    if (metadata.project_id && metadata.project_id !== params.projectId) {
+    if (!metadata.project_id || metadata.project_id !== params.projectId) {
       throw redirect(`/projects/${params.projectId}`);
     }
   } catch (error) {
     if (error instanceof Response) throw error;
     // Agent Server unreachable — redirect to project home
     throw redirect(`/projects/${params.projectId}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   const workspaceContext = await buildWorkspaceContext(params.projectId);

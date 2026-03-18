@@ -18,7 +18,8 @@ try:
     from deepagents import create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
     from deepagents.backends.store import StoreBackend
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
+    logger.info("deepagents not installed — agent creation will be unavailable")
     create_deep_agent = None
     CompositeBackend = None
     FilesystemBackend = None
@@ -28,32 +29,33 @@ except Exception:  # pragma: no cover
 
 try:
     from langchain.agents.middleware import AgentMiddleware
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
+    logger.info("langchain AgentMiddleware not available")
     AgentMiddleware = None
 
 try:
     from langchain_core.messages import ToolMessage
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     ToolMessage = None
 
 try:
     from langchain_core.tools import tool
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     tool = None
 
 try:
     from langchain_openai import ChatOpenAI
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     ChatOpenAI = None
 
 try:
     from langgraph.types import interrupt
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     interrupt = None
 
 try:
     from langgraph.prebuilt.tool_node import ToolRuntime
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     ToolRuntime = None
 
 tracer = get_tracer()
@@ -527,18 +529,32 @@ async def _stage_source_ingest_api(
 ) -> dict[str, Any]:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
+        logger.error("Stage source ingest skipped: api_base_url is empty")
         return {}
+    url = f"{api_base_url}/api/projects/{project_id}/source-ingest"
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/source-ingest",
-                json=payload,
-            )
+            response = await client.post(url, json=payload)
             response.raise_for_status()
             body = response.json()
-        return body if isinstance(body, dict) else {}
+        if not isinstance(body, dict) or "batch" not in body:
+            logger.error(
+                "Stage source ingest returned unexpected payload (keys=%s): %s",
+                list(body.keys()) if isinstance(body, dict) else type(body).__name__,
+                str(body)[:500],
+            )
+            return {}
+        return body
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Stage source ingest HTTP %s from %s: %s",
+            exc.response.status_code,
+            url,
+            exc.response.text[:500],
+        )
+        return {}
     except Exception as exc:
-        logger.warning("Stage source ingest API call failed: %s", exc)
+        logger.error("Stage source ingest API call failed: %s", exc, exc_info=True)
         return {}
 
 
@@ -550,17 +566,29 @@ async def _approve_source_batch_api(
     """Auto-approve a staged source batch after the user approved in chat."""
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not batch_id:
+        logger.error(
+            "Approve source batch skipped: api_base_url=%r, batch_id=%r",
+            api_base_url,
+            batch_id,
+        )
         return {}
+    url = f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve"
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            response = await client.post(
-                f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve",
-            )
+            response = await client.post(url)
             response.raise_for_status()
             body = response.json()
         return body if isinstance(body, dict) else {}
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Approve source batch HTTP %s from %s: %s",
+            exc.response.status_code,
+            url,
+            exc.response.text[:500],
+        )
+        return {}
     except Exception as exc:
-        logger.warning("Approve source batch API call failed: %s", exc)
+        logger.error("Approve source batch API call failed: %s", exc, exc_info=True)
         return {}
 
 
@@ -803,6 +831,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             project_id,
             query,
             limit=max(1, min(int(limit or 6), 8)),
+            store=getattr(runtime, "store", None),
         )
         return json.dumps(results)
 
@@ -918,11 +947,19 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         batch_id = str((batch or {}).get("id") or "").strip()
         if batch_id:
             await _approve_source_batch_api(api_base_url, project_id, batch_id)
+        else:
+            logger.error(
+                "stage_literature_collection: batch_id empty after staging "
+                "(stage_payload keys=%s, batch=%r)",
+                list(stage_payload.keys()) if isinstance(stage_payload, dict) else None,
+                batch,
+            )
 
         return json.dumps({
-            "status": "approved",
+            "status": "approved" if batch_id else "error",
             "count": len(approved_results),
             "batch_id": batch_id or None,
+            "error": None if batch_id else "Failed to stage source ingest batch",
         })
 
     @tool
@@ -968,11 +1005,18 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         batch_id = str((batch or {}).get("id") or "").strip()
         if batch_id:
             await _approve_source_batch_api(api_base_url, project_id, batch_id)
+        else:
+            logger.error(
+                "stage_web_source: batch_id empty after staging (payload keys=%s, batch=%r)",
+                list(payload.keys()) if isinstance(payload, dict) else None,
+                batch,
+            )
 
         return json.dumps({
-            "status": "approved",
+            "status": "approved" if batch_id else "error",
             "url": url,
             "batch_id": batch_id or None,
+            "error": None if batch_id else "Failed to stage web source batch",
         })
 
     @tool

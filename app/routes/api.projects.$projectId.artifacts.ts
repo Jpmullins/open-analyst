@@ -1,15 +1,12 @@
-import { createArtifact, listArtifacts, listArtifactVersions } from "~/lib/db/queries/workspace.server";
+import { createArtifact, getArtifactVersionCounts, listArtifacts } from "~/lib/db/queries/workspace.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.artifacts";
 
 export async function loader({ params }: Route.LoaderArgs) {
-  const artifacts = await listArtifacts(params.projectId);
-  const versionsByArtifactId: Record<string, number> = {};
-  await Promise.all(
-    artifacts.map(async (artifact) => {
-      const versions = await listArtifactVersions(params.projectId, artifact.id);
-      versionsByArtifactId[artifact.id] = versions.length;
-    })
-  );
+  const [artifacts, versionsByArtifactId] = await Promise.all([
+    listArtifacts(params.projectId),
+    getArtifactVersionCounts(params.projectId),
+  ]);
   return Response.json({ artifacts, versionsByArtifactId });
 }
 
@@ -17,9 +14,9 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const artifact = await createArtifact(params.projectId, {
-    runId: typeof body.runId === "string" ? body.runId : null,
     title: body.title,
     kind: body.kind,
     mimeType: body.mimeType,

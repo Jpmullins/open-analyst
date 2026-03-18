@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createProject } from "~/lib/db/queries/projects.server";
-import { getDocument, listDocuments } from "~/lib/db/queries/documents.server";
+import { getArtifact } from "~/lib/db/queries/workspace.server";
 import { getProjectWorkspace } from "~/lib/filesystem.server";
 import { action } from "~/routes/api.projects.$projectId.artifacts.capture";
 
@@ -26,7 +26,7 @@ afterAll(() => {
 });
 
 describe("POST /api/projects/:projectId/artifacts/capture", () => {
-  it("captures a workspace file into project documents", async () => {
+  it("captures a workspace file into a project artifact", async () => {
     const response = await action({
       params: { projectId },
       request: new Request(
@@ -37,7 +37,6 @@ describe("POST /api/projects/:projectId/artifacts/capture", () => {
           body: JSON.stringify({
             relativePath: "outputs/generated-note.txt",
             title: "Generated Note",
-            collectionName: "Artifacts",
           }),
         }
       ),
@@ -46,17 +45,15 @@ describe("POST /api/projects/:projectId/artifacts/capture", () => {
 
     expect(response.status).toBe(201);
     const payload = await response.json();
-    expect(payload.document.title).toBe("Generated Note");
-    expect(payload.document.storageUri).toBeTruthy();
-    expect(payload.document.content).toContain("generated artifact");
-
-    const stored = await getDocument(projectId, payload.document.id);
-    expect(stored?.metadata).toMatchObject({
+    expect(payload.artifact.title).toBe("Generated Note");
+    expect(payload.artifact.storageUri).toBeTruthy();
+    expect(payload.artifact.metadata).toMatchObject({
       relativePath: "outputs/generated-note.txt",
       storageBackend: expect.any(String),
     });
 
-    const docs = await listDocuments(projectId);
-    expect(docs.some((doc) => doc.id === payload.document.id)).toBe(true);
+    const stored = await getArtifact(projectId, payload.artifact.id);
+    expect(stored).toBeTruthy();
+    expect(stored!.title).toBe("Generated Note");
   });
 });

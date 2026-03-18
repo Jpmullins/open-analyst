@@ -3,6 +3,7 @@ import {
   createDocument,
 } from "~/lib/db/queries/documents.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.documents";
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -19,7 +20,8 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const document = await createDocument(params.projectId, {
     collectionId: body.collectionId,
     title: body.title,

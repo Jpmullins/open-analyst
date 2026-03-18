@@ -4,28 +4,9 @@ import { getProject } from "~/lib/db/queries/projects.server";
 import { storeArtifact } from "~/lib/artifacts.server";
 import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
+import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.import.file";
-
-function inferExtension(contentType: string): string {
-  const value = String(contentType || "").toLowerCase();
-  if (value.includes("pdf")) return ".pdf";
-  if (value.includes("json")) return ".json";
-  if (value.includes("html")) return ".html";
-  if (value.includes("xml")) return ".xml";
-  if (value.includes("markdown")) return ".md";
-  if (value.includes("plain")) return ".txt";
-  return ".bin";
-}
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "source")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "source"
-  );
-}
 
 function inferTextFromBuffer(
   buffer: Buffer,
@@ -67,7 +48,8 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const projectId = params.projectId;
   const project = await getProject(projectId);
   if (!project) {

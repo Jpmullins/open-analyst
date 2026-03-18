@@ -1,3 +1,4 @@
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.memory.$memoryId";
 
 const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
@@ -62,7 +63,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
 
     const existingValue = (existing.value ?? {}) as Record<string, unknown>;
-    const body = await request.json();
+    const body = await parseJsonBody(request);
+    if (body instanceof Response) return body;
 
     const updatedValue = {
       ...existingValue,

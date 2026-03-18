@@ -1,4 +1,5 @@
 import { listSourceIngestBatches } from "~/lib/db/queries/source-ingest.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import {
   stageLiteratureCollectionBatch,
   stageSourceIngestBatch,
@@ -30,7 +31,8 @@ export async function action({
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const origin = String(body.origin || "").trim();
   const requestOrigin = new URL(request.url).origin;
 

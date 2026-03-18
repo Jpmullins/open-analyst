@@ -18,26 +18,7 @@ import {
 } from "~/lib/db/queries/source-ingest.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
-
-function sanitizeFilename(value: string): string {
-  return (
-    String(value || "source")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80) || "source"
-  );
-}
-
-function inferExtension(mimeType: string, fallback = ".bin"): string {
-  const lower = String(mimeType || "").toLowerCase();
-  if (lower.includes("pdf")) return ".pdf";
-  if (lower.includes("json")) return ".json";
-  if (lower.includes("html")) return ".html";
-  if (lower.includes("markdown")) return ".md";
-  if (lower.includes("plain")) return ".txt";
-  return fallback;
-}
+import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -99,13 +80,21 @@ async function fetchAnalystJson<T>(
       String(analystServer?.headers?.["x-api-key"] || process.env.ANALYST_MCP_API_KEY || "change-me").trim(),
     ...buildProjectMcpHeaders(project, requestOrigin),
   };
-  const response = await fetch(`${getAnalystApiBaseUrl()}${pathName}`, {
-    ...init,
-    headers: {
-      ...headers,
-      ...(init.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try {
+    response = await fetch(`${getAnalystApiBaseUrl()}${pathName}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...headers,
+        ...(init.headers || {}),
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail =
@@ -392,9 +381,17 @@ async function importWebItem(
   if (!project) throw new Error("Project not found");
   const url = String(item.sourceUrl || "").trim();
   if (!url) throw new Error("Web source is missing a URL");
-  const response = await fetch(url, {
-    headers: { "User-Agent": "open-analyst-headless" },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { "User-Agent": "open-analyst-headless" },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const contentType = response.headers.get("content-type") || "text/html";
   const raw = await response.text();
   const fetchedAt = new Date().toISOString();

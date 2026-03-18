@@ -1,6 +1,6 @@
 import { getDocument } from "~/lib/db/queries/documents.server";
 import { readArtifact } from "~/lib/artifacts.server";
-import { inferMimeType } from "~/lib/artifacts.server";
+import { inferMimeType } from "~/lib/file-utils";
 
 function getMetadataValue(
   metadata: unknown,

@@ -32,30 +32,6 @@ export async function headlessSaveConfig(config: Partial<AppConfig>): Promise<vo
   });
 }
 
-export async function headlessSetWorkingDir(
-  path: string
-): Promise<{ success: boolean; path: string; workingDirType: string }> {
-  return requestJson('/workdir', {
-    method: 'POST',
-    body: JSON.stringify({ path }),
-  });
-}
-
-export async function headlessGetWorkingDir(): Promise<{
-  workingDir: string;
-  workingDirType: string;
-  s3Uri?: string;
-}> {
-  return requestJson('/workdir');
-}
-
-export async function headlessGetTools(): Promise<Array<{ name: string; description: string }>> {
-  const result = await requestJson<{ tools?: Array<{ name: string; description: string }> }>(
-    '/tools'
-  );
-  return Array.isArray(result.tools) ? result.tools : [];
-}
-
 export interface HeadlessProject {
   id: string;
   name: string;
@@ -91,13 +67,6 @@ export interface HeadlessDocument {
   metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface HeadlessRunEvent {
-  id: string;
-  type: string;
-  payload: Record<string, unknown>;
-  timestamp: number;
 }
 
 export interface HeadlessRun {
@@ -210,84 +179,6 @@ export interface HeadlessRagResult {
   metadata: Record<string, unknown>;
 }
 
-export async function headlessGetProjects(): Promise<{
-  activeProject: HeadlessProject | null;
-  projects: HeadlessProject[];
-}> {
-  const response = await requestJson<{
-    activeProject?: HeadlessProject | null;
-    projects?: HeadlessProject[];
-  }>('/projects');
-  return {
-    activeProject: response.activeProject || null,
-    projects: Array.isArray(response.projects) ? response.projects : [],
-  };
-}
-
-export async function headlessCreateProject(
-  name: string,
-  description = '',
-  storage?: {
-    workspaceLocalRoot?: string | null;
-    artifactBackend?: string | null;
-    artifactLocalRoot?: string | null;
-    artifactS3Bucket?: string | null;
-    artifactS3Region?: string | null;
-    artifactS3Endpoint?: string | null;
-    artifactS3Prefix?: string | null;
-  }
-): Promise<HeadlessProject> {
-  const response = await requestJson<{ project: HeadlessProject }>('/projects', {
-    method: 'POST',
-    body: JSON.stringify({ name, description, ...storage }),
-  });
-  return response.project;
-}
-
-export async function headlessSetActiveProject(projectId: string): Promise<void> {
-  await requestJson('/projects/active', {
-    method: 'POST',
-    body: JSON.stringify({ projectId }),
-  });
-}
-
-export async function headlessUpdateProject(
-  projectId: string,
-  updates: {
-    name?: string;
-    description?: string;
-    workspaceLocalRoot?: string | null;
-    artifactBackend?: string | null;
-    artifactLocalRoot?: string | null;
-    artifactS3Bucket?: string | null;
-    artifactS3Region?: string | null;
-    artifactS3Endpoint?: string | null;
-    artifactS3Prefix?: string | null;
-  }
-): Promise<HeadlessProject> {
-  const response = await requestJson<{ project: HeadlessProject }>(
-    `/projects/${encodeURIComponent(projectId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(updates),
-    }
-  );
-  return response.project;
-}
-
-export async function headlessDeleteProject(projectId: string): Promise<void> {
-  await requestJson(`/projects/${encodeURIComponent(projectId)}`, {
-    method: 'DELETE',
-  });
-}
-
-export async function headlessGetCollections(projectId: string): Promise<HeadlessCollection[]> {
-  const response = await requestJson<{ collections?: HeadlessCollection[] }>(
-    `/projects/${encodeURIComponent(projectId)}/collections`
-  );
-  return Array.isArray(response.collections) ? response.collections : [];
-}
-
 export async function headlessCreateCollection(
   projectId: string,
   name: string,
@@ -301,45 +192,6 @@ export async function headlessCreateCollection(
     }
   );
   return response.collection;
-}
-
-export async function headlessGetDocuments(
-  projectId: string,
-  collectionId?: string
-): Promise<HeadlessDocument[]> {
-  const query = collectionId ? `?collectionId=${encodeURIComponent(collectionId)}` : '';
-  const response = await requestJson<{ documents?: HeadlessDocument[] }>(
-    `/projects/${encodeURIComponent(projectId)}/documents${query}`
-  );
-  return Array.isArray(response.documents) ? response.documents : [];
-}
-
-export async function headlessCreateDocument(
-  projectId: string,
-  input: {
-    collectionId?: string;
-    title: string;
-    content: string;
-    sourceType?: string;
-    sourceUri?: string;
-    metadata?: Record<string, unknown>;
-  }
-): Promise<HeadlessDocument> {
-  const response = await requestJson<{ document: HeadlessDocument }>(
-    `/projects/${encodeURIComponent(projectId)}/documents`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        collectionId: input.collectionId,
-        title: input.title,
-        content: input.content,
-        sourceType: input.sourceType || 'manual',
-        sourceUri: input.sourceUri || `manual://${input.title.toLowerCase().replace(/\s+/g, '-')}`,
-        metadata: input.metadata || {},
-      }),
-    }
-  );
-  return response.document;
 }
 
 export async function headlessDeleteDocument(
@@ -419,13 +271,6 @@ export async function headlessRagQuery(
     totalCandidates: Number(response.totalCandidates || 0),
     results: Array.isArray(response.results) ? response.results : [],
   };
-}
-
-export async function headlessGetRuns(projectId: string): Promise<HeadlessRun[]> {
-  const response = await requestJson<{ runs?: HeadlessRun[] }>(
-    `/projects/${encodeURIComponent(projectId)}/runs`
-  );
-  return Array.isArray(response.runs) ? response.runs : [];
 }
 
 export async function headlessGetRun(

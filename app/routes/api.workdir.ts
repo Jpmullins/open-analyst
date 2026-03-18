@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { getSettings, upsertSettings } from "~/lib/db/queries/settings.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.workdir";
 
 export async function loader() {
@@ -16,7 +17,8 @@ export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
-  const body = await request.json();
+  const body = await parseJsonBody(request);
+  if (body instanceof Response) return body;
   const inputPath = String(body.path || "").trim();
   const workingDirType = String(
     body.workingDirType || (inputPath.startsWith("s3://") ? "s3" : "local")

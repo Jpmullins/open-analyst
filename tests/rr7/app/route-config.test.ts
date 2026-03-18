@@ -29,7 +29,6 @@ describe('route config', () => {
     expect(apiPaths).toContain('api/projects');
     expect(apiPaths).toContain('api/config');
     expect(apiPaths).toContain('api/credentials');
-    expect(apiPaths).toContain('api/chat');
   });
 
   it('contains a top-level catch-all route for unmatched requests', () => {

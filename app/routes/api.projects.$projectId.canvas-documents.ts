@@ -3,6 +3,7 @@ import {
   listCanvasDocuments,
   updateCanvasDocument,
 } from "~/lib/db/queries/workspace.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.projects.$projectId.canvas-documents";
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -12,7 +13,8 @@ export async function loader({ params }: Route.LoaderArgs) {
 
 export async function action({ params, request }: Route.ActionArgs) {
   if (request.method === "POST") {
-    const body = await request.json();
+    const body = await parseJsonBody(request);
+    if (body instanceof Response) return body;
     const document = await createCanvasDocument(params.projectId, {
       artifactId: typeof body.artifactId === "string" ? body.artifactId : null,
       title: body.title,
@@ -24,7 +26,8 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   if (request.method === "PUT") {
-    const body = await request.json();
+    const body = await parseJsonBody(request);
+    if (body instanceof Response) return body;
     const documentId = String(body.id || "").trim();
     if (!documentId) {
       return Response.json({ error: "id is required" }, { status: 400 });

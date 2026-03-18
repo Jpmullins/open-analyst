@@ -1,5 +1,5 @@
 import { readArtifact } from "~/lib/artifacts.server";
-import { inferMimeType } from "~/lib/artifacts.server";
+import { inferMimeType } from "~/lib/file-utils";
 import { getArtifact } from "~/lib/db/queries/workspace.server";
 
 function encodeDispositionFilename(filename: string): string {

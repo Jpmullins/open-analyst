@@ -2,13 +2,15 @@ import {
   updateCredential,
   deleteCredential,
 } from "~/lib/credentials.server";
+import { parseJsonBody } from "~/lib/request-utils";
 import type { Route } from "./+types/api.credentials.$id";
 
 export async function action({ request, params }: Route.ActionArgs) {
   const id = params.id;
 
   if (request.method === "PATCH") {
-    const body = await request.json();
+    const body = await parseJsonBody(request);
+    if (body instanceof Response) return body;
     const credential = updateCredential(id, body);
     if (!credential) {
       return Response.json(

@@ -19,7 +19,7 @@ describe("Project route loader", () => {
     });
     const result = await loader(args);
     expect(result).toHaveProperty("projectId", testProject.id);
-    expect(result).toHaveProperty("tasks");
+    expect(result).toHaveProperty("workspaceContext");
   });
 
   it("redirects for invalid projectId", async () => {
@@ -41,7 +41,7 @@ describe("Project route loader", () => {
     }
   });
 
-  it("returns collections summary", async () => {
+  it("returns workspace context", async () => {
     const { loader } = await import(
       "~/routes/_app.projects.$projectId.loader.server"
     );
@@ -49,8 +49,7 @@ describe("Project route loader", () => {
       projectId: testProject.id,
     });
     const result = await loader(args);
-    expect(result).toHaveProperty("collections");
-    expect(Array.isArray(result.collections)).toBe(true);
+    expect(result).toHaveProperty("workspaceContext");
   });
 
   it("syncs active project server-side", async () => {
