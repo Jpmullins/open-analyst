@@ -4,12 +4,11 @@ import type { RuntimeProjectContext } from "~/lib/runtime-client.server";
 import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
 export async function buildRuntimeProjectContext(
-  projectId: string,
-  taskId?: string
+  projectId: string
 ): Promise<RuntimeProjectContext> {
   const [project, workspaceContext] = await Promise.all([
     getProject(projectId),
-    buildWorkspaceContext(projectId, taskId),
+    buildWorkspaceContext(projectId),
   ]);
 
   if (!project) {

@@ -107,17 +107,25 @@ function StatusBlock({ block }: { block: StatusContent }) {
   );
 }
 
-function ToolUseBlock({ block, isStreaming }: { block: ToolUseContent; isStreaming?: boolean }) {
+function ToolUseBlock({ block }: { block: ToolUseContent }) {
   const [expanded, setExpanded] = useState(false);
-  const showExpanded = expanded || isStreaming;
+  const input = (block.input || {}) as Record<string, unknown>;
+  const isTaskDelegation = block.name === "task";
 
   const summary = useMemo(() => {
-    const input = (block.input || {}) as Record<string, unknown>;
+    if (isTaskDelegation) {
+      const subType = String(input.subagent_type || "agent");
+      const desc = String(input.description || "").slice(0, 80);
+      return `Delegating to ${subType}${desc ? `: ${desc}…` : ""}`;
+    }
     if (block.name === "search_literature" || block.name === "search_project_documents") {
       return `Searching for "${input.query || '...'}"`;
     }
+    if (block.name === "search_project_memories") {
+      return `Searching memories for "${input.query || '...'}"`;
+    }
     if (block.name === "read_project_document") {
-      return `Reading document ${input.document_id || '...'}`;
+      return `Reading document ${String(input.document_id || '...').slice(0, 12)}`;
     }
     if (block.name === "execute_command") {
       return `Running: ${input.command || '...'}`;
@@ -126,42 +134,74 @@ function ToolUseBlock({ block, isStreaming }: { block: ToolUseContent; isStreami
       return `Saving canvas: ${input.title || 'draft'}`;
     }
     if (block.name === "stage_literature_collection") {
-      return `Staging sources for "${input.query || '...'}"`;
+      return `Collecting sources for "${input.query || '...'}"`;
+    }
+    if (block.name === "stage_web_source") {
+      return `Capturing: ${input.url || '...'}`;
+    }
+    if (block.name === "publish_canvas_document") {
+      return "Publishing canvas document";
+    }
+    if (block.name === "publish_workspace_file") {
+      return `Publishing: ${input.relative_path || 'file'}`;
+    }
+    if (block.name === "capture_artifact") {
+      return `Capturing artifact: ${input.relativePath || input.title || 'file'}`;
+    }
+    if (block.name === "propose_project_memory") {
+      return `Saving memory: ${input.title || 'note'}`;
     }
     if (block.name === "write_file") {
       return `Writing ${input.path || 'file'}`;
     }
+    if (block.name === "write_todos") {
+      return "Updating plan";
+    }
     const firstVal = Object.values(input)[0];
     return firstVal ? String(firstVal).slice(0, 60) : block.name.replace(/_/g, " ");
-  }, [block]);
+  }, [block, input, isTaskDelegation]);
+
+  // For task() delegations, don't show the expanded detail — the SubagentCard handles that
+  if (isTaskDelegation && !expanded) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-text-muted">
+        <Terminal className="w-3 h-3" />
+        <span>{summary}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="w-full px-4 py-3 flex items-center gap-3 bg-surface-muted hover:bg-surface-active transition-colors"
+        className="w-full px-4 py-2.5 flex items-center gap-3 bg-surface-muted hover:bg-surface-active transition-colors"
       >
-        <div className="w-6 h-6 rounded-lg bg-accent-muted flex items-center justify-center">
-          <Terminal className="w-3.5 h-3.5 text-accent" />
+        <Terminal className="w-3.5 h-3.5 text-accent shrink-0" />
+        <div className="flex-1 text-left min-w-0">
+          <span className="text-xs text-text-muted truncate">{summary}</span>
         </div>
-        <div className="flex-1 text-left">
-          <span className="font-medium text-sm text-text-primary">
-            {block.name.replace(/_/g, " ")}
-          </span>
-          <span className="ml-2 text-xs text-text-muted">{summary}</span>
-        </div>
-        {showExpanded ? (
-          <ChevronDown className="w-4 h-4 text-text-muted" />
+        {expanded ? (
+          <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-text-muted" />
+          <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
         )}
       </button>
-      {showExpanded ? (
-        <div className="p-4">
-          <pre className="code-block text-xs whitespace-pre-wrap">
-            {JSON.stringify(block.input, null, 2)}
-          </pre>
+      {expanded ? (
+        <div className="px-4 py-3 text-xs space-y-1.5 border-t border-border">
+          {Object.entries(input).map(([key, val]) => (
+            <div key={key} className="flex gap-2">
+              <span className="text-text-muted shrink-0 w-28 text-right">{key}:</span>
+              <span className="text-text-secondary break-all">
+                {typeof val === "string" && val.length > 200
+                  ? `${val.slice(0, 200)}…`
+                  : typeof val === "object"
+                    ? JSON.stringify(val)
+                    : String(val ?? "")}
+              </span>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
@@ -181,6 +221,9 @@ function ToolResultBlock({
       candidate.type === "tool_use" && (candidate as ToolUseContent).id === block.toolUseId
   ) as ToolUseContent | undefined;
 
+  // For task() results, the content is the subagent's summary — show it inline
+  const isTaskResult = toolUse?.name === "task";
+
   const summary = useMemo(() => {
     if (block.isError) {
       const text = block.content.split("\n")[0] || "Tool failed";
@@ -192,40 +235,54 @@ function ToolResultBlock({
     if (!block.content) {
       return "Completed";
     }
-    return block.content.length > 120 ? `${block.content.slice(0, 120)}...` : block.content;
+    // Try to extract a clean text summary (strip JSON wrappers)
+    const trimmed = block.content.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === "object" && parsed.status) {
+          return `${parsed.status}${parsed.count ? ` (${parsed.count} items)` : ""}`;
+        }
+      } catch { /* use raw */ }
+    }
+    return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
   }, [block]);
+
+  // For task() results, render the subagent's summary as markdown directly (no collapsible)
+  if (isTaskResult && block.content && !block.isError) {
+    return null; // SubagentCard handles displaying the result
+  }
 
   return (
     <div className="rounded-xl border border-border overflow-hidden bg-surface">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="w-full px-4 py-3 flex items-center gap-3 bg-surface-muted hover:bg-surface-active transition-colors"
+        className="w-full px-4 py-2.5 flex items-center gap-3 bg-surface-muted hover:bg-surface-active transition-colors"
       >
-        <div className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center border border-border">
-          {block.isError ? (
-            <FileText className="w-3.5 h-3.5 text-error" />
-          ) : (
-            <Check className="w-3.5 h-3.5 text-success" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0 text-left">
-          <div className="text-sm font-medium text-text-primary">
-            {toolUse?.name.replace(/_/g, " ") || "Tool result"}
-          </div>
-          <div className="text-xs text-text-muted truncate">{summary}</div>
-        </div>
-        {expanded ? (
-          <ChevronDown className="w-4 h-4 text-text-muted" />
+        {block.isError ? (
+          <FileText className="w-3.5 h-3.5 text-error shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-text-muted" />
+          <Check className="w-3.5 h-3.5 text-success shrink-0" />
+        )}
+        <div className="flex-1 min-w-0 text-left">
+          <span className="text-xs text-text-muted truncate">{summary}</span>
+        </div>
+        {block.content && (
+          expanded ? (
+            <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
+          )
         )}
       </button>
-      {expanded ? (
-        <div className="p-4 space-y-3">
-          {block.content ? (
-            <pre className="code-block text-xs whitespace-pre-wrap">{block.content}</pre>
-          ) : null}
+      {expanded && block.content ? (
+        <div className="px-4 py-3 space-y-3 border-t border-border">
+          <div className="prose prose-sm prose-invert max-w-none text-xs">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {block.content}
+            </ReactMarkdown>
+          </div>
           {block.artifacts?.map((artifact) => (
             <ArtifactCard
               key={artifact.documentId || artifact.artifactId || `${artifact.filename}-${artifact.artifactUrl}`}
@@ -241,11 +298,9 @@ function ToolResultBlock({
 function ContentBlockView({
   block,
   allBlocks,
-  isStreaming,
 }: {
   block: ContentBlock;
   allBlocks: ContentBlock[];
-  isStreaming?: boolean;
 }) {
   switch (block.type) {
     case "text":
@@ -271,7 +326,7 @@ function ContentBlockView({
     case "status":
       return <StatusBlock block={block} />;
     case "tool_use":
-      return <ToolUseBlock block={block} isStreaming={isStreaming} />;
+      return <ToolUseBlock block={block} />;
     case "tool_result":
       return <ToolResultBlock block={block} allBlocks={allBlocks} />;
     case "file_attachment":
@@ -346,7 +401,7 @@ export function MessageCard({ message, isStreaming }: MessageCardProps) {
         ) : null}
       </div>
       {contentBlocks.map((block, index) => (
-        <ContentBlockView key={index} block={block} allBlocks={contentBlocks} isStreaming={isStreaming} />
+        <ContentBlockView key={index} block={block} allBlocks={contentBlocks} />
       ))}
       {isStreaming ? <span className="inline-block w-2 h-4 bg-accent ml-1 animate-pulse" /> : null}
     </div>

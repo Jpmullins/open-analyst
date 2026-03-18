@@ -37,7 +37,6 @@ export async function action({
   if (origin === "literature" && typeof body.query === "string" && body.query.trim()) {
     const batch = await stageLiteratureCollectionBatch(params.projectId, requestOrigin, {
       query: body.query.trim(),
-      taskId: typeof body.taskId === "string" ? body.taskId : null,
       collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
       collectionName: typeof body.collectionName === "string" ? body.collectionName : null,
       limit: Number(body.limit) || 10,
@@ -52,7 +51,6 @@ export async function action({
     const batch = await stageWebSourceBatch(params.projectId, {
       url: body.url,
       title: typeof body.title === "string" ? body.title : null,
-      taskId: typeof body.taskId === "string" ? body.taskId : null,
       collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
       collectionName: typeof body.collectionName === "string" ? body.collectionName : null,
     });
@@ -64,7 +62,6 @@ export async function action({
   }
 
   const batch = await stageSourceIngestBatch(params.projectId, {
-    taskId: typeof body.taskId === "string" ? body.taskId : null,
     collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
     collectionName: typeof body.collectionName === "string" ? body.collectionName : null,
     origin: origin === "web" ? "web" : "literature",

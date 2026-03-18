@@ -1,64 +1,106 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useRevalidator, useSearchParams } from "react-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { BookOpen, BrainCircuit, FlaskConical, PanelRightOpen, Plug, Settings2, Sparkles, Square, Wrench } from "lucide-react";
-import { useChatStream } from "~/hooks/useChatStream";
+import { useAnalystStream } from "~/hooks/useAnalystStream";
 import type { Message } from "~/lib/types";
 import type { WorkspaceContextData } from "~/lib/workspace-context.server";
 import { MessageCard } from "./MessageCard";
+import { InterruptCard } from "./InterruptCard";
+import { SubagentCards } from "./SubagentPanel";
 
 interface AssistantWorkspaceViewProps {
   projectId: string;
-  taskId?: string;
-  taskTitle?: string;
-  initialMessages?: Array<{
-    id: string;
-    role: string;
-    content: unknown;
-    timestamp: string | Date;
-  }>;
+  agentThreadId?: string;
   workspaceContext: WorkspaceContextData;
 }
 
-function mapMessages(
-  taskId: string | undefined,
-  initialMessages: AssistantWorkspaceViewProps["initialMessages"]
-): Message[] {
-  return (initialMessages || []).map((message) => ({
-    id: message.id,
-    sessionId: taskId || "",
-    role: message.role as Message["role"],
-    content: Array.isArray(message.content)
-      ? (message.content as Message["content"])
-      : [{ type: "text", text: String(message.content ?? "") }],
-    timestamp:
-      typeof message.timestamp === "string"
-        ? new Date(message.timestamp).getTime()
-        : message.timestamp instanceof Date
-          ? message.timestamp.getTime()
-          : Date.now(),
-  }));
+/**
+ * Convert a LangGraph BaseMessage (from useStream) to our Message type
+ * so MessageCard can render it.
+ */
+function langGraphMessageToMessage(
+  msg: { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+  sessionId: string,
+): Message | null {
+  const role = msg.type === "human" ? "user" : msg.type === "ai" ? "assistant" : null;
+  if (!role) return null;
+
+  // Build ContentBlock[] from LangGraph message content
+  const content: Message["content"] = [];
+
+  if (typeof msg.content === "string" && msg.content) {
+    content.push({ type: "text", text: msg.content });
+  } else if (Array.isArray(msg.content)) {
+    for (const block of msg.content) {
+      if (typeof block === "string") {
+        content.push({ type: "text", text: block });
+      } else if (block && typeof block === "object") {
+        const b = block as Record<string, unknown>;
+        if (b.type === "text" && typeof b.text === "string") {
+          content.push({ type: "text", text: b.text });
+        } else if (b.type === "tool_use") {
+          content.push({
+            type: "tool_use",
+            id: String(b.id || ""),
+            name: String(b.name || ""),
+            input: (b.input as Record<string, unknown>) || {},
+          });
+        }
+      }
+    }
+  }
+
+  // Add tool_calls as tool_use blocks
+  if (Array.isArray(msg.tool_calls)) {
+    for (const tc of msg.tool_calls) {
+      const call = tc as { id?: string; name?: string; args?: Record<string, unknown> };
+      content.push({
+        type: "tool_use",
+        id: String(call.id || ""),
+        name: String(call.name || ""),
+        input: call.args || {},
+      });
+    }
+  }
+
+  if (content.length === 0) return null;
+
+  return {
+    id: msg.id || `lg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    sessionId,
+    role,
+    content,
+    timestamp: Date.now(),
+  };
 }
 
 export function AssistantWorkspaceView({
   projectId,
-  taskId,
-  taskTitle,
-  initialMessages,
+  agentThreadId: initialAgentThreadId,
   workspaceContext,
 }: AssistantWorkspaceViewProps) {
   const navigate = useNavigate();
-  const { revalidate } = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sendMessage, stop, isStreaming, streamingMessage } = useChatStream();
+  const [isResuming, setIsResuming] = useState(false);
+
+  const stream = useAnalystStream({
+    threadId: initialAgentThreadId,
+    onThreadId: useCallback((id: string) => {
+      // Navigate to the thread route when a new thread is created
+      const next = new URLSearchParams(searchParams);
+      navigate(
+        `/projects/${projectId}/threads/${id}${next.toString() ? `?${next.toString()}` : ""}`,
+        { replace: true },
+      );
+    }, [projectId, searchParams, navigate]),
+  });
 
   const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
-  const collectionId = searchParams.get("collection") || "";
   const activeConnectorCount = workspaceContext.activeConnectorIds.length;
   const activeToolCount = workspaceContext.tools.filter(
     (tool) => tool.source === "local" || tool.active
@@ -66,27 +108,59 @@ export function AssistantWorkspaceView({
   const activeSkillCount = workspaceContext.skills.filter(
     (skill) => skill.pinned || skill.enabled
   ).length;
-  const isProjectHome = !taskId;
+  const isProjectHome = !initialAgentThreadId;
 
-  const serverMessages = useMemo(
-    () => mapMessages(taskId, initialMessages),
-    [taskId, initialMessages]
-  );
-
+  // Stream messages from Agent Server (converted to our format)
   const displayedMessages = useMemo(() => {
-    const scopedOptimisticMessages = optimisticMessages.filter((message) =>
-      taskId ? message.sessionId === taskId : !message.sessionId
-    );
-    const merged = [...serverMessages, ...scopedOptimisticMessages];
-    if (!streamingMessage) return merged;
-    return [...merged, streamingMessage];
-  }, [serverMessages, optimisticMessages, streamingMessage, taskId]);
+    return (stream.messages || [])
+      .map((msg) => langGraphMessageToMessage(
+        msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+        initialAgentThreadId || "",
+      ))
+      .filter((m): m is Message => m !== null);
+  }, [stream.messages, initialAgentThreadId]);
 
+  // Interrupt from Agent Server
+  const interruptValue = useMemo(() => {
+    if (!stream.interrupt) return null;
+    const val = stream.interrupt.value as Record<string, unknown> | undefined;
+    if (!val || typeof val !== "object") return null;
+    return { type: String(val.type || "tool_approval"), ...val };
+  }, [stream.interrupt]);
+
+  const handleInterruptResume = async (resumeValue: Record<string, unknown>) => {
+    setIsResuming(true);
+    try {
+      stream.submit(null, {
+        command: { resume: resumeValue },
+        streamSubgraphs: true,
+      } as any);
+      setIsResuming(false);
+    } catch (error) {
+      console.error("[AssistantWorkspaceView] resume failed", error);
+      setIsResuming(false);
+    }
+  };
+
+  // Extract subagents for a given message from the stream
+  const getSubagentsForMessage = useCallback((messageId: string) => {
+    const getter = (stream as unknown as {
+      getSubagentsByMessage?: (id: string) => unknown[];
+    }).getSubagentsByMessage;
+    if (!getter) return [];
+    try {
+      return (getter(messageId) || []) as Array<Record<string, unknown>>;
+    } catch {
+      return [];
+    }
+  }, [stream]);
+
+  // Auto-scroll
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [displayedMessages.length, streamingMessage]);
+  }, [displayedMessages.length, stream.isLoading]);
 
   const setPanel = (panel: string | null) => {
     setSearchParams(
@@ -107,46 +181,26 @@ export function AssistantWorkspaceView({
     event?.preventDefault();
     setErrorMessage(null);
     const nextPrompt = prompt.trim();
-    if (!nextPrompt || isStreaming) return;
+    if (!nextPrompt || stream.isLoading) return;
 
-    const optimisticMessage: Message = {
-      id: `optimistic-${Date.now()}`,
-      sessionId: taskId || "",
-      role: "user",
-      content: [{ type: "text", text: nextPrompt }],
-      timestamp: Date.now(),
-      localStatus: "queued",
-    };
-
-    setOptimisticMessages((current) => [...current, optimisticMessage]);
     setPrompt("");
 
     try {
-      const result = await sendMessage({
-        prompt: nextPrompt,
-        projectId,
-        taskId,
-        collectionId: collectionId || undefined,
-        deepResearch,
-      });
-      setOptimisticMessages([]);
-      await revalidate();
-      if (!taskId && result.taskId) {
-        const next = new URLSearchParams(searchParams);
-        navigate(
-          `/projects/${projectId}/tasks/${result.taskId}${next.toString() ? `?${next.toString()}` : ""}`,
-          { replace: true }
-        );
-        return;
-      }
-    } catch (error) {
-      setOptimisticMessages((current) =>
-        current.filter((message) => message.id !== optimisticMessage.id)
+      stream.submit(
+        { messages: [{ role: "human", content: nextPrompt }] },
+        {
+          config: { configurable: { project_id: projectId } },
+          metadata: { project_id: projectId },
+          streamSubgraphs: true,
+          onDisconnect: "continue",
+          streamResumable: true,
+        } as any,
       );
+    } catch (error) {
       setPrompt(nextPrompt);
       const message = error instanceof Error ? error.message : String(error);
       setErrorMessage(message);
-      console.error("[AssistantWorkspaceView] chat submit failed", error);
+      console.error("[AssistantWorkspaceView] submit failed", error);
     }
   };
 
@@ -159,7 +213,7 @@ export function AssistantWorkspaceView({
               Analyst Workspace
             </div>
             <h1 className="text-lg font-semibold text-text-primary">
-              {isProjectHome ? "Project Home" : taskTitle || "Interactive Project Thread"}
+              {isProjectHome ? "Project Home" : "Interactive Project Thread"}
             </h1>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
               <span className="tag">
@@ -219,7 +273,7 @@ export function AssistantWorkspaceView({
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-          {displayedMessages.length === 0 ? (
+          {displayedMessages.length === 0 && !stream.isLoading ? (
             <div className="card p-8 text-center">
               <h2 className="text-lg font-semibold mb-2">
                 {isProjectHome ? "Start a new analyst thread" : "Start an analyst conversation"}
@@ -251,12 +305,26 @@ export function AssistantWorkspaceView({
           ) : null}
 
           {displayedMessages.map((message) => (
-            <MessageCard
-              key={message.id}
-              message={message}
-              isStreaming={Boolean(streamingMessage && message.id === streamingMessage.id)}
-            />
+            <React.Fragment key={message.id}>
+              <MessageCard
+                message={message}
+                isStreaming={stream.isLoading && message === displayedMessages[displayedMessages.length - 1]}
+              />
+              {/* Inline subagent cards after assistant messages that delegated */}
+              {message.role === "assistant" && (
+                <SubagentCards subagents={getSubagentsForMessage(message.id)} />
+              )}
+            </React.Fragment>
           ))}
+
+          {/* Interrupt card for in-chat approvals */}
+          {interruptValue && (
+            <InterruptCard
+              interrupt={{ value: interruptValue }}
+              onResume={handleInterruptResume}
+              isProcessing={isResuming}
+            />
+          )}
         </div>
       </div>
 
@@ -281,8 +349,8 @@ export function AssistantWorkspaceView({
               <FlaskConical className="w-3.5 h-3.5" />
               Deep Research
             </button>
-            {isStreaming ? (
-              <button type="button" className="btn btn-secondary text-sm" onClick={stop}>
+            {stream.isLoading ? (
+              <button type="button" className="btn btn-secondary text-sm" onClick={() => stream.stop()}>
                 <Square className="w-4 h-4" />
                 Stop
               </button>
@@ -294,6 +362,12 @@ export function AssistantWorkspaceView({
               <span className="font-medium">Error:</span>
               <span className="flex-1">{errorMessage}</span>
               <button type="button" onClick={() => setErrorMessage(null)} className="text-error/60 hover:text-error">&#x2715;</button>
+            </div>
+          ) : null}
+
+          {stream.error ? (
+            <div className="mb-3 px-4 py-3 rounded-xl bg-error/10 border border-error/30 text-error text-sm">
+              <span className="font-medium">Stream error:</span> {String(stream.error)}
             </div>
           ) : null}
 
@@ -310,11 +384,11 @@ export function AssistantWorkspaceView({
                   void handleSubmit();
                 }
               }}
-              disabled={isStreaming}
+              disabled={stream.isLoading}
             />
             <button
               type="submit"
-              disabled={!prompt.trim() || isStreaming}
+              disabled={!prompt.trim() || stream.isLoading}
               className="absolute bottom-3 right-3 w-10 h-10 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-hover disabled:opacity-40 transition-colors"
               aria-label="Send message"
             >

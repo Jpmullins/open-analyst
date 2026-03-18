@@ -6,7 +6,7 @@ import { AssistantWorkspaceView } from "~/components/AssistantWorkspaceView";
 export { loader } from "./_app.projects.$projectId.tasks.$taskId.loader.server";
 
 export default function TaskRoute() {
-  const { task, messages, workspaceContext } = useLoaderData<
+  const { task, workspaceContext } = useLoaderData<
     typeof import("./_app.projects.$projectId.tasks.$taskId.loader.server").loader
   >();
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
@@ -15,18 +15,16 @@ export default function TaskRoute() {
     setActiveProjectId(task.projectId);
   }, [task.projectId, setActiveProjectId]);
 
+  const taskContext = (task.context as Record<string, unknown> | undefined) ?? {};
+  const agentThreadId = typeof taskContext.agentThreadId === "string"
+    ? taskContext.agentThreadId
+    : undefined;
+
   return (
     <AssistantWorkspaceView
       projectId={task.projectId}
-      taskId={task.id}
-      taskTitle={task.title ?? "Interactive Thread"}
       workspaceContext={workspaceContext}
-      initialMessages={messages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        timestamp: message.timestamp ?? new Date(),
-      }))}
+      agentThreadId={agentThreadId}
     />
   );
 }

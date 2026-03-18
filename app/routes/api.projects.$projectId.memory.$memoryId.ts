@@ -1,58 +1,119 @@
-import { getProjectMemory, updateProjectMemory } from "~/lib/db/queries/memory.server";
-import {
-  deleteRuntimeProjectMemory,
-  upsertRuntimeProjectMemory,
-} from "~/lib/runtime-memory.server";
 import type { Route } from "./+types/api.projects.$projectId.memory.$memoryId";
 
+const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+
+function memoryNamespace(projectId: string): string[] {
+  return ["open-analyst", "projects", projectId, "memories"];
+}
+
 export async function loader({ params }: Route.LoaderArgs) {
-  const memory = await getProjectMemory(params.projectId, params.memoryId);
-  if (!memory) {
+  const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      namespace_prefix: memoryNamespace(params.projectId),
+      filter: { key: params.memoryId },
+      limit: 1,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
+  }
+
+  const data = await res.json();
+  const items: Array<Record<string, unknown>> = Array.isArray(data.items) ? data.items : [];
+  const match = items.find((item) => item.key === params.memoryId);
+
+  if (!match) {
     return Response.json({ error: "Project memory not found" }, { status: 404 });
   }
-  return Response.json({ memory });
+
+  const value = (match.value ?? {}) as Record<string, unknown>;
+  return Response.json({
+    memory: {
+      id: match.key,
+      ...value,
+      createdAt: match.created_at ?? value.createdAt,
+      updatedAt: match.updated_at ?? value.updatedAt,
+    },
+  });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  if (request.method !== "PATCH") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
-  const body = await request.json();
-  const memory = await updateProjectMemory(params.projectId, params.memoryId, {
-    status:
-      body.status === "proposed" || body.status === "active" || body.status === "dismissed"
-        ? body.status
-        : undefined,
-    title: typeof body.title === "string" ? body.title : undefined,
-    summary: typeof body.summary === "string" ? body.summary : undefined,
-    content: typeof body.content === "string" ? body.content : undefined,
-    metadata:
-      body.metadata && typeof body.metadata === "object"
-        ? (body.metadata as Record<string, unknown>)
-        : undefined,
-    provenance:
-      body.provenance && typeof body.provenance === "object"
-        ? (body.provenance as Record<string, unknown>)
-        : undefined,
-  });
-  if (memory.status === "active") {
-    await upsertRuntimeProjectMemory(params.projectId, memory.id, {
-      title: memory.title,
-      summary: memory.summary,
-      content: memory.content,
-      memory_type: memory.memoryType,
-      task_id: memory.taskId,
-      metadata:
-        memory.metadata && typeof memory.metadata === "object"
-          ? (memory.metadata as Record<string, unknown>)
-          : undefined,
-      provenance:
-        memory.provenance && typeof memory.provenance === "object"
-          ? (memory.provenance as Record<string, unknown>)
-          : undefined,
+  if (request.method === "PATCH") {
+    // Fetch existing value first
+    const getRes = await fetch(`${RUNTIME_URL}/store/items/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        namespace_prefix: memoryNamespace(params.projectId),
+        filter: { key: params.memoryId },
+        limit: 1,
+      }),
     });
-  } else {
-    await deleteRuntimeProjectMemory(params.projectId, memory.id);
+    const getData = await getRes.json();
+    const items: Array<Record<string, unknown>> = Array.isArray(getData.items) ? getData.items : [];
+    const existing = items.find((item) => item.key === params.memoryId);
+
+    if (!existing) {
+      return Response.json({ error: "Project memory not found" }, { status: 404 });
+    }
+
+    const existingValue = (existing.value ?? {}) as Record<string, unknown>;
+    const body = await request.json();
+
+    const updatedValue = {
+      ...existingValue,
+      ...(typeof body.title === "string" ? { title: body.title } : {}),
+      ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+      ...(typeof body.content === "string" ? { content: body.content } : {}),
+      ...(body.status === "proposed" || body.status === "active" || body.status === "dismissed"
+        ? { status: body.status }
+        : {}),
+      ...(body.metadata && typeof body.metadata === "object" ? { metadata: body.metadata } : {}),
+      ...(body.provenance && typeof body.provenance === "object"
+        ? { provenance: body.provenance }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const putRes = await fetch(`${RUNTIME_URL}/store/items`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        namespace: memoryNamespace(params.projectId),
+        key: params.memoryId,
+        value: updatedValue,
+      }),
+    });
+
+    if (!putRes.ok) {
+      const detail = await putRes.text().catch(() => "");
+      return Response.json({ error: `Store API error: ${putRes.status} ${detail}` }, { status: 502 });
+    }
+
+    return Response.json({ memory: { id: params.memoryId, ...updatedValue } });
   }
-  return Response.json({ memory });
+
+  if (request.method === "DELETE") {
+    const delRes = await fetch(`${RUNTIME_URL}/store/items`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        namespace: memoryNamespace(params.projectId),
+        key: params.memoryId,
+      }),
+    });
+
+    if (!delRes.ok && delRes.status !== 404) {
+      const detail = await delRes.text().catch(() => "");
+      return Response.json({ error: `Store API error: ${delRes.status} ${detail}` }, { status: 502 });
+    }
+
+    return Response.json({ ok: true });
+  }
+
+  return Response.json({ error: "Method not allowed" }, { status: 405 });
 }

@@ -1,0 +1,10 @@
+{
+  "graphs": {
+    "open-analyst": "./src/graph.py:make_graph"
+  },
+  "dependencies": ["./pyproject.toml"],
+  "env": "../../.env",
+  "http": {
+    "app": "./src/webapp.py:app"
+  }
+}

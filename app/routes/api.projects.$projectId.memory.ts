@@ -1,11 +1,46 @@
-import { createProjectMemory, listProjectMemories } from "~/lib/db/queries/memory.server";
-import { upsertRuntimeProjectMemory } from "~/lib/runtime-memory.server";
+import { v4 as uuidv4 } from "uuid";
 import type { Route } from "./+types/api.projects.$projectId.memory";
+
+const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
+
+function memoryNamespace(projectId: string): string[] {
+  return ["open-analyst", "projects", projectId, "memories"];
+}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const status = url.searchParams.get("status") || undefined;
-  const memories = await listProjectMemories(params.projectId, { status });
+
+  const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      namespace_prefix: memoryNamespace(params.projectId),
+      limit: 100,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
+  }
+
+  const data = await res.json();
+  const items: Array<Record<string, unknown>> = Array.isArray(data.items) ? data.items : [];
+
+  const memories = items
+    .map((item: Record<string, unknown>) => {
+      const value = (item.value ?? {}) as Record<string, unknown>;
+      return {
+        id: item.key as string,
+        ...value,
+        status: value.status ?? "active",
+        createdAt: item.created_at ?? value.createdAt,
+        updatedAt: item.updated_at ?? value.updatedAt,
+      };
+    })
+    .filter((m) => !status || m.status === status);
+
   return Response.json({ memories });
 }
 
@@ -13,39 +48,41 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
+
   const body = await request.json();
-  const memory = await createProjectMemory(params.projectId, {
-    taskId: typeof body.taskId === "string" ? body.taskId : undefined,
-    memoryType: typeof body.memoryType === "string" ? body.memoryType : undefined,
-    status: typeof body.status === "string" ? body.status : undefined,
-    title: typeof body.title === "string" ? body.title : undefined,
-    summary: typeof body.summary === "string" ? body.summary : undefined,
+  const memoryId = uuidv4();
+  const memoryPayload = {
+    title: typeof body.title === "string" ? body.title : "Untitled memory",
+    summary: typeof body.summary === "string" ? body.summary : "",
     content: typeof body.content === "string" ? body.content : "",
+    memoryType: typeof body.memoryType === "string" ? body.memoryType : "note",
+    status: typeof body.status === "string" ? body.status : "proposed",
     metadata:
       body.metadata && typeof body.metadata === "object"
         ? (body.metadata as Record<string, unknown>)
-        : undefined,
+        : {},
     provenance:
       body.provenance && typeof body.provenance === "object"
         ? (body.provenance as Record<string, unknown>)
-        : undefined,
+        : {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const res = await fetch(`${RUNTIME_URL}/store/items`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      namespace: memoryNamespace(params.projectId),
+      key: memoryId,
+      value: memoryPayload,
+    }),
   });
-  if (memory.status === "active") {
-    await upsertRuntimeProjectMemory(params.projectId, memory.id, {
-      title: memory.title,
-      summary: memory.summary,
-      content: memory.content,
-      memory_type: memory.memoryType,
-      task_id: memory.taskId,
-      metadata:
-        memory.metadata && typeof memory.metadata === "object"
-          ? (memory.metadata as Record<string, unknown>)
-          : undefined,
-      provenance:
-        memory.provenance && typeof memory.provenance === "object"
-          ? (memory.provenance as Record<string, unknown>)
-          : undefined,
-    });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return Response.json({ error: `Store API error: ${res.status} ${detail}` }, { status: 502 });
   }
-  return Response.json({ memory });
+
+  return Response.json({ memory: { id: memoryId, ...memoryPayload } });
 }

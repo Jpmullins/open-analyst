@@ -66,7 +66,6 @@ export async function getSourceIngestBatch(
 export async function createSourceIngestBatch(
   projectId: string,
   input: {
-    taskId?: string | null;
     collectionId?: string | null;
     collectionName?: string;
     origin: string;
@@ -90,7 +89,6 @@ export async function createSourceIngestBatch(
     .insert(sourceIngestBatches)
     .values({
       projectId,
-      taskId: input.taskId || null,
       collectionId: input.collectionId || null,
       collectionName: String(input.collectionName || "Research Inbox").trim(),
       origin: String(input.origin || "literature").trim(),

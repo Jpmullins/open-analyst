@@ -1,9 +1,9 @@
-import { getTask } from "~/lib/db/queries/tasks.server";
-import { listProjectMemories } from "~/lib/db/queries/memory.server";
 import { getProjectProfile } from "~/lib/db/queries/workspace.server";
 import { getMcpStatus, getMcpTools, listMcpServers } from "~/lib/mcp.server";
 import { listActiveSkills } from "~/lib/skills.server";
 import { listAvailableTools } from "~/lib/tools.server";
+
+const RUNTIME_URL = process.env.RUNTIME_URL || "http://localhost:8081";
 
 export interface WorkspaceConnectorSummary {
   id: string;
@@ -54,7 +54,6 @@ export interface WorkspaceContextData {
       summary: string;
       memoryType: string;
       status: string;
-      taskId?: string | null;
     }>;
     proposed: Array<{
       id: string;
@@ -62,54 +61,75 @@ export interface WorkspaceContextData {
       summary: string;
       memoryType: string;
       status: string;
-      taskId?: string | null;
     }>;
   };
 }
 
 export async function buildWorkspaceContext(
-  projectId: string,
-  taskId?: string
+  projectId: string
 ): Promise<WorkspaceContextData> {
+  const fetchStoreMemories = async () => {
+    try {
+      const res = await fetch(`${RUNTIME_URL}/store/items/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          namespace_prefix: ["open-analyst", "projects", projectId, "memories"],
+          limit: 50,
+        }),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data.items) ? data.items : [];
+    } catch {
+      return [];
+    }
+  };
+
   const [
     profile,
-    task,
     serverConfigs,
     statuses,
     discoveredTools,
-    activeMemories,
-    proposedMemories,
+    storeMemories,
     activeSkills,
   ] =
     await Promise.all([
       getProjectProfile(projectId),
-      taskId ? getTask(taskId) : Promise.resolve(undefined),
       Promise.resolve(listMcpServers()),
       getMcpStatus(),
       getMcpTools(),
-      listProjectMemories(projectId, { status: "active", limit: 12 }),
-      listProjectMemories(projectId, { status: "proposed", limit: 12 }),
+      fetchStoreMemories(),
       Promise.resolve(listActiveSkills()),
     ]);
 
-  const taskContext =
-    task?.context && typeof task.context === "object"
-      ? (task.context as Record<string, unknown>)
-      : {};
+  const allMemories = storeMemories.map((item: Record<string, unknown>) => {
+    const value = (item.value ?? {}) as Record<string, unknown>;
+    return {
+      id: item.key as string,
+      title: String(value.title || ""),
+      summary: String(value.summary || ""),
+      memoryType: String(value.memoryType || value.memory_type || "note"),
+      status: String(value.status || "active"),
+    };
+  });
+  const activeMemories = allMemories.filter(
+    (m: { status: string }) => m.status === "active"
+  ).slice(0, 12);
+  const proposedMemories = allMemories.filter(
+    (m: { status: string }) => m.status === "proposed"
+  ).slice(0, 12);
+
   const enabledConnectorIds = serverConfigs
     .filter((server) => server.enabled)
     .map((server) => String(server.id));
-  const activeConnectorIds = Array.isArray(taskContext.activeConnectorIds)
-    ? taskContext.activeConnectorIds.map((value) => String(value))
-    : Array.isArray(profile?.defaultConnectorIds)
-      ? profile.defaultConnectorIds.map((value) => String(value))
-      : enabledConnectorIds;
+  const activeConnectorIds = Array.isArray(profile?.defaultConnectorIds)
+    ? profile.defaultConnectorIds.map((value) => String(value))
+    : enabledConnectorIds;
   const enabledSkillIds = activeSkills
     .filter((skill) => skill.enabled)
     .map((skill) => String(skill.id));
-  const pinnedSkillIds = Array.isArray(taskContext.pinnedSkillIds)
-    ? taskContext.pinnedSkillIds.map((value) => String(value))
-    : enabledSkillIds;
+  const pinnedSkillIds = enabledSkillIds;
   const activeConnectorSet = new Set(activeConnectorIds);
   const pinnedSkillSet = new Set(pinnedSkillIds);
   const statusById = new Map(statuses.map((status) => [status.id, status]));
@@ -179,23 +199,21 @@ export async function buildWorkspaceContext(
         ? profile.defaultConnectorIds.map((value) => String(value))
         : [],
     },
-    taskContext,
+    taskContext: {},
     memories: {
-      active: activeMemories.map((memory) => ({
+      active: activeMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
         id: memory.id,
         title: memory.title,
         summary: memory.summary,
         memoryType: memory.memoryType,
         status: memory.status,
-        taskId: memory.taskId,
       })),
-      proposed: proposedMemories.map((memory) => ({
+      proposed: proposedMemories.map((memory: { id: string; title: string; summary: string; memoryType: string; status: string }) => ({
         id: memory.id,
         title: memory.title,
         summary: memory.summary,
         memoryType: memory.memoryType,
         status: memory.status,
-        taskId: memory.taskId,
       })),
     },
   };

@@ -101,7 +101,7 @@ export default function AppLayout() {
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
-          tasks={loaderData?.sidebarTasks ?? []}
+          threads={loaderData?.sidebarThreads ?? []}
           collections={loaderData?.sidebarCollections ?? []}
           documentCounts={loaderData?.sidebarDocumentCounts ?? {}}
         />

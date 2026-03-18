@@ -1,29 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
 import logging
 import re
 import shlex
-import traceback
-import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import httpx
 
 from config import settings
-from models import (
-    ExecutionPhase,
-    Message,
-    RuntimeEvent,
-    RuntimeEvidenceItem,
-    RuntimeInvocationResult,
-    RuntimeRunRequest,
-    RuntimeState,
-)
-from retrieval import configure_retrieval_store, retrieval_service
+from retrieval import retrieval_service
 from telemetry import get_tracer
 
 try:
@@ -58,78 +46,21 @@ try:
 except Exception:  # pragma: no cover
     ChatOpenAI = None
 
+try:
+    from langgraph.types import interrupt
+except Exception:  # pragma: no cover
+    interrupt = None
+
+try:
+    from langgraph.prebuilt.tool_node import ToolRuntime
+except Exception:  # pragma: no cover
+    ToolRuntime = None
+
 tracer = get_tracer()
 logger = logging.getLogger(__name__)
-CURRENT_REQUEST: contextvars.ContextVar[RuntimeRunRequest | None] = contextvars.ContextVar(
-    "open_analyst_current_request",
-    default=None,
-)
-CURRENT_MEMORY_CANDIDATES: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
-    "open_analyst_memory_candidates",
-    default=None,
-)
-CURRENT_EXECUTION_PHASE: contextvars.ContextVar[ExecutionPhase] = contextvars.ContextVar(
-    "open_analyst_execution_phase",
-    default="analyze",
-)
-AGENT_CACHE: dict[str, Any] = {}
-CHECKPOINTER: Any | None = None
-STORE: Any | None = None
 HTML_TAG_RE = re.compile(r"<[^>]+>")
-ARTIFACT_TOOL_NAMES = {
-    "ls",
-    "list_directory",
-    "read_file",
-    "write_file",
-    "edit_file",
-    "glob",
-    "grep",
-    "execute",
-    "execute_command",
-    "capture_artifact",
-    "save_canvas_markdown",
-    "publish_canvas_document",
-    "publish_workspace_file",
-}
-ACQUIRE_TOOL_NAMES = {
-    "search_literature",
-    "stage_literature_collection",
-    "stage_web_source",
-    "list_active_connectors",
-}
-ANALYZE_TOOL_NAMES = {
-    "search_project_documents",
-    "search_project_memories",
-    "list_active_skills",
-    "describe_runtime_capabilities",
-    "list_canvas_documents",
-    "propose_project_memory",
-}
-REVIEW_TOOL_NAMES = {
-    "propose_project_memory",
-}
 
 
-def configure_runtime_persistence(*, checkpointer: Any | None, store: Any | None) -> None:
-    global CHECKPOINTER, STORE
-    CHECKPOINTER = checkpointer
-    STORE = store
-    configure_retrieval_store(store)
-    AGENT_CACHE.clear()
-
-
-def _phase_for_tool_name(tool_name: str) -> str:
-    """Classify a tool into a phase for stream event labeling."""
-    name = str(tool_name or "").strip()
-    if name in ACQUIRE_TOOL_NAMES:
-        return "acquire"
-    if name in ARTIFACT_TOOL_NAMES:
-        return "artifact"
-    if name in REVIEW_TOOL_NAMES:
-        return "review"
-    if name in ANALYZE_TOOL_NAMES:
-        return "analyze"
-    return "analyze"
 
 
 class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
@@ -171,6 +102,14 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         return await handler(request)
 
 
+def _get_project_config(runtime: Any) -> dict[str, Any]:
+    """Extract project config from ToolRuntime's configurable dict."""
+    if runtime is None:
+        return {}
+    config = getattr(runtime, "config", {}) or {}
+    return config.get("configurable", {})
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
@@ -194,50 +133,29 @@ def _skill_paths() -> list[str]:
     return paths
 
 
-def _active_skill_ids(request: RuntimeRunRequest) -> list[str]:
+def _active_skill_ids(cfg: dict[str, Any]) -> list[str]:
     return list(
         dict.fromkeys(
             [
-                *request.project.pinned_skill_ids,
-                *request.project.matched_skill_ids,
+                *(cfg.get("pinned_skill_ids") or []),
+                *(cfg.get("matched_skill_ids") or []),
             ]
         )
     )
 
 
-def _active_skill_summaries(request: RuntimeRunRequest) -> list[dict[str, Any]]:
-    active = set(_active_skill_ids(request))
-    skills = request.project.available_skills or []
+def _active_skill_summaries(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    active = set(_active_skill_ids(cfg))
+    skills = cfg.get("available_skills") or []
     return [skill for skill in skills if str(skill.get("id") or "") in active]
 
 
-def _active_skill_names(request: RuntimeRunRequest) -> set[str]:
-    return {
-        str(skill.get("name") or "").strip().lower()
-        for skill in _active_skill_summaries(request)
-        if str(skill.get("name") or "").strip()
-    }
 
 
 
-
-def _tool_catalog_text(request: RuntimeRunRequest) -> str:
-    lines: list[str] = []
-    for tool_def in request.project.available_tools:
-        if tool_def.get("source") == "mcp" and not tool_def.get("active"):
-            continue
-        name = str(tool_def.get("name") or "tool").strip()
-        description = str(tool_def.get("description") or "").strip()
-        server_name = str(tool_def.get("server_name") or "").strip()
-        if server_name:
-            name = f"{name} ({server_name})"
-        lines.append(f"- {name}: {description}")
-    return "\n".join(lines) if lines else "(none)"
-
-
-def _tool_catalog_payload(request: RuntimeRunRequest) -> dict[str, Any]:
+def _tool_catalog_payload(cfg: dict[str, Any]) -> dict[str, Any]:
     active_tools: list[dict[str, Any]] = []
-    for tool_def in request.project.available_tools:
+    for tool_def in (cfg.get("available_tools") or []):
         if tool_def.get("source") == "mcp" and not tool_def.get("active"):
             continue
         active_tools.append(
@@ -251,15 +169,15 @@ def _tool_catalog_payload(request: RuntimeRunRequest) -> dict[str, Any]:
         )
 
     return {
-        "project": request.project.project_name,
-        "connectors": request.project.active_connector_ids,
+        "project": cfg.get("project_name", ""),
+        "connectors": cfg.get("active_connector_ids", []),
         "skills": [
             {
                 "id": str(skill.get("id") or ""),
                 "name": str(skill.get("name") or ""),
                 "description": str(skill.get("description") or "").strip(),
             }
-            for skill in _active_skill_summaries(request)
+            for skill in _active_skill_summaries(cfg)
         ],
         "tools": active_tools,
     }
@@ -296,29 +214,6 @@ def _artifact_meta_sentinel(payload: dict[str, Any]) -> str:
     )
 
 
-def _skill_catalog_text(request: RuntimeRunRequest) -> str:
-    active_skills = _active_skill_summaries(request)
-    if not active_skills:
-        return "(none)"
-    return "\n".join(
-        f"- {skill.get('name')}: {skill.get('description') or 'Skill pack'}"
-        for skill in active_skills
-    )
-
-
-def _project_brief_evidence(request: RuntimeRunRequest) -> list[RuntimeEvidenceItem]:
-    if not request.project.brief:
-        return []
-    return [
-        RuntimeEvidenceItem(
-            title="Project brief",
-            evidence_type="project_brief",
-            extracted_text=request.project.brief,
-            citation_text="Project profile",
-            confidence="high",
-            provenance={"source": "project_profile"},
-        )
-    ]
 
 
 def _system_prompt() -> str:
@@ -349,6 +244,23 @@ def _system_prompt() -> str:
         "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
         "edit_file, glob, grep, or execute. All file operations and command execution "
         "must be delegated to subagents via task().\n\n"
+        "## Structured Analytic Techniques (SATs)\n"
+        "When performing intelligence analysis, apply structured analytic techniques:\n\n"
+        "### For Research and Evidence Gathering\n"
+        "- Key Assumptions Check: identify and test assumptions before analysis begins\n"
+        "- Use the researcher subagent to gather evidence from multiple independent sources\n\n"
+        "### For Analysis\n"
+        "- Analysis of Competing Hypotheses (ACH): generate multiple hypotheses, evaluate evidence for/against each\n"
+        "- Argument Mapping: decompose the analytic question into claims, sub-claims, and supporting evidence\n"
+        "- Assess confidence using IC probabilistic language (remote, unlikely, roughly even, likely, highly likely, almost certain)\n\n"
+        "### End-to-End Analytic Workflow\n"
+        "For a complete analytic product (bulletin, assessment, brief):\n"
+        "1. task(researcher): gather sources and evidence\n"
+        "2. Synthesize findings, apply ACH or argument mapping as appropriate\n"
+        "3. task(drafter): create the structured product\n"
+        "4. task(critic): evaluate against SAT standards and Four Sweeps\n"
+        "5. If critic finds critical issues: task(drafter) again with feedback\n"
+        "6. task(drafter): finalize and publish\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
         "rather than exhaustive retrieval. When gathering large amounts of data, "
@@ -356,195 +268,10 @@ def _system_prompt() -> str:
     )
 
 
-def _load_skill_body(skill_id: str, max_chars: int = 4000) -> str | None:
-    """Load the SKILL.md body for a given skill ID."""
-    skill_path = _skills_root() / skill_id / "SKILL.md"
-    if not skill_path.exists():
-        return None
-    try:
-        content = skill_path.read_text(encoding="utf-8")
-        return content[:max_chars] if len(content) > max_chars else content
-    except Exception:
-        return None
 
 
-def _build_user_prompt(request: RuntimeRunRequest) -> str:
-    active_connectors = ", ".join(request.project.active_connector_ids) or "(none)"
-    active_skills = ", ".join(
-        str(skill.get("name") or "").strip()
-        for skill in _active_skill_summaries(request)
-        if str(skill.get("name") or "").strip()
-    ) or "(none)"
-    research_note = (
-        "This request starts in acquisition mode. Begin with search_literature, then use project document/memory retrieval or active connector tools as needed. "
-        "Only transition into artifact work when the user explicitly wants a draft, file, canvas update, or published deliverable. After one or two targeted searches, synthesize instead of re-reading raw tool dumps.\n\n"
-        if _is_research_prompt(request)
-        else ""
-    )
-    collection_note = (
-        "If the user wants sources collected into the project, use stage_literature_collection or stage_web_source instead of only summarizing search results. "
-        "After staging, tell the user the sources are waiting in the Sources panel for approval.\n\n"
-        if _is_collection_request(request) or _is_web_capture_request(request)
-        else ""
-    )
-    # Build skill body section for active skills
-    skill_bodies = []
-    for skill in _active_skill_summaries(request):
-        skill_id = str(skill.get("id") or "").strip()
-        if skill_id:
-            body = _load_skill_body(skill_id)
-            if body:
-                skill_bodies.append(f"### Skill: {skill.get('name', skill_id)}\n{body}")
-
-    skill_instructions = ""
-    if skill_bodies:
-        skill_instructions = (
-            "Active skill instructions:\n"
-            + "\n\n".join(skill_bodies)
-            + "\n\nFollow these skill instructions precisely when they apply to the current request.\n\n"
-        )
-
-    return (
-        f"Project: {request.project.project_name}\n\n"
-        f"Project workspace:\n{request.project.workspace_path or '(not configured)'}\n\n"
-        f"Project brief:\n{request.project.brief or '(none)'}\n\n"
-        f"Active connectors:\n{active_connectors}\n\n"
-        f"Active skills:\n{active_skills}\n\n"
-        f"{skill_instructions}"
-        "Runtime note:\n"
-        "Use the bound tools directly when they help. "
-        "When you need the full text of a project source, use read_project_document(document_id). "
-        "Do not use read_file on artifact URLs or API routes.\n"
-        "Do not restate the tool catalog unless the user explicitly asks about tools, skills, or connectors.\n\n"
-        f"{research_note}"
-        f"{collection_note}"
-        f"Current user request:\n{request.prompt}\n"
-    )
 
 
-def _is_capability_question(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    return (
-        "what tools" in prompt
-        or "which tools" in prompt
-        or "available tools" in prompt
-        or (
-            ("tool" in prompt or "connector" in prompt or "skill" in prompt)
-            and ("list" in prompt or "available" in prompt or "what can you do" in prompt)
-        )
-    )
-
-
-def _is_research_prompt(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    if request.mode == "deep_research":
-        return True
-    keywords = [
-        "research",
-        "literature",
-        "papers",
-        "paper",
-        "articles",
-        "article",
-        "arxiv",
-        "openalex",
-        "semantic scholar",
-        "citations",
-        "sources",
-        "collect",
-        "download",
-        "survey",
-        "review",
-    ]
-    if any(keyword in prompt for keyword in keywords):
-        return True
-    active_skill_names = _active_skill_names(request)
-    return "web research" in active_skill_names
-
-
-def _is_document_generation_request(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    if prompt and any(
-        phrase in prompt
-        for phrase in [
-            ".docx",
-            "docx",
-            "bulletin",
-            "word document",
-            "word doc",
-            "arlis",
-            "template",
-            "memo",
-            "report",
-        ]
-    ):
-        return True
-    active_skill_names = _active_skill_names(request)
-    return bool({"arlis-bulletin", "docx"} & active_skill_names)
-
-
-def _is_collection_request(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    return any(
-        phrase in prompt
-        for phrase in [
-            "collect ",
-            "collect articles",
-            "collect papers",
-            "add to sources",
-            "save to sources",
-            "stage sources",
-            "build a source list",
-        ]
-    )
-
-
-def _is_web_capture_request(request: RuntimeRunRequest) -> bool:
-    prompt = str(request.prompt or "").strip().lower()
-    return ("http://" in prompt or "https://" in prompt) and any(
-        phrase in prompt
-        for phrase in [
-            "collect",
-            "capture",
-            "save",
-            "ingest",
-            "add to sources",
-        ]
-    )
-
-
-def _fallback_runtime_text(request: RuntimeRunRequest, reason: str) -> str:
-    base = [
-        f"Objective: {request.prompt}",
-        "",
-        f"Project: {request.project.project_name}",
-        f"Active connectors: {', '.join(request.project.active_connector_ids) or '(none)'}",
-        f"Active skills: {', '.join(str(skill.get('name') or '') for skill in _active_skill_summaries(request) if str(skill.get('name') or '').strip()) or '(none)'}",
-    ]
-    if _is_capability_question(request):
-        base.extend(
-            [
-                "",
-                "Available tools:",
-                _tool_catalog_text(request),
-            ]
-        )
-    base.extend(["", reason])
-    return "\n".join(base)
-
-
-def _runtime_exception_text(request: RuntimeRunRequest, exc: Exception) -> str:
-    return _fallback_runtime_text(
-        request,
-        f"Runtime failure during agent execution: {type(exc).__name__}: {exc}",
-    )
-
-
-def _runtime_config(request: RuntimeRunRequest) -> dict[str, Any]:
-    return {
-        "configurable": {"thread_id": request.thread_id or request.run_id},
-        "recursion_limit": 150 if _is_research_prompt(request) else 80,
-    }
 
 
 def _clean_text(value: Any, *, limit: int = 320) -> str:
@@ -614,64 +341,15 @@ def _summarize_literature_payload(payload: dict[str, Any], *, limit: int) -> str
     return json.dumps(summary, ensure_ascii=False)
 
 
-def _extract_text_from_message_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                if item.get("type") == "text":
-                    parts.append(str(item.get("text") or ""))
-        return "".join(parts)
-    if isinstance(content, dict):
-        if content.get("type") == "text":
-            return str(content.get("text") or "")
-    return str(content or "")
 
-
-def _extract_final_text(result: Any) -> str:
-    if isinstance(result, dict):
-        messages = result.get("messages")
-        if isinstance(messages, list):
-            for message in reversed(messages):
-                if getattr(message, "type", "") == "ai":
-                    return _extract_text_from_message_content(getattr(message, "content", ""))
-                if isinstance(message, dict) and message.get("role") in {"assistant", "ai"}:
-                    return _extract_text_from_message_content(message.get("content"))
-        if "output" in result:
-            return _extract_final_text(result.get("output"))
-    return _extract_text_from_message_content(result)
-
-
-def _build_memory_candidates(final_text: str, request: RuntimeRunRequest) -> list[dict[str, Any]]:
-    candidates = CURRENT_MEMORY_CANDIDATES.get() or []
-    if candidates:
-        return candidates[:5]
-    if not final_text.strip():
-        return []
-    if len(final_text.strip()) < 180:
-        return []
-    return [
-        {
-            "title": f"Thread insight: {request.project.project_name}",
-            "summary": final_text.strip()[:220],
-            "content": final_text.strip(),
-            "memory_type": "finding",
-        }
-    ]
-
-
-async def _list_canvas_documents_api(request: RuntimeRunRequest) -> list[dict[str, Any]]:
-    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+async def _list_canvas_documents_api(api_base_url: str, project_id: str) -> list[dict[str, Any]]:
+    api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return []
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.get(
-                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents"
+                f"{api_base_url}/api/projects/{project_id}/canvas-documents"
             )
             response.raise_for_status()
             payload = response.json()
@@ -683,15 +361,16 @@ async def _list_canvas_documents_api(request: RuntimeRunRequest) -> list[dict[st
 
 
 async def _save_canvas_document_api(
-    request: RuntimeRunRequest,
+    api_base_url: str,
+    project_id: str,
     markdown: str,
     title: str = "Analysis Draft",
 ) -> dict[str, Any] | None:
-    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not markdown.strip():
         return None
     try:
-        existing = await _list_canvas_documents_api(request)
+        existing = await _list_canvas_documents_api(api_base_url, project_id)
         if existing:
             target = existing[0]
             method = "PUT"
@@ -714,7 +393,7 @@ async def _save_canvas_document_api(
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.request(
                 method,
-                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents",
+                f"{api_base_url}/api/projects/{project_id}/canvas-documents",
                 json=body,
             )
             response.raise_for_status()
@@ -727,16 +406,17 @@ async def _save_canvas_document_api(
 
 
 async def _publish_canvas_document_api(
-    request: RuntimeRunRequest,
+    api_base_url: str,
+    project_id: str,
     *,
     add_to_sources: bool = False,
     change_summary: str = "Published from runtime",
 ) -> dict[str, Any] | None:
-    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return None
     try:
-        existing = await _list_canvas_documents_api(request)
+        existing = await _list_canvas_documents_api(api_base_url, project_id)
         if not existing:
             return None
         target = existing[0]
@@ -745,7 +425,7 @@ async def _publish_canvas_document_api(
             return None
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.post(
-                f"{api_base_url}/api/projects/{request.project.project_id}/canvas-documents/{document_id}/publish",
+                f"{api_base_url}/api/projects/{project_id}/canvas-documents/{document_id}/publish",
                 json={
                     "addToSources": add_to_sources,
                     "changeSummary": change_summary,
@@ -761,13 +441,15 @@ async def _publish_canvas_document_api(
 
 
 async def _publish_workspace_file_api(
-    request: RuntimeRunRequest,
+    api_base_url: str,
+    project_id: str,
     relative_path: str,
     title: str | None = None,
     collection_name: str | None = None,
+    collection_id: str | None = None,
     add_to_sources: bool = True,
 ) -> dict[str, Any] | None:
-    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url or not relative_path.strip():
         return None
     try:
@@ -775,12 +457,12 @@ async def _publish_workspace_file_api(
             "relativePath": relative_path,
             "title": title or "",
             "collectionName": collection_name or "Artifacts",
-            "collectionId": request.project.collection_id,
+            "collectionId": collection_id,
             "addToSources": add_to_sources,
         }
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.post(
-                f"{api_base_url}/api/projects/{request.project.project_id}/artifacts/capture",
+                f"{api_base_url}/api/projects/{project_id}/artifacts/capture",
                 json=payload,
             )
             response.raise_for_status()
@@ -839,16 +521,17 @@ async def _search_literature_api(
 
 
 async def _stage_source_ingest_api(
-    request: RuntimeRunRequest,
+    api_base_url: str,
+    project_id: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    api_base_url = str(request.project.api_base_url or "").rstrip("/")
+    api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
         return {}
     try:
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             response = await client.post(
-                f"{api_base_url}/api/projects/{request.project.project_id}/source-ingest",
+                f"{api_base_url}/api/projects/{project_id}/source-ingest",
                 json=payload,
             )
             response.raise_for_status()
@@ -859,8 +542,30 @@ async def _stage_source_ingest_api(
         return {}
 
 
-def _workspace_root(request: RuntimeRunRequest) -> Path:
-    raw_path = str(request.project.workspace_path or "").strip()
+async def _approve_source_batch_api(
+    api_base_url: str,
+    project_id: str,
+    batch_id: str,
+) -> dict[str, Any]:
+    """Auto-approve a staged source batch after the user approved in chat."""
+    api_base_url = str(api_base_url or "").rstrip("/")
+    if not api_base_url or not batch_id:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            response = await client.post(
+                f"{api_base_url}/api/projects/{project_id}/source-ingest/{batch_id}/approve",
+            )
+            response.raise_for_status()
+            body = response.json()
+        return body if isinstance(body, dict) else {}
+    except Exception as exc:
+        logger.warning("Approve source batch API call failed: %s", exc)
+        return {}
+
+
+def _workspace_root(workspace_path: str) -> Path:
+    raw_path = str(workspace_path or "").strip()
     if not raw_path:
         raise RuntimeError("Project workspace is not configured for this runtime request.")
     workspace = Path(raw_path).expanduser().resolve()
@@ -868,7 +573,7 @@ def _workspace_root(request: RuntimeRunRequest) -> Path:
     return workspace
 
 
-def _resolve_virtual_or_workspace_path(request: RuntimeRunRequest, input_path: str) -> Path:
+def _resolve_virtual_or_workspace_path(workspace_path: str, input_path: str) -> Path:
     raw = str(input_path or ".").strip()
     if raw.startswith("/skills/skills/"):
         return (_skills_root() / raw.removeprefix("/skills/skills/")).resolve()
@@ -876,40 +581,32 @@ def _resolve_virtual_or_workspace_path(request: RuntimeRunRequest, input_path: s
         return (_skills_root() / raw.removeprefix("/skills/")).resolve()
     if raw.startswith("/memories/"):
         return (_repo_root() / raw.removeprefix("/")).resolve()
-    return _resolve_workspace_path(request, raw)
+    return _resolve_workspace_path(workspace_path, raw)
 
 
-def _resolve_workspace_path(request: RuntimeRunRequest, relative_path: str) -> Path:
-    workspace = _workspace_root(request)
+def _resolve_workspace_path(workspace_path: str, relative_path: str) -> Path:
+    workspace = _workspace_root(workspace_path)
     candidate = (workspace / str(relative_path or ".").strip()).resolve()
     if candidate != workspace and workspace not in candidate.parents:
         raise RuntimeError("Requested path is outside the project workspace.")
     return candidate
 
 
-def _workspace_relative_path(request: RuntimeRunRequest, target: Path) -> str:
-    workspace = _workspace_root(request)
+def _workspace_relative_path(workspace_path: str, target: Path) -> str:
+    workspace = _workspace_root(workspace_path)
     return str(target.resolve().relative_to(workspace)).replace("\\", "/")
 
 
-def _display_path(request: RuntimeRunRequest, target: Path) -> str:
+def _display_path(workspace_path: str, target: Path) -> str:
     resolved = target.resolve()
     skills_root = _skills_root().resolve()
     if resolved == skills_root or skills_root in resolved.parents:
         return f"/skills/{resolved.relative_to(skills_root).as_posix()}".rstrip("/") or "/skills"
-    workspace = _workspace_root(request)
+    workspace = _workspace_root(workspace_path)
     if resolved == workspace or workspace in resolved.parents:
         return str(resolved.relative_to(workspace)).replace("\\", "/") or "."
     return str(resolved)
 
-
-def _coerce_text_file(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(
-            f"{path.name} is not a UTF-8 text file. Use execute_command for binary extraction or conversion."
-        ) from exc
 
 
 def _safe_command_parts(command: str) -> list[str]:
@@ -938,13 +635,14 @@ def _safe_command_parts(command: str) -> list[str]:
         "tail",
         "grep",
         "sed",
+        "file",
     }
     if parts[0] not in allowed:
         raise RuntimeError(f"Command '{parts[0]}' is not allowed in the project workspace runtime.")
     return parts
 
 
-def _map_command_parts(request: RuntimeRunRequest, parts: list[str]) -> list[str]:
+def _map_command_parts(workspace_path: str, parts: list[str]) -> list[str]:
     mapped: list[str] = []
     for part in parts:
         if part.startswith("/skills/skills/"):
@@ -956,23 +654,24 @@ def _map_command_parts(request: RuntimeRunRequest, parts: list[str]) -> list[str
             mapped.append(str((_skills_root() / part.removeprefix("/skills/")).resolve()))
             continue
         if part.startswith("/workspace/"):
-            mapped.append(str(_resolve_workspace_path(request, part.removeprefix("/workspace/"))))
+            mapped.append(str(_resolve_workspace_path(workspace_path, part.removeprefix("/workspace/"))))
             continue
         mapped.append(part)
     return mapped
 
 
-def _build_tools() -> list[Any]:
+def _build_tools() -> tuple[list[Any], dict[str, Any]]:
     if tool is None:
         return []
 
     @tool
-    async def list_directory(path: str = ".") -> str:
+    async def list_directory(path: str = ".", runtime: ToolRuntime = None) -> str:
         """List files and folders inside the current project workspace."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        workspace_path = cfg.get("workspace_path", "")
+        if not cfg.get("project_id"):
             return "[]"
-        target = _resolve_virtual_or_workspace_path(request, path)
+        target = _resolve_virtual_or_workspace_path(workspace_path, path)
         if not target.exists():
             raise RuntimeError(f"{path} does not exist in the project workspace.")
         if target.is_file():
@@ -981,7 +680,7 @@ def _build_tools() -> list[Any]:
                 [
                     {
                         "name": target.name,
-                        "path": _display_path(request, target),
+                        "path": _display_path(workspace_path, target),
                         "type": "file",
                         "size": stat.st_size,
                     }
@@ -993,7 +692,7 @@ def _build_tools() -> list[Any]:
             entries.append(
                 {
                     "name": child.name,
-                    "path": _display_path(request, child),
+                    "path": _display_path(workspace_path, child),
                     "type": "directory" if child.is_dir() else "file",
                     "size": stat.st_size if child.is_file() else None,
                 }
@@ -1001,15 +700,16 @@ def _build_tools() -> list[Any]:
         return json.dumps(entries)
 
     @tool
-    async def execute_command(command: str, cwd: str = ".") -> str:
+    async def execute_command(command: str, cwd: str = ".", runtime: ToolRuntime = None) -> str:
         """Execute an allowed shell command inside the project workspace."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        workspace_path = cfg.get("workspace_path", "")
+        if not cfg.get("project_id"):
             return "{}"
-        working_dir = _resolve_workspace_path(request, cwd)
+        working_dir = _resolve_workspace_path(workspace_path, cwd)
         if not working_dir.exists() or not working_dir.is_dir():
             raise RuntimeError(f"{cwd} is not a directory in the project workspace.")
-        parts = _map_command_parts(request, _safe_command_parts(command))
+        parts = _map_command_parts(workspace_path, _safe_command_parts(command))
         process = await asyncio.create_subprocess_exec(
             *parts,
             cwd=str(working_dir),
@@ -1028,7 +728,7 @@ def _build_tools() -> list[Any]:
         return json.dumps(
             {
                 "command": command,
-                "cwd": _workspace_relative_path(request, working_dir),
+                "cwd": _workspace_relative_path(workspace_path, working_dir),
                 "exit_code": process.returncode,
                 "stdout": stdout.decode("utf-8", errors="replace")[:24000],
                 "stderr": stderr.decode("utf-8", errors="replace")[:12000],
@@ -1040,17 +740,22 @@ def _build_tools() -> list[Any]:
         relativePath: str,
         title: str = "",
         collectionName: str = "Artifacts",
+        runtime: ToolRuntime = None,
     ) -> str:
         """Capture a generated workspace file into the project artifact store."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        workspace_path = cfg.get("workspace_path", "")
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
-        target = _resolve_workspace_path(request, relativePath)
+        target = _resolve_workspace_path(workspace_path, relativePath)
         if not target.exists() or not target.is_file():
             raise RuntimeError(f"{relativePath} was not found in the project workspace.")
         document = await _publish_workspace_file_api(
-            request,
-            _workspace_relative_path(request, target),
+            api_base_url,
+            project_id,
+            _workspace_relative_path(workspace_path, target),
             title=title or target.stem,
             collection_name=collectionName,
         )
@@ -1059,40 +764,43 @@ def _build_tools() -> list[Any]:
         return json.dumps(document or {})
 
     @tool
-    async def search_project_documents(query: str, limit: int = 6) -> str:
+    async def search_project_documents(query: str, limit: int = 6, runtime: ToolRuntime = None) -> str:
         """Search indexed project documents with pgvector retrieval and return grounded snippets."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "[]"
         results = await retrieval_service.search_project_documents(
-            request.project.project_id,
+            project_id,
             query,
-            collection_id=request.project.collection_id,
+            collection_id=cfg.get("collection_id"),
             limit=max(1, min(int(limit or 6), 8)),
         )
         return json.dumps(results)
 
     @tool
-    async def read_project_document(document_id: str, max_chars: int = 12000) -> str:
+    async def read_project_document(document_id: str, max_chars: int = 12000, runtime: ToolRuntime = None) -> str:
         """Read the extracted text and metadata for a project document by document id."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
         result = await retrieval_service.read_project_document(
-            request.project.project_id,
+            project_id,
             document_id=document_id,
             max_chars=max(1000, min(int(max_chars or 12000), 40000)),
         )
         return json.dumps(result or {})
 
     @tool
-    async def search_project_memories(query: str, limit: int = 6) -> str:
+    async def search_project_memories(query: str, limit: int = 6, runtime: ToolRuntime = None) -> str:
         """Search promoted long-term project memories relevant to the current request."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "[]"
         results = await retrieval_service.search_project_memories(
-            request.project.project_id,
+            project_id,
             query,
             limit=max(1, min(int(limit or 6), 8)),
         )
@@ -1125,103 +833,209 @@ def _build_tools() -> list[Any]:
         date_to: str = "",
         collection_name: str = "",
         sources: list[str] | None = None,
+        runtime: ToolRuntime = None,
     ) -> str:
-        """Stage literature results as pending project sources for approval and import."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        """Search literature and present results for user approval before adding to project sources."""
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
-        payload = await _stage_source_ingest_api(
-            request,
+
+        # Step 1: Search literature
+        effective_limit = max(1, min(int(limit or 10), 20))
+        search_payload = await _search_literature_api(
+            query,
+            limit=effective_limit,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            sources=sources,
+        )
+        results = search_payload.get("results") if isinstance(search_payload.get("results"), list) else []
+        if not results:
+            return json.dumps({"status": "no_results", "message": f"No literature found for '{query}'."})
+
+        # Step 2: Build compact results for user review
+        compact = []
+        for i, item in enumerate(results):
+            if not isinstance(item, dict):
+                continue
+            compact.append({
+                "index": i,
+                "title": _clean_text(item.get("title"), limit=220),
+                "authors": _clean_authors(item.get("authors")),
+                "venue": _clean_text(item.get("venue"), limit=120),
+                "year": str(item.get("published_at") or "")[:4],
+                "abstract": _clean_text(item.get("abstract"), limit=300),
+                "doi": _clean_text(item.get("doi"), limit=120) or None,
+                "url": _clean_text(item.get("url"), limit=200) or None,
+                "citation_count": int(item.get("citation_count") or 0),
+            })
+
+        # Step 3: Interrupt for user approval with full paper list
+        if interrupt is not None:
+            approval = interrupt({
+                "type": "source_collection_approval",
+                "query": query,
+                "total_found": len(compact),
+                "sources": compact,
+                "message": f"Found {len(compact)} sources for '{query}'. Select which to add to project.",
+            })
+        else:
+            # Fallback: auto-approve all if interrupt not available
+            approval = {"approved": True, "approved_indices": list(range(len(compact)))}
+
+        if not isinstance(approval, dict) or not approval.get("approved"):
+            return json.dumps({"status": "rejected", "message": "Source collection was declined by the user."})
+
+        # Step 4: Filter to user-selected items
+        approved_indices = approval.get("approved_indices")
+        if approved_indices is not None:
+            approved_set = set(int(idx) for idx in approved_indices)
+            approved_results = [r for i, r in enumerate(results) if i in approved_set]
+        else:
+            approved_results = results
+
+        if not approved_results:
+            return json.dumps({"status": "rejected", "message": "No sources selected."})
+
+        # Step 5: Stage and auto-approve (user already approved in chat)
+        stage_payload = await _stage_source_ingest_api(
+            api_base_url,
+            project_id,
             {
                 "origin": "literature",
                 "query": query,
-                "limit": max(1, min(int(limit or 10), 20)),
+                "limit": len(approved_results),
                 "dateFrom": date_from or None,
                 "dateTo": date_to or None,
-                "collectionId": request.project.collection_id,
+                "collectionId": cfg.get("collection_id"),
                 "collectionName": collection_name or None,
                 "sources": sources or [],
             },
         )
-        batch = payload.get("batch") if isinstance(payload, dict) else None
-        return json.dumps(batch or {})
+        batch = stage_payload.get("batch") if isinstance(stage_payload, dict) else None
+        batch_id = str((batch or {}).get("id") or "").strip()
+        if batch_id:
+            await _approve_source_batch_api(api_base_url, project_id, batch_id)
+
+        return json.dumps({
+            "status": "approved",
+            "count": len(approved_results),
+            "batch_id": batch_id or None,
+        })
 
     @tool
     async def stage_web_source(
         url: str,
         title: str = "",
         collection_name: str = "",
+        runtime: ToolRuntime = None,
     ) -> str:
-        """Stage a website capture as a pending project source for approval and import."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        """Capture a web page as a project source after user confirms in chat."""
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
+
+        # Interrupt for user confirmation
+        if interrupt is not None:
+            approval = interrupt({
+                "type": "web_source_approval",
+                "url": url,
+                "title": title or url,
+                "message": f"Add web source to project?\n\nURL: {url}\nTitle: {title or '(auto-detect)'}",
+            })
+        else:
+            approval = {"approved": True}
+
+        if not isinstance(approval, dict) or not approval.get("approved"):
+            return json.dumps({"status": "rejected", "message": "Web source capture was declined."})
+
         payload = await _stage_source_ingest_api(
-            request,
+            api_base_url,
+            project_id,
             {
                 "origin": "web",
                 "url": url,
                 "title": title or None,
-                "collectionId": request.project.collection_id,
+                "collectionId": cfg.get("collection_id"),
                 "collectionName": collection_name or None,
             },
         )
         batch = payload.get("batch") if isinstance(payload, dict) else None
-        return json.dumps(batch or {})
+        batch_id = str((batch or {}).get("id") or "").strip()
+        if batch_id:
+            await _approve_source_batch_api(api_base_url, project_id, batch_id)
+
+        return json.dumps({
+            "status": "approved",
+            "url": url,
+            "batch_id": batch_id or None,
+        })
 
     @tool
-    async def list_active_connectors() -> str:
+    async def list_active_connectors(runtime: ToolRuntime = None) -> str:
         """List the currently active connectors for this thread."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        if not cfg.get("project_id"):
             return "[]"
-        return json.dumps(request.project.active_connector_ids)
+        return json.dumps(cfg.get("active_connector_ids", []))
 
     @tool
-    async def list_active_skills() -> str:
+    async def list_active_skills(runtime: ToolRuntime = None) -> str:
         """List the currently pinned or auto-matched skill packs for this thread."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        if not cfg.get("project_id"):
             return "[]"
-        return json.dumps(_active_skill_summaries(request))
+        return json.dumps(_active_skill_summaries(cfg))
 
     @tool
-    async def describe_runtime_capabilities() -> str:
+    async def describe_runtime_capabilities(runtime: ToolRuntime = None) -> str:
         """Describe the active tools, connectors, and skills for the current thread."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        if not cfg.get("project_id"):
             return "{}"
-        return json.dumps(_tool_catalog_payload(request))
+        return json.dumps(_tool_catalog_payload(cfg))
 
     @tool
-    async def list_canvas_documents() -> str:
+    async def list_canvas_documents(runtime: ToolRuntime = None) -> str:
         """List existing canvas documents for the current project."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "[]"
-        documents = await _list_canvas_documents_api(request)
+        documents = await _list_canvas_documents_api(api_base_url, project_id)
         return json.dumps(documents)
 
     @tool
-    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft") -> str:
+    async def save_canvas_markdown(markdown: str, title: str = "Analysis Draft", runtime: ToolRuntime = None) -> str:
         """Create or update the primary markdown canvas document for the current project."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
-        document = await _save_canvas_document_api(request, markdown=markdown, title=title)
+        document = await _save_canvas_document_api(api_base_url, project_id, markdown=markdown, title=title)
         return json.dumps(document or {})
 
     @tool
     async def publish_canvas_document(
         add_to_sources: bool = True,
         change_summary: str = "Published from runtime",
+        runtime: ToolRuntime = None,
     ) -> str:
         """Publish the primary canvas document into artifact storage and optionally add it to sources."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
         document = await _publish_canvas_document_api(
-            request,
+            api_base_url,
+            project_id,
             add_to_sources=add_to_sources,
             change_summary=change_summary,
         )
@@ -1236,16 +1050,21 @@ def _build_tools() -> list[Any]:
         relative_path: str,
         title: str = "",
         collection_name: str = "Artifacts",
+        runtime: ToolRuntime = None,
     ) -> str:
         """Publish a workspace file into the project artifact store and register it as a project document."""
-        request = CURRENT_REQUEST.get()
-        if request is None:
+        cfg = _get_project_config(runtime)
+        api_base_url = cfg.get("api_base_url", "")
+        project_id = cfg.get("project_id", "")
+        if not project_id:
             return "{}"
         document = await _publish_workspace_file_api(
-            request,
+            api_base_url,
+            project_id,
             relative_path=relative_path,
             title=title,
             collection_name=collection_name,
+            collection_id=cfg.get("collection_id"),
         )
         if isinstance(document, dict):
             return _artifact_meta_sentinel(document)
@@ -1259,18 +1078,12 @@ def _build_tools() -> list[Any]:
         memory_type: str = "finding",
     ) -> str:
         """Propose a durable project memory for later user approval."""
-        candidates = CURRENT_MEMORY_CANDIDATES.get()
-        if candidates is None:
-            candidates = []
-            CURRENT_MEMORY_CANDIDATES.set(candidates)
         entry = {
             "title": title.strip() or "Analyst memory",
             "summary": (summary.strip() or content.strip()[:220]),
             "content": content.strip(),
             "memory_type": memory_type.strip() or "finding",
         }
-        if entry["content"]:
-            candidates.append(entry)
         return json.dumps(entry)
 
     # All tools are built here but the supervisor only gets a minimal
@@ -1344,7 +1157,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_memories"],
             ],
             "middleware": [],
-            # Researcher doesn't need artifact/drafting skills
+            "skills": ["/skills/content-extraction/"],
         },
         {
             "name": "drafter",
@@ -1378,7 +1191,14 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["list_canvas_documents"],
             ],
             "middleware": [],
-            "skills": _skill_paths(),
+            "skills": [
+                "/skills/arlis-bulletin/",
+                "/skills/docx/",
+                "/skills/xlsx/",
+                "/skills/pptx/",
+                "/skills/pdf/",
+                "/skills/schedule/",
+            ],
         },
         {
             "name": "critic",
@@ -1389,8 +1209,16 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "1. Evidence grounding: Are claims supported by cited sources?\n"
                 "2. Citation quality: Are sources credible, recent, and relevant?\n"
                 "3. Gaps: What important aspects are missing?\n"
-                "4. Confidence calibration: Are uncertainty levels appropriate?\n"
-                "5. Structure: Does the output follow the requested format?\n\n"
+                "4. Confidence calibration: Are uncertainty levels appropriate? Does language match IC probabilistic standards?\n"
+                "5. Structure: Does the output follow the requested format?\n"
+                "6. Key Assumptions Check: Are assumptions explicitly stated and tested?\n"
+                "7. Competing Hypotheses: Were alternative explanations considered?\n"
+                "8. Analytic Story Arc: Does the product follow KIQ → BLUF → What → So What?\n"
+                "9. Four Sweeps (for bulletins):\n"
+                "   - Sweep 1: Message clarity (single analytic message, clear KIQ, clear BLUF)\n"
+                "   - Sweep 2: Structure (analytic story arc, evidence supports assessments, facts vs assessments distinguished)\n"
+                "   - Sweep 3: Prose (short sentences, active voice, probabilistic language, no jargon)\n"
+                "   - Sweep 4: Formatting (sources cited, headers correct)\n\n"
                 "Use search_project_documents and read_project_document to verify claims against sources.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a structured critique (under 400 words)\n"
@@ -1436,7 +1264,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["execute_command"],
             ],
             "middleware": [],
-            "skills": _skill_paths(),
+            # general-purpose inherits skills from parent agent automatically
         },
     ]
 
@@ -1445,41 +1273,56 @@ def _build_backend() -> Any:
     if CompositeBackend is None or FilesystemBackend is None or StoreBackend is None:
         return None
 
-    def namespace(_: Any) -> tuple[str, ...]:
-        request = CURRENT_REQUEST.get()
-        project_id = request.project.project_id if request is not None else "default"
+    def namespace(runtime: Any) -> tuple[str, ...]:
+        config = getattr(runtime, "config", {}) or {}
+        project_id = config.get("configurable", {}).get("project_id", "default")
         return ("open-analyst", "projects", project_id, "memories")
 
-    return lambda runtime: CompositeBackend(
-        default=(
-            FilesystemBackend(
-                root_dir=(
-                    _workspace_root(CURRENT_REQUEST.get())
-                    if CURRENT_REQUEST.get() is not None
-                    else _repo_root()
-                ),
-                virtual_mode=True,
-            )
-            if FilesystemBackend is not None
-            else StateBackend(runtime)
-        ),
-        routes={
-            "/memories/": StoreBackend(runtime, namespace=namespace),
-            "/skills/": FilesystemBackend(root_dir=_skills_root(), virtual_mode=True),
-        },
-    )
+    def _backend_factory(runtime: Any) -> Any:
+        config = getattr(runtime, "config", {}) or {}
+        workspace_path = config.get("configurable", {}).get("workspace_path", "")
+        if workspace_path:
+            default_root = _workspace_root(workspace_path)
+        else:
+            default_root = _repo_root()
+        return CompositeBackend(
+            default=(
+                FilesystemBackend(
+                    root_dir=default_root,
+                    virtual_mode=True,
+                )
+                if FilesystemBackend is not None
+                else StateBackend(runtime)
+            ),
+            routes={
+                "/memories/": StoreBackend(runtime, namespace=namespace),
+                "/skills/": FilesystemBackend(root_dir=_skills_root(), virtual_mode=True),
+            },
+        )
+
+    return _backend_factory
 
 
-def _build_agent() -> Any | None:
-    if create_deep_agent is None or ChatOpenAI is None:
-        return None
-    cache_key = settings.default_chat_model
-    if cache_key in AGENT_CACHE:
-        return AGENT_CACHE[cache_key]
+def _build_model() -> Any:
+    """Build the LLM model instance for the deep agent."""
+    if ChatOpenAI is None:
+        raise RuntimeError("langchain-openai is not installed")
     model_kwargs = {**settings.chat_model_kwargs}
     model_kwargs.setdefault("max_retries", 10)
     model_kwargs.setdefault("timeout", 120)
-    model = ChatOpenAI(**model_kwargs)
+    return ChatOpenAI(**model_kwargs)
+
+
+def make_graph() -> Any:
+    """Entry point for the LangGraph Agent Server (referenced in langgraph.json).
+
+    Returns a compiled deep agent graph. The Agent Server handles
+    checkpointing, store, streaming, thread management, and run lifecycle.
+    """
+    if create_deep_agent is None:
+        raise RuntimeError("deepagents is not installed")
+
+    model = _build_model()
     supervisor_tools, all_tools = _build_tools()
     agent = create_deep_agent(
         model=model,
@@ -1491,333 +1334,10 @@ def _build_agent() -> Any | None:
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, all_tools),
         backend=_build_backend(),
-        checkpointer=CHECKPOINTER,
-        store=STORE,
         interrupt_on={
             "publish_canvas_document": True,
             "publish_workspace_file": True,
             "execute_command": True,
         },
-        debug=False,
     )
-    AGENT_CACHE[cache_key] = agent
     return agent
-
-
-def _has_live_model() -> bool:
-    return bool(ChatOpenAI is not None and (settings.litellm_api_key or settings.litellm_base_url))
-
-
-def _build_conversation_messages(request: RuntimeRunRequest) -> list[dict[str, str]]:
-    """Build conversation messages. SummarizationMiddleware handles compaction."""
-    user_prompt = _build_user_prompt(request)
-
-    if not request.messages or len(request.messages) <= 1:
-        return [{"role": "user", "content": user_prompt}]
-
-    # Pass through history — SummarizationMiddleware will compact if needed
-    history: list[dict[str, str]] = []
-    for msg in request.messages[:-1]:
-        content = msg.content.strip()
-        if content:
-            history.append({"role": msg.role, "content": content})
-
-    # Current prompt is always the final user message
-    history.append({"role": "user", "content": user_prompt})
-    return history
-
-
-def build_initial_state(request: RuntimeRunRequest) -> RuntimeState:
-    return RuntimeState(
-        run_id=request.run_id,
-        prompt=request.prompt,
-        mode=request.mode,
-        project=request.project,
-        messages=request.messages or [Message(role="user", content=request.prompt)],
-        phase="analyze",
-        phase_history=["analyze"],
-        active_skill_ids=_active_skill_ids(request),
-    )
-
-
-async def invoke_run(request: RuntimeRunRequest) -> RuntimeInvocationResult:
-    state = build_initial_state(request)
-    evidence = _project_brief_evidence(request)
-    fallback_text = _fallback_runtime_text(
-        request,
-        "The deep agent runtime is available, but no live model response could be completed. "
-        "Check LiteLLM connectivity to enable planning, delegation, retrieval, and artifact actions.",
-    )
-
-    if not _has_live_model() or _build_agent() is None:
-        final_text = _fallback_runtime_text(
-            request,
-            "No live model is configured for the deep agent runtime. "
-            "Configure LiteLLM and restart to enable planning, delegation, retrieval, and artifact actions.",
-        )
-        return RuntimeInvocationResult(
-            status="completed",
-            final_text=final_text,
-            active_plan=[],
-            evidence_bundle=evidence,
-            memory_candidates=[],
-            approvals=[],
-        )
-
-    phase_token = CURRENT_EXECUTION_PHASE.set(state.phase)
-    token = CURRENT_REQUEST.set(request)
-    memory_token = CURRENT_MEMORY_CANDIDATES.set([])
-    try:
-        agent = _build_agent()
-        try:
-            result = await agent.ainvoke(
-                {"messages": _build_conversation_messages(request)},
-                _runtime_config(request),
-            )
-            final_text = _extract_final_text(result).strip()
-        except Exception as exc:
-            logger.exception("Runtime invoke failed for thread %s", request.thread_id or request.run_id)
-            final_text = _runtime_exception_text(request, exc)
-        return RuntimeInvocationResult(
-            status="completed",
-            final_text=final_text,
-            active_plan=[],
-            evidence_bundle=evidence,
-            approvals=[],
-            memory_candidates=_build_memory_candidates(final_text, request),
-        )
-    finally:
-        CURRENT_EXECUTION_PHASE.reset(phase_token)
-        CURRENT_REQUEST.reset(token)
-        CURRENT_MEMORY_CANDIDATES.reset(memory_token)
-
-
-async def stream_run(request: RuntimeRunRequest) -> AsyncIterator[RuntimeEvent]:
-    yield RuntimeEvent(
-        type="status",
-        phase="analyze",
-        status="running",
-        actor="supervisor",
-        text="Starting analysis",
-    )
-
-    if not _has_live_model() or _build_agent() is None:
-        fallback = await invoke_run(request)
-        for line in fallback.final_text.splitlines(keepends=True):
-            if line:
-                yield RuntimeEvent(
-                    type="text_delta",
-                    phase="final",
-                    status="running",
-                    actor="supervisor",
-                    text=line,
-                )
-        yield RuntimeEvent(
-            type="status",
-            phase="completed",
-            status="completed",
-            actor="supervisor",
-            text="Analysis complete",
-        )
-        return
-
-    phase_token = CURRENT_EXECUTION_PHASE.set("analyze")
-    token = CURRENT_REQUEST.set(request)
-    memory_token = CURRENT_MEMORY_CANDIDATES.set([])
-    tool_run_ids: dict[str, str] = {}
-    final_text = ""
-    streamed_any_text = False
-    try:
-        agent = _build_agent()
-        try:
-            async for event in agent.astream_events(
-                {"messages": _build_conversation_messages(request)},
-                _runtime_config(request),
-                version="v2",
-            ):
-                event_type = str(event.get("event") or "")
-                # Extract agent name from metadata for subagent attribution
-                event_metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
-                agent_name = str(event_metadata.get("lc_agent_name") or "supervisor").strip() or "supervisor"
-                is_supervisor = agent_name in ("supervisor", "open-analyst")
-
-                if event_type == "on_tool_start":
-                    run_id = str(event.get("run_id") or uuid.uuid4())
-                    tool_name = str(event.get("name") or "tool")
-                    tool_use_id = str(uuid.uuid4())
-                    tool_run_ids[run_id] = tool_use_id
-                    tool_phase = _phase_for_tool_name(tool_name)
-
-                    # Extract tool input before yielding
-                    tool_input = (
-                        event.get("data", {}).get("input")
-                        if isinstance(event.get("data"), dict)
-                        else None
-                    )
-
-                    # Build display text with agent attribution
-                    if not is_supervisor:
-                        display_text = f"{agent_name}: {tool_name}"
-                    else:
-                        display_text = f"Running {tool_name}"
-
-                    # Emit descriptive status for subagent delegation
-                    if tool_name == "task" and isinstance(tool_input, dict):
-                        subagent_type = str(tool_input.get("subagent_type") or "").strip()
-                        description = str(tool_input.get("description") or "").strip()
-                        if subagent_type:
-                            short_desc = description[:100] if description else "working"
-                            display_text = f"Delegating to {subagent_type}: {short_desc}"
-                            yield RuntimeEvent(
-                                type="status",
-                                phase=tool_phase,
-                                status="running",
-                                actor=subagent_type,
-                                text=display_text,
-                            )
-                    elif tool_name == "write_todos":
-                        display_text = f"{agent_name}: Updating plan" if not is_supervisor else "Updating plan"
-                        yield RuntimeEvent(
-                            type="status",
-                            phase=tool_phase,
-                            status="running",
-                            actor=agent_name,
-                            text=display_text,
-                        )
-
-                    yield RuntimeEvent(
-                        type="tool_call_start",
-                        phase=tool_phase,
-                        status="running",
-                        actor=agent_name,
-                        text=display_text,
-                        toolUseId=tool_use_id,
-                        toolName=tool_name,
-                        toolInput=tool_input,
-                    )
-                elif event_type == "on_tool_end":
-                    run_id = str(event.get("run_id") or "")
-                    tool_use_id = tool_run_ids.get(run_id, str(uuid.uuid4()))
-                    tool_name = str(event.get("name") or "tool")
-                    tool_phase = _phase_for_tool_name(tool_name)
-                    output = ""
-                    if isinstance(event.get("data"), dict):
-                        output = json.dumps(
-                            event["data"].get("output", ""),
-                            ensure_ascii=False,
-                            default=str,
-                        )
-                    completed_text = (
-                        f"{agent_name}: Completed {tool_name}" if not is_supervisor
-                        else f"Completed {tool_name}"
-                    )
-                    yield RuntimeEvent(
-                        type="tool_call_end",
-                        phase=tool_phase,
-                        status="completed",
-                        actor=agent_name,
-                        text=completed_text,
-                        toolUseId=tool_use_id,
-                        toolName=tool_name,
-                        toolOutput=output,
-                        toolStatus="completed",
-                    )
-                    # Emit plan update for write_todos
-                    if tool_name == "write_todos" and isinstance(event.get("data"), dict):
-                        raw_output = event["data"].get("output")
-                        todos_text = str(raw_output) if raw_output else ""
-                        if todos_text:
-                            yield RuntimeEvent(
-                                type="status",
-                                phase=tool_phase,
-                                status="running",
-                                actor=agent_name,
-                                text=f"Plan updated: {todos_text[:200]}",
-                            )
-                elif event_type == "on_chat_model_stream":
-                    # Only stream supervisor text to the user as text_delta;
-                    # subagent text is internal working and returns via task tool result
-                    if not is_supervisor:
-                        continue
-                    chunk = event.get("data", {}).get("chunk") if isinstance(event.get("data"), dict) else None
-                    if chunk is not None:
-                        chunk_content = getattr(chunk, "content", None)
-                        if isinstance(chunk_content, str) and chunk_content:
-                            yield RuntimeEvent(
-                                type="text_delta",
-                                phase=CURRENT_EXECUTION_PHASE.get(),
-                                status="running",
-                                actor="supervisor",
-                                text=chunk_content,
-                            )
-                            final_text += chunk_content
-                            streamed_any_text = True
-                        elif isinstance(chunk_content, list):
-                            for item in chunk_content:
-                                if isinstance(item, dict) and item.get("type") == "text":
-                                    text_piece = str(item.get("text") or "")
-                                    if text_piece:
-                                        yield RuntimeEvent(
-                                            type="text_delta",
-                                            phase=CURRENT_EXECUTION_PHASE.get(),
-                                            status="running",
-                                            actor="supervisor",
-                                            text=text_piece,
-                                        )
-                                        final_text += text_piece
-                                        streamed_any_text = True
-                elif event_type == "on_chain_end":
-                    if not final_text:
-                        candidate = _extract_final_text(event.get("data", {}).get("output"))
-                        if candidate.strip():
-                            final_text = candidate.strip()
-            if not final_text:
-                result = await agent.ainvoke(
-                    {"messages": _build_conversation_messages(request)},
-                    _runtime_config(request),
-                )
-                final_text = _extract_final_text(result).strip()
-        except Exception as exc:
-            logger.exception("Runtime stream failed for thread %s", request.thread_id or request.run_id)
-            yield RuntimeEvent(
-                type="error",
-                phase="runtime",
-                status="error",
-                actor="supervisor",
-                text=f"Runtime failure during agent execution: {type(exc).__name__}: {exc}",
-                error=traceback.format_exc(limit=8),
-            )
-            final_text = _runtime_exception_text(request, exc)
-
-        memory_candidates = _build_memory_candidates(final_text, request)
-        if memory_candidates:
-            yield RuntimeEvent(
-                type="memory_proposal",
-                phase="memory",
-                status="completed",
-                actor="supervisor",
-                text="Proposed project memories",
-                memoryCandidates=memory_candidates,
-            )
-        # Fallback: emit text line-by-line if no on_chat_model_stream events were received
-        if final_text and not streamed_any_text:
-            for line in final_text.splitlines(keepends=True):
-                if line:
-                    yield RuntimeEvent(
-                        type="text_delta",
-                        phase="final",
-                        status="running",
-                        actor="supervisor",
-                        text=line,
-                    )
-        yield RuntimeEvent(
-            type="status",
-            phase="completed",
-            status="completed",
-            actor="supervisor",
-            text="Analysis complete",
-        )
-    finally:
-        CURRENT_EXECUTION_PHASE.reset(phase_token)
-        CURRENT_REQUEST.reset(token)
-        CURRENT_MEMORY_CANDIDATES.reset(memory_token)

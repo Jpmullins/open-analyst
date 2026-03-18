@@ -41,11 +41,51 @@ Use this skill when the user wants to:
 2. **Read the analytic writing guide** — Read `references/analytic-writing-guide.md` for detailed standards on KIQs, BLUFs, argumentation, and the four-sweeps review
 3. **Read the template spec** — Read `references/template-spec.md` for exact formatting details
 4. **Formulate the KIQ** — Craft a two-part Key Intelligence Question based on the source material
-5. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
+5. **Structured analysis** — Before drafting, apply structured analytic techniques (see "Structured Analysis" below)
+6. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
 6. **Generate the document inside the project workspace** — Run `scripts/generate_bulletin.py` to clone the template and inject content. Save the final `.docx` under a workspace-relative folder such as `outputs/<topic-slug>/arlis-bulletin.docx`. Do not write outputs under the agent service directory.
 7. **Capture the finished document as a project artifact** — After generating the `.docx`, call `capture_artifact` with the workspace-relative path so the bulletin is registered in the project and stored in the configured artifact backend (local or S3).
 8. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
-9. **Visual QA** — Convert to PDF/images and visually inspect
+9. **SAT evaluation** — Evaluate the draft against SAT standards (see "SAT Evaluation" below)
+10. **Visual QA** — Convert to PDF/images and visually inspect
+
+## Structured Analysis
+
+Before drafting, apply at least one structured analytic technique to strengthen the analysis:
+
+### Key Assumptions Check
+List the 3-5 key assumptions underlying your analysis. For each:
+- State the assumption clearly
+- Rate its vulnerability (high/medium/low)
+- Note what would change if the assumption is wrong
+
+### Analysis of Competing Hypotheses (when applicable)
+If the topic involves competing explanations or uncertain outcomes:
+1. List 2-4 plausible hypotheses
+2. For each piece of evidence, rate its consistency with each hypothesis (Consistent/Inconsistent/Neutral)
+3. Identify the hypothesis most consistent with the evidence
+4. Note diagnostic evidence that distinguishes between hypotheses
+
+### Argument Mapping
+Decompose the KIQ into:
+- Main claim (this becomes the BLUF answer)
+  - Sub-claim 1 → supporting evidence
+  - Sub-claim 2 → supporting evidence
+- Counter-arguments and their evidence
+- Identify the weakest links in the argument chain
+
+Use the argument map to structure the "What" and "So What" sections. The strongest evidence-backed claims go first (inverted pyramid).
+
+## SAT Evaluation
+
+After the four-sweeps self-review, evaluate the draft against SAT standards:
+1. Does the BLUF directly answer the KIQ?
+2. Are all assessments supported by cited evidence?
+3. Are key assumptions identified and tested?
+4. Is probabilistic language calibrated correctly (remote → almost certain)?
+5. Were alternative hypotheses considered and addressed?
+6. Does the product acknowledge key uncertainties and intelligence gaps?
+7. Are facts clearly distinguished from assessments?
 
 ## Working with Input Files
 

@@ -178,7 +178,6 @@ function normalizeLiteratureItem(item: Record<string, unknown>) {
 export async function stageSourceIngestBatch(
   projectId: string,
   input: {
-    taskId?: string | null;
     collectionId?: string | null;
     collectionName?: string | null;
     origin: "literature" | "web";
@@ -200,7 +199,6 @@ export async function stageSourceIngestBatch(
     collectionName: input.collectionName,
   });
   return createSourceIngestBatch(projectId, {
-    taskId: input.taskId || null,
     collectionId: targetCollection.id,
     collectionName: targetCollection.name,
     origin: input.origin,
@@ -217,7 +215,6 @@ export async function stageLiteratureCollectionBatch(
   requestOrigin: string,
   input: {
     query: string;
-    taskId?: string | null;
     collectionId?: string | null;
     collectionName?: string | null;
     limit?: number;
@@ -241,7 +238,6 @@ export async function stageLiteratureCollectionBatch(
   }>(projectId, requestOrigin, `/api/search?${params.toString()}`);
   const results = Array.isArray(payload.results) ? payload.results : [];
   return stageSourceIngestBatch(projectId, {
-    taskId: input.taskId || null,
     collectionId: input.collectionId || null,
     collectionName: input.collectionName || null,
     origin: "literature",
@@ -262,14 +258,12 @@ export async function stageWebSourceBatch(
   input: {
     url: string;
     title?: string | null;
-    taskId?: string | null;
     collectionId?: string | null;
     collectionName?: string | null;
   }
 ) {
   const normalizedUrl = new URL(String(input.url || "").trim()).toString();
   return stageSourceIngestBatch(projectId, {
-    taskId: input.taskId || null,
     collectionId: input.collectionId || null,
     collectionName: input.collectionName || null,
     origin: "web",

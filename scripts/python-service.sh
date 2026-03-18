@@ -28,7 +28,7 @@ case "$service_name" in
   runtime)
     service_dir="$repo_root/services/langgraph-runtime"
     venv_dir="${OPEN_ANALYST_RUNTIME_VENV:-$HOME/.venvs/open-analyst-langgraph-runtime}"
-    run_args=("python" "src/main.py")
+    run_args=("langgraph" "dev" "--config" "langgraph.json" "--port" "8081" "--no-browser")
     test_args=("pytest" "tests/" "-v")
     ;;
   analyst-mcp)

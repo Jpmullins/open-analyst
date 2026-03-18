@@ -5,7 +5,7 @@ import {
   Settings,
 } from "lucide-react";
 
-interface SidebarTask {
+interface SidebarThread {
   id: string;
   title: string | null;
   status: string | null;
@@ -19,26 +19,26 @@ interface SidebarCollection {
 }
 
 interface SidebarProps {
-  tasks: SidebarTask[];
+  threads: SidebarThread[];
   collections: SidebarCollection[];
   documentCounts: Record<string, number>;
 }
 
-function buildWorkspacePath(projectId: string, taskId: string | null): string {
-  return taskId ? `/projects/${projectId}/tasks/${taskId}` : `/projects/${projectId}`;
+function buildWorkspacePath(projectId: string, threadId: string | null): string {
+  return threadId ? `/projects/${projectId}/threads/${threadId}` : `/projects/${projectId}`;
 }
 
-export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
+export function Sidebar({ threads, collections, documentCounts }: SidebarProps) {
   const { sidebarCollapsed, isConfigured } = useAppStore();
   const navigate = useNavigate();
   const params = useParams();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const activeProjectId = params.projectId || null;
-  const activeTaskId = params.taskId || null;
+  const activeThreadId = params.threadId || null;
   const activePanel = searchParams.get("panel");
   const isSourcesView = activePanel === "sources" || location.pathname.endsWith("/knowledge");
-  const isWorkspaceHome = !activeTaskId && !isSourcesView;
+  const isWorkspaceHome = !activeThreadId && !isSourcesView;
 
   // Determine active IDs from URL
   const activeCollectionId = searchParams.get("collection") || null;
@@ -141,16 +141,16 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
                 Threads
               </div>
             </div>
-            {tasks.length === 0 ? (
+            {threads.length === 0 ? (
               <div className="text-sm text-text-muted px-1 py-2">
                 No threads yet.
               </div>
             ) : (
-              tasks.map((task) => (
+              threads.map((thread) => (
                 <div
-                  key={task.id}
+                  key={thread.id}
                   className={`group flex items-center gap-2 px-2 py-2 rounded-lg border transition-colors cursor-pointer ${
-                    activeTaskId === task.id
+                    activeThreadId === thread.id
                       ? "border-accent/40 bg-accent-muted"
                       : "border-transparent hover:border-accent/30 hover:bg-surface-hover"
                   }`}
@@ -159,12 +159,12 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
                     className="flex-1 text-left min-w-0"
                     onClick={() =>
                       navigate(
-                        `/projects/${activeProjectId}/tasks/${task.id}`
+                        `/projects/${activeProjectId}/threads/${thread.id}`
                       )
                     }
                   >
-                    <div className="text-sm truncate">{task.title}</div>
-                    <div className="text-xs text-text-muted">{task.status}</div>
+                    <div className="text-sm truncate">{thread.title}</div>
+                    <div className="text-xs text-text-muted">{thread.status}</div>
                   </button>
                 </div>
               ))
@@ -180,23 +180,23 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
 
         {sidebarCollapsed && activeProjectId && !isSourcesView && (
           <div className="flex flex-col items-center gap-1">
-            {tasks.slice(0, 8).map((task) => (
+            {threads.slice(0, 8).map((thread) => (
               <button
-                key={task.id}
+                key={thread.id}
                 onClick={() =>
                   navigate(
-                    `/projects/${activeProjectId}/tasks/${task.id}`
+                    `/projects/${activeProjectId}/threads/${thread.id}`
                   )
                 }
                 className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium ${
-                  activeTaskId === task.id
+                  activeThreadId === thread.id
                     ? "bg-accent-muted text-accent"
                     : "hover:bg-surface-hover text-text-muted"
                 }`}
-                title={task.title ?? undefined}
-                aria-label={task.title ?? undefined}
+                title={thread.title ?? undefined}
+                aria-label={thread.title ?? undefined}
               >
-                {(task.title ?? "?").charAt(0).toUpperCase()}
+                {(thread.title ?? "?").charAt(0).toUpperCase()}
               </button>
             ))}
           </div>
@@ -213,7 +213,7 @@ export function Sidebar({ tasks, collections, documentCounts }: SidebarProps) {
             }
             const next = new URLSearchParams(searchParams);
             next.set("panel", "settings");
-            navigate(`${buildWorkspacePath(activeProjectId, activeTaskId)}?${next.toString()}`);
+            navigate(`${buildWorkspacePath(activeProjectId, activeThreadId)}?${next.toString()}`);
           }}
           className={`w-full flex items-center ${
             sidebarCollapsed ? "justify-center" : "gap-3"
