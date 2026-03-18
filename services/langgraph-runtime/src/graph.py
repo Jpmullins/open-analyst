@@ -39,6 +39,16 @@ except Exception:  # pragma: no cover
 
 
 try:
+    from langchain.agents.middleware import AgentMiddleware
+except Exception:  # pragma: no cover
+    AgentMiddleware = None
+
+try:
+    from langchain_core.messages import ToolMessage
+except Exception:  # pragma: no cover
+    ToolMessage = None
+
+try:
     from langchain_core.tools import tool
 except Exception:  # pragma: no cover
     tool = None
@@ -120,6 +130,45 @@ def _phase_for_tool_name(tool_name: str) -> str:
     if name in ANALYZE_TOOL_NAMES:
         return "analyze"
     return "analyze"
+
+
+class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
+    """Block DeepAgents built-in filesystem tools on the supervisor.
+
+    DeepAgents' FilesystemMiddleware auto-injects ls, read_file, write_file,
+    edit_file, glob, grep, and execute onto every agent including the supervisor.
+    This middleware intercepts those calls and returns an error directing the
+    supervisor to delegate via the task() tool instead.
+    """
+
+    BLOCKED_TOOLS = {"ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute"}
+
+    def _block(self, request: Any) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
+        tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
+        return ToolMessage(
+            content=(
+                f"The supervisor cannot use {tool_name} directly. "
+                "Delegate file and command work to subagents:\n"
+                "- task(subagent_type='drafter') for file creation, document generation, and command execution\n"
+                "- task(subagent_type='researcher') for evidence gathering and source retrieval"
+            ),
+            name=tool_name,
+            tool_call_id=tool_call_id,
+            status="error",
+        )
+
+    def wrap_tool_call(self, request: Any, handler: Any) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
+        if ToolMessage is not None and tool_name in self.BLOCKED_TOOLS:
+            return self._block(request)
+        return handler(request)
+
+    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
+        if ToolMessage is not None and tool_name in self.BLOCKED_TOOLS:
+            return self._block(request)
+        return await handler(request)
 
 
 def _repo_root() -> Path:
@@ -296,6 +345,10 @@ def _system_prompt() -> str:
         "Before beginning complex work, use `write_todos` to create a visible plan. "
         "Update todos as you progress through each step. "
         "This helps the user see what you're doing and why.\n\n"
+        "## Filesystem and commands\n"
+        "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
+        "edit_file, glob, grep, or execute. All file operations and command execution "
+        "must be delegated to subagents via task().\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
         "rather than exhaustive retrieval. When gathering large amounts of data, "
@@ -1354,6 +1407,37 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "middleware": [],
             # Critic doesn't need skills — it reviews, not creates
         },
+        {
+            # Override the DeepAgents auto-included general-purpose subagent.
+            # Without this, it gets the generic DeepAgents prompt, inherits all
+            # parent tools, and spins on unfocused work.
+            "name": "general-purpose",
+            "description": "General-purpose analyst assistant for tasks that don't clearly fit researcher, drafter, or critic roles.",
+            "system_prompt": (
+                "You are a general-purpose analyst assistant for Open Analyst.\n\n"
+                "You handle tasks that don't clearly fit the researcher, drafter, or critic specializations. "
+                "You have access to both research tools and drafting tools.\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a concise summary of results (under 500 words)\n"
+                "- Save large outputs to workspace files and reference them\n"
+                "- Do NOT dump raw tool outputs in your response"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["search_project_documents"],
+                tool_map["read_project_document"],
+                tool_map["search_project_memories"],
+                tool_map["search_literature"],
+                tool_map["list_canvas_documents"],
+                tool_map["save_canvas_markdown"],
+                tool_map["publish_canvas_document"],
+                tool_map["publish_workspace_file"],
+                tool_map["capture_artifact"],
+                tool_map["execute_command"],
+            ],
+            "middleware": [],
+            "skills": _skill_paths(),
+        },
     ]
 
 
@@ -1402,7 +1486,7 @@ def _build_agent() -> Any | None:
         name="open-analyst",
         system_prompt=_system_prompt(),
         tools=supervisor_tools,
-        middleware=[],
+        middleware=[SupervisorToolGuard()] if AgentMiddleware is not None else [],
         skills=_skill_paths(),
         memory=["/memories/AGENTS.md"],
         subagents=_build_subagents(model, all_tools),
