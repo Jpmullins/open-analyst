@@ -21,8 +21,13 @@ type RuntimeProxyBody = {
       content?: unknown;
     }>;
   };
+  command?: Record<string, unknown>;
   context?: Record<string, unknown>;
   config?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+type RuntimeThreadRecord = {
   metadata?: Record<string, unknown>;
 };
 
@@ -59,6 +64,10 @@ function getBodyCollectionId(body: RuntimeProxyBody): string | null {
   if (typeof contextCollectionId === "string" && contextCollectionId.trim()) {
     return contextCollectionId.trim();
   }
+  const metadataCollectionId = body.metadata?.collection_id;
+  if (typeof metadataCollectionId === "string" && metadataCollectionId.trim()) {
+    return metadataCollectionId.trim();
+  }
   return null;
 }
 
@@ -72,6 +81,23 @@ function getBodyAnalysisMode(body: RuntimeProxyBody): string {
     return metadataMode.trim();
   }
   return "chat";
+}
+
+function getThreadIdFromRuntimePath(pathname: string): string | null {
+  const match = pathname.match(/^\/api\/runtime\/threads\/([^/]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+async function loadThreadMetadata(threadId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${RUNTIME_URL}/threads/${encodeURIComponent(threadId)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    return {};
+  }
+  const payload = await response.json().catch(() => null) as RuntimeThreadRecord | null;
+  const metadata = payload?.metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
 }
 
 function applyRuntimeSystemPrompt(
@@ -136,39 +162,56 @@ async function buildForwardedInit(request: Request): Promise<RequestInit> {
     return init;
   }
 
-  const projectId = getBodyProjectId(body);
+  const threadId = getThreadIdFromRuntimePath(requestUrl.pathname);
+  const threadMetadata =
+    !isThreadCreateRequest && !getBodyProjectId(body) && threadId
+      ? await loadThreadMetadata(threadId)
+      : {};
+  const bodyWithThreadMetadata: RuntimeProxyBody = Object.keys(threadMetadata).length
+    ? {
+        ...body,
+        metadata: {
+          ...threadMetadata,
+          ...(body.metadata || {}),
+        },
+      }
+    : body;
+
+  const projectId = getBodyProjectId(bodyWithThreadMetadata);
   if (!projectId) {
-    init.body = JSON.stringify(body);
+    init.body = JSON.stringify(bodyWithThreadMetadata);
     return init;
   }
 
   if (isThreadCreateRequest) {
     init.body = JSON.stringify({
-      ...body,
+      ...bodyWithThreadMetadata,
       metadata: {
-        ...(body.metadata || {}),
+        ...(bodyWithThreadMetadata.metadata || {}),
         project_id: projectId,
+        collection_id: getBodyCollectionId(bodyWithThreadMetadata),
         analysis_mode: getBodyAnalysisMode(body),
       },
     });
     return init;
   }
 
-  const analysisMode = getBodyAnalysisMode(body);
+  const analysisMode = getBodyAnalysisMode(bodyWithThreadMetadata);
   const runtimeContext = await buildRuntimeContext(projectId, {
     request,
-    collectionId: getBodyCollectionId(body),
+    collectionId: getBodyCollectionId(bodyWithThreadMetadata),
     analysisMode,
   });
 
   init.body = JSON.stringify(
     applyRuntimeSystemPrompt(
       {
-        ...body,
+        ...bodyWithThreadMetadata,
         context: runtimeContext,
         metadata: {
-          ...(body.metadata || {}),
+          ...(bodyWithThreadMetadata.metadata || {}),
           project_id: projectId,
+          collection_id: getBodyCollectionId(bodyWithThreadMetadata),
           analysis_mode: analysisMode,
         },
       },

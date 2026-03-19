@@ -177,7 +177,19 @@ export function AssistantWorkspaceView({
     try {
       stream.submit(null, {
         command: { resume: resumeValue },
+        context: {
+          project_id: projectId,
+          collection_id: activeCollectionId,
+          analysis_mode: analysisMode,
+        },
+        metadata: {
+          project_id: projectId,
+          collection_id: activeCollectionId,
+          analysis_mode: analysisMode,
+        },
         streamSubgraphs: true,
+        onDisconnect: "continue",
+        streamResumable: true,
       } as any);
       setIsResuming(false);
     } catch (error) {
@@ -240,6 +252,7 @@ export function AssistantWorkspaceView({
           body: JSON.stringify({
             metadata: {
               project_id: projectId,
+              collection_id: activeCollectionId,
               analysis_mode: analysisMode,
             },
           }),
@@ -303,6 +316,7 @@ export function AssistantWorkspaceView({
           },
           metadata: {
             project_id: projectId,
+            collection_id: activeCollectionId,
             analysis_mode: analysisMode,
           },
           streamSubgraphs: true,
@@ -350,6 +364,7 @@ export function AssistantWorkspaceView({
         },
         metadata: {
           project_id: projectId,
+          collection_id: activeCollectionId,
           analysis_mode: analysisMode,
         },
         streamSubgraphs: true,
