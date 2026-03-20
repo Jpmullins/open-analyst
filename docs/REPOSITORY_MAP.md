@@ -6,11 +6,12 @@
 - [`app/routes/`](/home/ubuntu/code/ARLIS/open-analyst/app/routes): React Router route modules and API handlers
 - [`app/components/`](/home/ubuntu/code/ARLIS/open-analyst/app/components): workspace UI components
 - [`app/lib/`](/home/ubuntu/code/ARLIS/open-analyst/app/lib): runtime integration, DB queries, storage, skills, connectors, and workspace logic
-- [`app/lib/db/schema.ts`](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/schema.ts): Drizzle schema
+- [`app/lib/db/queries/`](/home/ubuntu/code/ARLIS/open-analyst/app/lib/db/queries): explicit SQL query modules for app-shell persistence
 
 ## Runtime
 
 - [`services/langgraph-runtime/langgraph.json`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/langgraph.json): Agent Server graph and HTTP app wiring
+- [`services/langgraph-runtime/src/config.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/config.py): runtime settings, LiteLLM configuration, and throttling/fallback knobs
 - [`services/langgraph-runtime/src/graph.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/graph.py): Deep Agents graph assembly, tools, streaming, runtime policies
 - [`services/langgraph-runtime/src/webapp.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/webapp.py): custom Agent Server middleware, request enrichment, and health route
 - [`services/langgraph-runtime/src/runtime_context.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py): server-owned project/runtime context assembly

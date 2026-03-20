@@ -78,11 +78,26 @@ The runtime resolves workspace roots server-side. The supervisor delegates all f
 
 ### Source And Artifact Flow
 
-- Research collection requests stage source batches first.
+- Parallel literature retrieval branches collect candidate batches first.
+- The supervisor merges and deduplicates those batches, then asks the user for one consolidated approval.
+- Approved literature imports are executed in chunks so large source sets do not depend on one oversized resume payload.
+- Direct web-source staging still stages and approves individual source batches.
 - Approving a batch imports files or captures web content into the configured artifact backend.
 - Imported sources create `documents` rows for indexing and retrieval.
 - Generated workspace outputs captured through the app create `artifacts` plus `artifact_versions`.
 - Source/document previews and artifact previews are served through same-origin app routes, not direct S3 links.
+
+## Runtime Model Resilience
+
+The runtime calls chat models through LiteLLM-backed `ChatOpenAI` instances, but it does not rely only on the provider client's built-in retries.
+
+- A shared LangChain rate limiter can throttle outgoing model calls before they hit LiteLLM.
+- A shared concurrency semaphore reduces bursty parallel fan-out, especially for Bedrock-backed models.
+- Runtime middleware retries transient `429`, timeout, network, and `5xx` failures with backoff.
+- Optional fallback models can be configured for model-level failover.
+- If transient model retries are exhausted, the runtime returns a non-crashing AI message so the run can degrade gracefully rather than failing the whole workflow.
+
+If `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default admission control even without explicit rate-limit env settings.
 
 ## Retrieval
 

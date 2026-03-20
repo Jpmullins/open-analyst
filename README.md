@@ -20,10 +20,13 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - Analyst MCP is a connector service, not the main runtime.
 - The app shell persists project metadata and per-user UI settings with explicit SQL rather than an ORM/migration layer.
 - Source collection is approval-gated:
-  - the runtime stages literature or web-source batches
-  - approval from the Sources panel imports them into project documents
+  - retriever branches collect literature candidates in parallel
+  - the supervisor presents one consolidated approval to the user
+  - approved literature imports are executed in chunks so larger source sets do not block on one monolithic resume payload
+  - direct web-source staging still uses a per-source approval path
   - imported files are stored in the configured artifact backend and indexed for retrieval
 - Captured workspace files now create real `artifacts` and `artifact_versions` records.
+- The runtime applies model-call admission control and retry/fallback middleware to reduce Bedrock/LiteLLM throttling failures.
 
 ## Quick Start
 
@@ -54,6 +57,20 @@ Common service defaults:
 - `ANALYST_MCP_BASE_URL=http://localhost:8000`
 - blank `ARTIFACT_STORAGE_BACKEND` means local project storage
 - `ARTIFACT_STORAGE_BACKEND=s3` enables S3-backed artifacts
+
+Useful runtime throttling controls:
+
+- `LITELLM_FALLBACK_CHAT_MODELS`
+- `CHAT_RETRY_MAX_RETRIES`
+- `CHAT_RETRY_INITIAL_DELAY_SECONDS`
+- `CHAT_RETRY_BACKOFF_FACTOR`
+- `CHAT_RETRY_MAX_DELAY_SECONDS`
+- `CHAT_RATE_LIMIT_RPS`
+- `CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS`
+- `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
+- `CHAT_MAX_CONCURRENT_REQUESTS`
+
+If `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default request-rate and concurrency limits even when the optional knobs above are unset.
 
 ### Start The Stack
 

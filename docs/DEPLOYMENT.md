@@ -41,6 +41,15 @@ Common optional values:
 - `ARTIFACT_S3_ENDPOINT`
 - `PROJECT_WORKSPACES_ROOT`
 - `ARTIFACT_LOCAL_DIR`
+- `LITELLM_FALLBACK_CHAT_MODELS`
+- `CHAT_RETRY_MAX_RETRIES`
+- `CHAT_RETRY_INITIAL_DELAY_SECONDS`
+- `CHAT_RETRY_BACKOFF_FACTOR`
+- `CHAT_RETRY_MAX_DELAY_SECONDS`
+- `CHAT_RATE_LIMIT_RPS`
+- `CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS`
+- `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
+- `CHAT_MAX_CONCURRENT_REQUESTS`
 
 ## AWS Recommendation
 
@@ -58,6 +67,8 @@ Common optional values:
 ### LiteLLM
 
 - the runtime depends on a working chat endpoint and embedding endpoint
+- the runtime now adds shared admission control and transient retry/fallback handling around model calls
+- if `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default request-rate and concurrency limits even if the optional `CHAT_*` knobs are unset
 - verify both before debugging runtime behavior:
 
 ```bash

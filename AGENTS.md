@@ -44,22 +44,25 @@ Repo policy:
 - Thread metadata helps routing and ownership checks, but it is not a substitute for required graph context.
 
 ## Current Status
-As of March 19, 2026:
+As of March 20, 2026:
 
 - The chat path is Agent Server-first and Deep Agents-first.
 - `services/langgraph-runtime/src/webapp.py` owns CORS and request enrichment for Agent Server requests.
 - `services/langgraph-runtime/src/runtime_context.py` builds project runtime context on the server from Postgres plus Open Analyst config files.
 - `services/langgraph-runtime/src/graph.py` keeps shared project memory in `StoreBackend` and routes large shared files through local or S3-backed Deep Agents backends.
+- Literature retrieval now uses consolidated approval by default: retriever branches collect candidates, the supervisor requests one approval, and approved imports run in chunks.
+- `services/langgraph-runtime/src/graph.py` applies shared model-call admission control and transient retry/fallback handling so Bedrock/LiteLLM throttling degrades gracefully instead of crashing the run when possible.
 - `app/hooks/useAnalystStream.ts` points directly at `LANGGRAPH_RUNTIME_URL`.
 - The browser sends lightweight thread metadata (`project_id`, `collection_id`, `analysis_mode`) and the server expands that into full runtime context.
 - The old `app/routes/api.runtime.$.ts` proxy and its tests were removed.
 - The app-shell Postgres layer uses explicit SQL query modules; Drizzle and repo-committed migrations are gone.
 
 ## Known Issues / Next Fixes
-- Convert `stage_literature_collection` away from the custom raw interrupt flow and into a native HITL/tool-policy pattern. Right now source collection still always stops for approval.
+- Convert the legacy `stage_literature_collection` tool away from the custom raw interrupt flow and into a native HITL/tool-policy pattern. Consolidated literature approval is already the preferred path, but the legacy direct staging tool still always stops for approval.
 - Tighten subagent tool surfaces using native Deep Agents middleware/backend controls. Researcher and drafter still rely too much on default filesystem behavior and prompt discipline.
 - Remove duplicated server-side config discovery where possible. `runtime_context.py` currently reconstructs skills/connectors from repo/config files because there is no shared native source yet.
 - Consider server-side thread metadata rehydration for non-UI clients. The web UI path is covered because it sends routing metadata on run/resume, but generic external clients do not get that fallback yet. This is a convenience path only; full invocation context still remains a server-owned per-run contract.
+- Bedrock/LiteLLM throttling is now mitigated with runtime admission control and transient retry handling, but quota tuning is still environment-specific and may need live adjustment for heavy multi-agent fan-out.
 - Keep updating docs under `docs/` to reflect the Agent Server-first shape; older run-proxy assumptions are obsolete.
 
 ## Commit & Pull Request Guidelines
