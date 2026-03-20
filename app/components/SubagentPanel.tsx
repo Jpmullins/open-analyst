@@ -30,10 +30,15 @@ interface SubagentData {
 }
 
 const SUBAGENT_STYLES: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  reviewer: { label: "Reviewer", color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20" },
+  retriever: { label: "Retriever", color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20" },
   researcher: { label: "Researcher", color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
+  "argument-planner": { label: "Planner", color: "text-violet-400", bg: "bg-violet-500/10", border: "border-violet-500/20" },
   drafter: { label: "Drafter", color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
   critic: { label: "Critic", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" },
-  "general-purpose": { label: "General", color: "text-neutral-400", bg: "bg-neutral-500/10", border: "border-neutral-500/20" },
+  packager: { label: "Packager", color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  publisher: { label: "Publisher", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
+  "general-purpose": { label: "Fallback", color: "text-neutral-400", bg: "bg-neutral-500/10", border: "border-neutral-500/20" },
 };
 
 function getSubagentType(sub: SubagentData): string {

@@ -1,12 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatches, useNavigate, useSearchParams } from "react-router";
-import { BookOpen, Bot, BrainCircuit, FlaskConical, ListTodo, PanelRightOpen, Plug, Settings2, ShieldAlert, Sparkles, Square, Wrench } from "lucide-react";
+import {
+  BookOpen,
+  Bot,
+  FlaskConical,
+  ListTodo,
+  PanelRightOpen,
+  ShieldAlert,
+  Square,
+} from "lucide-react";
 import { useAnalystStream } from "~/hooks/useAnalystStream";
 import { useAppStore } from "~/lib/store";
 import type { Message } from "~/lib/types";
 import type { WorkspaceContextData } from "~/lib/workspace-context.server";
-import { MessageCard } from "./MessageCard";
 import { InterruptCard } from "./InterruptCard";
+import { MessageCard } from "./MessageCard";
 import { SubagentCards } from "./SubagentPanel";
 
 interface AssistantWorkspaceViewProps {
@@ -29,13 +37,21 @@ type StreamTodo = {
 
 type StreamInterrupt = {
   value?: Record<string, unknown>;
-  when?: string;
 };
 
 type StreamSubagent = {
   id?: string;
   status?: string;
+  result?: string;
+  messages?: Array<{
+    id?: string;
+    type?: string;
+    content?: unknown;
+    tool_calls?: Array<{ name?: string; args?: Record<string, unknown> }>;
+  }>;
   toolCall?: {
+    id?: string;
+    name?: string;
     args?: Record<string, unknown>;
   };
 };
@@ -45,15 +61,69 @@ function normalizeTodo(raw: unknown): StreamTodo | null {
   const todo = raw as Record<string, unknown>;
   return {
     id: typeof todo.id === "string" ? todo.id : undefined,
-    title: typeof todo.title === "string"
-      ? todo.title
-      : typeof todo.content === "string"
-        ? todo.content
-        : undefined,
+    title:
+      typeof todo.title === "string"
+        ? todo.title
+        : typeof todo.content === "string"
+          ? todo.content
+          : undefined,
     content: typeof todo.content === "string" ? todo.content : undefined,
     status: typeof todo.status === "string" ? todo.status : undefined,
     actor: typeof todo.actor === "string" ? todo.actor : undefined,
   };
+}
+
+function normalizeSubagent(raw: unknown): StreamSubagent | null {
+  if (!raw || typeof raw !== "object") return null;
+  return raw as StreamSubagent;
+}
+
+function prettifyName(value: string | undefined): string {
+  const text = String(value || "agent").trim();
+  if (!text) return "Agent";
+  return text
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function prettifyStatus(value: string | undefined): string {
+  return String(value || "pending")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function summarizeApproval(value: Record<string, unknown>, index: number): string {
+  const labelCandidates = [
+    value.title,
+    value.label,
+    value.name,
+    value.tool_name,
+    value.tool,
+    value.reason,
+    value.message,
+  ];
+  for (const candidate of labelCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return `Approval ${index + 1}`;
+}
+
+function deriveThreadTitle(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Untitled thread";
+  const sentence = cleaned.split(/[\n.!?]/, 1)[0]?.trim() || cleaned;
+  const normalized = sentence.replace(/^[-*#\d.\s]+/, "").trim();
+  return normalized.slice(0, 72) || "Untitled thread";
+}
+
+function deriveThreadSummary(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  return cleaned.slice(0, 140);
 }
 
 /**
@@ -67,7 +137,6 @@ function langGraphMessageToMessage(
   const role = msg.type === "human" ? "user" : msg.type === "ai" ? "assistant" : null;
   if (!role) return null;
 
-  // Build ContentBlock[] from LangGraph message content
   const content: Message["content"] = [];
 
   if (typeof msg.content === "string" && msg.content) {
@@ -77,25 +146,24 @@ function langGraphMessageToMessage(
       if (typeof block === "string") {
         content.push({ type: "text", text: block });
       } else if (block && typeof block === "object") {
-        const b = block as Record<string, unknown>;
-        if (b.type === "text" && typeof b.text === "string") {
-          content.push({ type: "text", text: b.text });
-        } else if (b.type === "tool_use") {
+        const candidate = block as Record<string, unknown>;
+        if (candidate.type === "text" && typeof candidate.text === "string") {
+          content.push({ type: "text", text: candidate.text });
+        } else if (candidate.type === "tool_use") {
           content.push({
             type: "tool_use",
-            id: String(b.id || ""),
-            name: String(b.name || ""),
-            input: (b.input as Record<string, unknown>) || {},
+            id: String(candidate.id || ""),
+            name: String(candidate.name || ""),
+            input: (candidate.input as Record<string, unknown>) || {},
           });
         }
       }
     }
   }
 
-  // Add tool_calls as tool_use blocks
   if (Array.isArray(msg.tool_calls)) {
-    for (const tc of msg.tool_calls) {
-      const call = tc as { id?: string; name?: string; args?: Record<string, unknown> };
+    for (const toolCall of msg.tool_calls) {
+      const call = toolCall as { id?: string; name?: string; args?: Record<string, unknown> };
       content.push({
         type: "tool_use",
         id: String(call.id || ""),
@@ -142,42 +210,50 @@ export function AssistantWorkspaceView({
       ? runtimeConfig.langgraphRuntimeUrl.replace(/\/+$/g, "")
       : "http://localhost:8081";
 
-  const navigateToThread = useCallback((threadId: string) => {
-    if (initialAgentThreadId || hasNavigatedToThreadRef.current) return;
-    hasNavigatedToThreadRef.current = true;
-    const next = new URLSearchParams(searchParams);
-    const pendingPrompt = lastSubmittedPromptRef.current;
-    navigate(
-      `/projects/${projectId}/threads/${threadId}${next.toString() ? `?${next.toString()}` : ""}`,
-      {
-        replace: true,
-        state: pendingPrompt ? { pendingPrompt } : null,
-      },
-    );
-  }, [initialAgentThreadId, navigate, projectId, searchParams]);
+  const navigateToThread = useCallback(
+    (threadId: string) => {
+      if (initialAgentThreadId || hasNavigatedToThreadRef.current) return;
+      hasNavigatedToThreadRef.current = true;
+      const next = new URLSearchParams(searchParams);
+      const pendingPrompt = lastSubmittedPromptRef.current;
+      navigate(
+        `/projects/${projectId}/threads/${threadId}${next.toString() ? `?${next.toString()}` : ""}`,
+        {
+          replace: true,
+          state: pendingPrompt ? { pendingPrompt } : null,
+        },
+      );
+    },
+    [initialAgentThreadId, navigate, projectId, searchParams],
+  );
 
   const stream = useAnalystStream({
     apiUrl: agentServerUrl,
     threadId: initialAgentThreadId,
-    onThreadId: useCallback((threadId: string) => {
-      navigateToThread(threadId);
-    }, [navigateToThread]),
-    onCreated: useCallback((meta: { thread_id: string; run_id: string }) => {
-      navigateToThread(meta.thread_id);
-    }, [navigateToThread]),
+    onThreadId: useCallback(
+      (threadId: string) => {
+        navigateToThread(threadId);
+      },
+      [navigateToThread],
+    ),
+    onCreated: useCallback(
+      (meta: { thread_id: string; run_id: string }) => {
+        navigateToThread(meta.thread_id);
+      },
+      [navigateToThread],
+    ),
   });
   type StreamSubmitOptions = NonNullable<Parameters<typeof stream.submit>[1]>;
 
   const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
-  const activeConnectorCount = workspaceContext.activeConnectorIds.length;
-  const activeToolCount = workspaceContext.tools.filter(
-    (tool) => tool.source === "local" || tool.active
-  ).length;
-  const activeSkillCount = workspaceContext.skills.filter(
-    (skill) => skill.pinned || skill.enabled
-  ).length;
   const isProjectHome = !initialAgentThreadId;
+  const contextSummary = useMemo(() => {
+    const connectorCount = workspaceContext.activeConnectorIds.length;
+    const skillCount = workspaceContext.skills.filter((skill) => skill.pinned || skill.enabled).length;
+    const memoryCount = workspaceContext.memories.active.length;
+    return `${connectorCount} connectors, ${skillCount} skills, ${memoryCount} memories active in project context`;
+  }, [workspaceContext]);
   const analysisMode = deepResearch ? "deep_research" : "chat";
   const resolvedCollectionId = initialAgentThreadId
     ? activeCollectionId ?? threadMetadata?.collectionId ?? null
@@ -185,11 +261,14 @@ export function AssistantWorkspaceView({
   const resolvedAnalysisMode = initialAgentThreadId
     ? (threadMetadata?.analysisMode || "chat")
     : analysisMode;
-  const requestMetadata = useMemo(() => ({
-    project_id: projectId,
-    collection_id: resolvedCollectionId,
-    analysis_mode: resolvedAnalysisMode,
-  }), [projectId, resolvedCollectionId, resolvedAnalysisMode]);
+  const requestMetadata = useMemo(
+    () => ({
+      project_id: projectId,
+      collection_id: resolvedCollectionId,
+      analysis_mode: resolvedAnalysisMode,
+    }),
+    [projectId, resolvedAnalysisMode, resolvedCollectionId],
+  );
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
@@ -201,15 +280,16 @@ export function AssistantWorkspaceView({
     return state?.autoSubmit === true;
   }, [location.state]);
 
-  // Stream messages from Agent Server (converted to our format)
   const displayedMessages = useMemo(() => {
     return (stream.messages || [])
-      .map((msg) => langGraphMessageToMessage(
-        msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
-        initialAgentThreadId || "",
-      ))
-      .filter((m): m is Message => m !== null);
-  }, [stream.messages, initialAgentThreadId]);
+      .map((msg) =>
+        langGraphMessageToMessage(
+          msg as { id?: string; type: string; content: unknown; tool_calls?: unknown[] },
+          initialAgentThreadId || "",
+        ),
+      )
+      .filter((message): message is Message => message !== null);
+  }, [initialAgentThreadId, stream.messages]);
 
   const renderedMessages = useMemo(() => {
     if (displayedMessages.length > 0 || !initialAgentThreadId || !pendingPromptFromNavigation) {
@@ -226,13 +306,13 @@ export function AssistantWorkspaceView({
     ];
   }, [displayedMessages, initialAgentThreadId, pendingPromptFromNavigation]);
 
-  // Interrupt from Agent Server
   const interruptValue = useMemo(() => {
     if (!stream.interrupt) return null;
-    const val = stream.interrupt.value as Record<string, unknown> | undefined;
-    if (!val || typeof val !== "object") return null;
-    return { type: String(val.type || "tool_approval"), ...val };
+    const value = stream.interrupt.value as Record<string, unknown> | undefined;
+    if (!value || typeof value !== "object") return null;
+    return { type: String(value.type || "tool_approval"), ...value };
   }, [stream.interrupt]);
+
   const interruptValues = useMemo(() => {
     const rawInterrupts = Array.isArray((stream as { interrupts?: unknown }).interrupts)
       ? ((stream as { interrupts?: unknown[] }).interrupts || [])
@@ -250,6 +330,7 @@ export function AssistantWorkspaceView({
       })
       .filter((item): item is Record<string, unknown> => item !== null);
   }, [interruptValue, stream]);
+
   const planTodos = useMemo(() => {
     const values = (stream.values || {}) as Record<string, unknown>;
     const rawTodos = Array.isArray(values.todos)
@@ -257,18 +338,43 @@ export function AssistantWorkspaceView({
       : Array.isArray(values.active_plan)
         ? values.active_plan
         : [];
-    return rawTodos.map(normalizeTodo).filter((item): item is StreamTodo => item !== null);
+    return rawTodos.map(normalizeTodo).filter((todo): todo is StreamTodo => todo !== null);
   }, [stream.values]);
+
   const activeSubagents = useMemo(() => {
     const raw = Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
       ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
       : [];
-    return raw.filter((item): item is StreamSubagent => !!item && typeof item === "object");
+    return raw.map(normalizeSubagent).filter((subagent): subagent is StreamSubagent => subagent !== null);
   }, [stream]);
+
+  const recentSubagents = useMemo(() => {
+    const raw = Array.isArray((stream as { subagents?: unknown }).subagents)
+      ? ((stream as { subagents?: unknown[] }).subagents || [])
+      : [];
+    const activeIds = new Set(activeSubagents.map((subagent) => subagent.id).filter(Boolean));
+    const unique = new Map<string, StreamSubagent>();
+    for (const item of raw) {
+      const subagent = normalizeSubagent(item);
+      if (!subagent) continue;
+      const fallbackId = `${subagent.toolCall?.id || ""}:${subagent.toolCall?.args?.subagent_type || "agent"}:${subagent.status || "pending"}`;
+      unique.set(subagent.id || fallbackId, subagent);
+    }
+    return Array.from(unique.values())
+      .filter((subagent) => !subagent.id || !activeIds.has(subagent.id))
+      .filter((subagent) => {
+        const status = String(subagent.status || "").toLowerCase();
+        return status === "complete" || status === "completed" || status === "error";
+      })
+      .slice(-6)
+      .reverse();
+  }, [activeSubagents, stream]);
+
   const completedTodoCount = useMemo(
     () => planTodos.filter((todo) => todo.status === "completed" || todo.status === "complete").length,
     [planTodos],
   );
+  const hasRailContent = planTodos.length > 0 || activeSubagents.length > 0 || recentSubagents.length > 0 || interruptValues.length > 0;
 
   const handleInterruptResume = async (resumeValue: Record<string, unknown>) => {
     setIsResuming(true);
@@ -287,18 +393,19 @@ export function AssistantWorkspaceView({
     }
   };
 
-  // Extract subagents for a given message from the stream
-  const getSubagentsForMessage = useCallback((messageId: string) => {
-    const getter = stream.getSubagentsByMessage;
-    if (!getter) return [];
-    try {
-      return (getter(messageId) || []) as Array<Record<string, unknown>>;
-    } catch {
-      return [];
-    }
-  }, [stream]);
+  const getSubagentsForMessage = useCallback(
+    (messageId: string) => {
+      const getter = stream.getSubagentsByMessage;
+      if (!getter) return [];
+      try {
+        return (getter(messageId) || []) as Array<Record<string, unknown>>;
+      } catch {
+        return [];
+      }
+    },
+    [stream],
+  );
 
-  // Auto-scroll
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
@@ -307,8 +414,8 @@ export function AssistantWorkspaceView({
 
   const setPanel = (panel: string | null) => {
     setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
+      (previous) => {
+        const next = new URLSearchParams(previous);
         if (panel) next.set("panel", panel);
         else next.delete("panel");
         if (panel !== "settings") {
@@ -316,7 +423,7 @@ export function AssistantWorkspaceView({
         }
         return next;
       },
-      { replace: true }
+      { replace: true },
     );
   };
 
@@ -336,16 +443,20 @@ export function AssistantWorkspaceView({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            Accept: "application/json",
           },
           body: JSON.stringify({
-            metadata: requestMetadata,
+            metadata: {
+              ...requestMetadata,
+              title: deriveThreadTitle(nextPrompt),
+              summary: deriveThreadSummary(nextPrompt),
+            },
           }),
         });
         if (!response.ok) {
           throw new Error(`Thread creation failed with status ${response.status}`);
         }
-        const payload = await response.json() as { thread_id?: unknown };
+        const payload = (await response.json()) as { thread_id?: unknown };
         const threadId =
           typeof payload.thread_id === "string" && payload.thread_id.trim()
             ? payload.thread_id.trim()
@@ -379,14 +490,10 @@ export function AssistantWorkspaceView({
       stream.submit(
         { messages: [{ role: "human", content: nextPrompt }] },
         {
-          optimisticValues: (prev: Record<string, unknown>) => ({
-            ...prev,
+          optimisticValues: (previous: Record<string, unknown>) => ({
+            ...previous,
             messages: [
-              ...(
-                Array.isArray(prev.messages)
-                  ? prev.messages
-                  : []
-              ),
+              ...(Array.isArray(previous.messages) ? previous.messages : []),
               {
                 id: `optimistic-${Date.now()}`,
                 type: "human",
@@ -418,14 +525,10 @@ export function AssistantWorkspaceView({
     stream.submit(
       { messages: [{ role: "human", content: pendingPromptFromNavigation }] },
       {
-        optimisticValues: (prev: Record<string, unknown>) => ({
-          ...prev,
+        optimisticValues: (previous: Record<string, unknown>) => ({
+          ...previous,
           messages: [
-            ...(
-              Array.isArray(prev.messages)
-                ? prev.messages
-                : []
-            ),
+            ...(Array.isArray(previous.messages) ? previous.messages : []),
             {
               id: `optimistic-${Date.now()}`,
               type: "human",
@@ -451,262 +554,313 @@ export function AssistantWorkspaceView({
     stream,
   ]);
 
+  const rail = hasRailContent ? (
+    <div className="space-y-4">
+      <section className="card p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ListTodo className="h-4 w-4 text-accent" />
+            <h2 className="text-sm font-semibold text-text-primary">Active Plan</h2>
+          </div>
+          {planTodos.length > 0 ? (
+            <span className="text-xs text-text-muted">
+              {completedTodoCount}/{planTodos.length}
+            </span>
+          ) : null}
+        </div>
+        {planTodos.length > 0 ? (
+          <div className="space-y-2">
+            {planTodos.map((todo, index) => {
+              const status = todo.status || "pending";
+              const isDone = status === "completed" || status === "complete";
+              const isRunning = status === "running" || status === "in_progress";
+              return (
+                <div
+                  key={todo.id || `${todo.title || "todo"}-${index}`}
+                  className="rounded-xl border border-border bg-surface px-3 py-2.5"
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`mt-1.5 h-2.5 w-2.5 rounded-full ${
+                        isDone
+                          ? "bg-success"
+                          : isRunning
+                            ? "bg-accent animate-pulse"
+                            : "bg-text-muted/40"
+                      }`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-text-primary">
+                        {todo.title || todo.content || "Untitled step"}
+                      </p>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                        <span>{prettifyStatus(status)}</span>
+                        {todo.actor ? <span>{todo.actor}</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">
+            The supervisor has not published a visible plan yet.
+          </p>
+        )}
+      </section>
+
+      <section className="card p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Bot className="h-4 w-4 text-accent" />
+          <h2 className="text-sm font-semibold text-text-primary">Parallel Work</h2>
+        </div>
+        {activeSubagents.length > 0 ? (
+          <div className="space-y-2">
+            {activeSubagents.map((subagent, index) => {
+              const role = prettifyName(String(subagent.toolCall?.args?.subagent_type || "agent"));
+              const description = String(subagent.toolCall?.args?.description || "").trim();
+              return (
+                <div
+                  key={subagent.id || `${role}-${index}`}
+                  className="rounded-xl border border-border bg-surface px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-text-primary">
+                      {role}
+                    </span>
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-accent">
+                      {prettifyStatus(subagent.status || "running")}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-text-secondary line-clamp-3">
+                    {description || "Working on a delegated task."}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : recentSubagents.length > 0 ? (
+          <p className="text-sm text-text-muted">
+            No active subagents right now. Recent delegated work is listed below.
+          </p>
+        ) : (
+          <p className="text-sm text-text-muted">No delegated work is visible yet.</p>
+        )}
+
+        {recentSubagents.length > 0 ? (
+          <div className="mt-4 space-y-2 border-t border-border pt-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+              Recent Branches
+            </div>
+            {recentSubagents.map((subagent, index) => {
+              const role = prettifyName(String(subagent.toolCall?.args?.subagent_type || "agent"));
+              const description = String(subagent.toolCall?.args?.description || "").trim();
+              return (
+                <div
+                  key={subagent.id || `${role}-recent-${index}`}
+                  className="rounded-xl border border-border bg-background-secondary px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-text-primary">
+                      {role}
+                    </span>
+                    <span className="text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                      {prettifyStatus(subagent.status || "complete")}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-text-secondary line-clamp-2">
+                    {subagent.result || description || "Completed delegated work."}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="card p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <ShieldAlert className="h-4 w-4 text-accent" />
+          <h2 className="text-sm font-semibold text-text-primary">Approvals</h2>
+        </div>
+        {interruptValues.length > 0 ? (
+          <div className="space-y-2">
+            {interruptValues.map((value, index) => (
+              <div
+                key={`${String(value.type || "approval")}-${index}`}
+                className="rounded-xl border border-warning/30 bg-warning/5 px-3 py-2.5"
+              >
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-warning">
+                  {prettifyName(String(value.type || "approval"))}
+                </div>
+                <p className="mt-1 text-sm text-text-secondary">
+                  {summarizeApproval(value, index)}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">No pending approvals.</p>
+        )}
+      </section>
+    </div>
+  ) : null;
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="border-b border-border bg-surface/80 backdrop-blur-sm px-6 py-3">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="border-b border-border bg-surface/80 px-6 py-3 backdrop-blur-sm">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-text-muted mb-1">
+            <div className="mb-1 text-xs uppercase tracking-[0.18em] text-text-muted">
               Analyst Workspace
             </div>
             <h1 className="text-lg font-semibold text-text-primary">
               {isProjectHome ? "Project Home" : "Interactive Project Thread"}
             </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-              <span className="tag">
-                <Plug className="w-3.5 h-3.5" />
-                {activeConnectorCount} connectors
-              </span>
-              <span className="tag">
-                <Wrench className="w-3.5 h-3.5" />
-                {activeToolCount} tools
-              </span>
-              <span className="tag">
-                <Sparkles className="w-3.5 h-3.5" />
-                {activeSkillCount} skills
-              </span>
-              <span className="tag">
-                <BrainCircuit className="w-3.5 h-3.5" />
-                {workspaceContext.memories.active.length} memories
-              </span>
-            </div>
+            <p className="mt-1 text-sm text-text-muted">{contextSummary}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setPanel(activePanel === "context" ? null : "context")}
-              className={`btn btn-secondary text-sm ${activePanel === "context" ? "bg-accent-muted text-accent" : ""}`}
-            >
-              <BrainCircuit className="w-4 h-4" />
-              Context
-            </button>
-            <button
-              type="button"
               onClick={() => setPanel(activePanel === "sources" ? null : "sources")}
-              className={`btn btn-secondary text-sm ${activePanel === "sources" ? "bg-accent-muted text-accent" : ""}`}
+              className={`btn btn-secondary text-sm ${
+                activePanel === "sources" ? "bg-accent-muted text-accent" : ""
+              }`}
             >
-              <BookOpen className="w-4 h-4" />
+              <BookOpen className="h-4 w-4" />
               Sources
             </button>
             <button
               type="button"
               onClick={() => setPanel(activePanel === "canvas" ? null : "canvas")}
-              className={`btn btn-secondary text-sm ${activePanel === "canvas" ? "bg-accent-muted text-accent" : ""}`}
+              className={`btn btn-secondary text-sm ${
+                activePanel === "canvas" ? "bg-accent-muted text-accent" : ""
+              }`}
             >
-              <PanelRightOpen className="w-4 h-4" />
+              <PanelRightOpen className="h-4 w-4" />
               Canvas
-            </button>
-            <button
-              type="button"
-              onClick={() => setPanel(activePanel === "settings" ? null : "settings")}
-              className={`btn btn-secondary text-sm ${activePanel === "settings" ? "bg-accent-muted text-accent" : ""}`}
-            >
-              <Settings2 className="w-4 h-4" />
-              Settings
             </button>
           </div>
         </div>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-          {(planTodos.length > 0 || activeSubagents.length > 0 || interruptValues.length > 0) ? (
-            <div className="grid gap-4 lg:grid-cols-3">
-              <section className="card p-4 lg:col-span-2">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <ListTodo className="w-4 h-4 text-accent" />
-                    <h2 className="text-sm font-semibold text-text-primary">Active Plan</h2>
-                  </div>
-                  <span className="text-xs text-text-muted">
-                    {completedTodoCount}/{planTodos.length} complete
-                  </span>
-                </div>
-                {planTodos.length > 0 ? (
-                  <div className="space-y-2">
-                    {planTodos.map((todo, index) => {
-                      const status = todo.status || "pending";
-                      const isDone = status === "completed" || status === "complete";
-                      const isRunning = status === "running" || status === "in_progress";
-                      return (
-                        <div
-                          key={todo.id || `${todo.title || "todo"}-${index}`}
-                          className="flex items-start gap-3 rounded-xl border border-border bg-surface px-3 py-2.5"
-                        >
-                          <div className={`mt-0.5 h-2.5 w-2.5 rounded-full ${isDone ? "bg-success" : isRunning ? "bg-accent animate-pulse" : "bg-text-muted/50"}`} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-text-primary">
-                              {todo.title || todo.content || "Untitled step"}
-                            </p>
-                            <div className="mt-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-text-muted">
-                              <span>{status.replace(/_/g, " ")}</span>
-                              {todo.actor ? <span>{todo.actor}</span> : null}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-sm text-text-muted">The supervisor has not published a visible plan yet.</p>
-                )}
-              </section>
+        <div className="mx-auto max-w-7xl px-6 py-8">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="min-w-0 space-y-6">
+              {hasRailContent ? <div className="xl:hidden">{rail}</div> : null}
 
-              <section className="card p-4 space-y-4">
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Bot className="w-4 h-4 text-accent" />
-                    <h2 className="text-sm font-semibold text-text-primary">Parallel Work</h2>
-                  </div>
-                  {activeSubagents.length > 0 ? (
-                    <div className="space-y-2">
-                      {activeSubagents.map((subagent, index) => {
-                        const args = subagent.toolCall?.args || {};
-                        const type = String(args.subagent_type || "agent");
-                        const description = String(args.description || "").trim();
-                        return (
-                          <div key={subagent.id || `${type}-${index}`} className="rounded-xl border border-border bg-surface px-3 py-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-text-primary">
-                                {type}
-                              </span>
-                              <span className="text-[11px] uppercase tracking-[0.14em] text-accent">
-                                {String(subagent.status || "running").replace(/_/g, " ")}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-sm text-text-secondary line-clamp-3">
-                              {description || "Working on a delegated task."}
-                            </p>
-                          </div>
-                        );
-                      })}
+              {renderedMessages.length === 0 && !stream.isLoading && !stream.isThreadLoading ? (
+                <div className="card p-8 text-center">
+                  <h2 className="mb-2 text-lg font-semibold">
+                    {isProjectHome ? "Start a new analyst thread" : "Start an analyst conversation"}
+                  </h2>
+                  <p className="mx-auto max-w-2xl text-sm text-text-secondary">
+                    {isProjectHome
+                      ? "You are back at the main project workspace. Start a fresh thread here, open sources from the right panel, or adjust settings and memory from the left panel."
+                      : "Ask for research, planning, synthesis, critique, argument mapping, or report drafting. Use the left panel for settings and thread context, and the right panel for sources, file preview, and canvas work."}
+                  </p>
+                  {isProjectHome ? (
+                    <div className="mt-5 flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => textareaRef.current?.focus()}
+                      >
+                        New Thread
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setPanel("sources")}
+                      >
+                        Browse Sources
+                      </button>
                     </div>
-                  ) : (
-                    <p className="text-sm text-text-muted">No active subagents at the moment.</p>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <ShieldAlert className="w-4 h-4 text-accent" />
-                    <h2 className="text-sm font-semibold text-text-primary">Approvals</h2>
-                  </div>
-                  {interruptValues.length > 0 ? (
-                    <div className="rounded-xl border border-warning/30 bg-warning/5 px-3 py-2.5 text-sm text-text-secondary">
-                      {interruptValues.length} pending approval{interruptValues.length === 1 ? "" : "s"} in this run.
-                    </div>
-                  ) : (
-                    <p className="text-sm text-text-muted">No pending approvals.</p>
-                  )}
-                </div>
-              </section>
-            </div>
-          ) : null}
-
-          {renderedMessages.length === 0 && !stream.isLoading && !stream.isThreadLoading ? (
-            <div className="card p-8 text-center">
-              <h2 className="text-lg font-semibold mb-2">
-                {isProjectHome ? "Start a new analyst thread" : "Start an analyst conversation"}
-              </h2>
-              <p className="text-sm text-text-secondary max-w-2xl mx-auto">
-                {isProjectHome
-                  ? "You are back at the main project workspace. Start a fresh thread here, open sources from the right panel, or adjust settings and memory from the left panel."
-                  : "Ask for research, planning, synthesis, critique, argument mapping, or report drafting. Use the left panel for settings and thread context, and the right panel for sources, file preview, and canvas work."}
-              </p>
-              {isProjectHome ? (
-                <div className="mt-5 flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => textareaRef.current?.focus()}
-                  >
-                    New Thread
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setPanel("sources")}
-                  >
-                    Browse Sources
-                  </button>
+                  ) : null}
                 </div>
               ) : null}
+
+              {renderedMessages.map((message) => (
+                <React.Fragment key={message.id}>
+                  <MessageCard
+                    message={message}
+                    isStreaming={stream.isLoading && message === renderedMessages[renderedMessages.length - 1]}
+                  />
+                  {message.role === "assistant" ? (
+                    <SubagentCards subagents={getSubagentsForMessage(message.id)} />
+                  ) : null}
+                </React.Fragment>
+              ))}
+
+              {interruptValue ? (
+                <InterruptCard
+                  interrupt={{ value: interruptValue }}
+                  onResume={handleInterruptResume}
+                  isProcessing={isResuming}
+                />
+              ) : null}
             </div>
-          ) : null}
 
-          {renderedMessages.map((message) => (
-            <React.Fragment key={message.id}>
-              <MessageCard
-                message={message}
-                isStreaming={stream.isLoading && message === renderedMessages[renderedMessages.length - 1]}
-              />
-              {/* Inline subagent cards after assistant messages that delegated */}
-              {message.role === "assistant" && (
-                <SubagentCards subagents={getSubagentsForMessage(message.id)} />
-              )}
-            </React.Fragment>
-          ))}
-
-          {/* Interrupt card for in-chat approvals */}
-          {interruptValue && (
-            <InterruptCard
-              interrupt={{ value: interruptValue }}
-              onResume={handleInterruptResume}
-              isProcessing={isResuming}
-            />
-          )}
+            {hasRailContent ? (
+              <aside className="hidden xl:block">
+                <div className="sticky top-6">{rail}</div>
+              </aside>
+            ) : null}
+          </div>
         </div>
       </div>
 
       <div className="border-t border-border bg-background px-6 py-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-3 flex items-center gap-2">
             <button
               type="button"
               onClick={() =>
                 setSearchParams(
-                  (prev) => {
-                    const next = new URLSearchParams(prev);
+                  (previous) => {
+                    const next = new URLSearchParams(previous);
                     if (deepResearch) next.delete("deepResearch");
                     else next.set("deepResearch", "true");
                     return next;
                   },
-                  { replace: true }
+                  { replace: true },
                 )
               }
               className={`tag text-xs ${deepResearch ? "tag-active" : ""}`}
             >
-              <FlaskConical className="w-3.5 h-3.5" />
+              <FlaskConical className="h-3.5 w-3.5" />
               Deep Research
             </button>
             {stream.isLoading ? (
-              <button type="button" className="btn btn-secondary text-sm" onClick={() => stream.stop()}>
-                <Square className="w-4 h-4" />
+              <button
+                type="button"
+                className="btn btn-secondary text-sm"
+                onClick={() => stream.stop()}
+              >
+                <Square className="h-4 w-4" />
                 Stop
               </button>
             ) : null}
           </div>
 
           {errorMessage ? (
-            <div className="mb-3 px-4 py-3 rounded-xl bg-error/10 border border-error/30 text-error text-sm flex items-center gap-2">
+            <div className="mb-3 flex items-center gap-2 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
               <span className="font-medium">Error:</span>
               <span className="flex-1">{errorMessage}</span>
-              <button type="button" onClick={() => setErrorMessage(null)} className="text-error/60 hover:text-error">&#x2715;</button>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-error/60 hover:text-error"
+              >
+                &#x2715;
+              </button>
             </div>
           ) : null}
 
           {stream.error ? (
-            <div className="mb-3 px-4 py-3 rounded-xl bg-error/10 border border-error/30 text-error text-sm">
+            <div className="mb-3 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
               <span className="font-medium">Stream error:</span> {String(stream.error)}
             </div>
           ) : null}
@@ -714,7 +868,7 @@ export function AssistantWorkspaceView({
           <form onSubmit={handleSubmit} className="relative">
             <textarea
               ref={textareaRef}
-              className="input text-base py-4 pr-14 min-h-[120px] resize-none rounded-2xl"
+              className="input min-h-[120px] resize-none rounded-2xl py-4 pr-14 text-base"
               placeholder="Ask the analyst to research, reason, critique, or draft..."
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -729,10 +883,10 @@ export function AssistantWorkspaceView({
             <button
               type="submit"
               disabled={!prompt.trim() || stream.isLoading}
-              className="absolute bottom-3 right-3 w-10 h-10 rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-hover disabled:opacity-40 transition-colors"
+              className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:opacity-40"
               aria-label="Send message"
             >
-              <PanelRightOpen className="w-5 h-5 rotate-180" />
+              <PanelRightOpen className="h-5 w-5 rotate-180" />
             </button>
           </form>
         </div>

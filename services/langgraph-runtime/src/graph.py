@@ -93,8 +93,10 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
             content=(
                 f"The supervisor cannot use {tool_name} directly. "
                 "Delegate file and command work to subagents:\n"
-                "- task(subagent_type='drafter') for file creation, document generation, and command execution\n"
-                "- task(subagent_type='researcher') for evidence gathering and source retrieval"
+                "- task(subagent_type='retriever') for source retrieval and staging\n"
+                "- task(subagent_type='argument-planner') or task(subagent_type='drafter') for canvas planning and draft creation\n"
+                "- task(subagent_type='packager') for file creation and command execution\n"
+                "- task(subagent_type='publisher') for publication actions"
             ),
             name=tool_name,
             tool_call_id=tool_call_id,
@@ -237,8 +239,18 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
         ],
         "subagents": [
             {
-                "name": "researcher",
-                "description": "Evidence gathering, literature search, web source discovery, and source collection into the project.",
+                "name": "reviewer",
+                "description": "Clarifies ambiguous requests, proposes numbered options, and recommends the next workflow branch.",
+                "tools": [
+                    "search_project_documents",
+                    "search_project_memories",
+                    "list_canvas_documents",
+                    "list_active_skills",
+                ],
+            },
+            {
+                "name": "retriever",
+                "description": "Fetches literature, stages sources, and gathers project material without drafting conclusions.",
                 "tools": [
                     "search_literature",
                     "stage_literature_collection",
@@ -249,17 +261,46 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                 ],
             },
             {
+                "name": "researcher",
+                "description": "Synthesizes retrieved evidence into findings, gaps, and confidence statements.",
+                "tools": [
+                    "search_project_documents",
+                    "read_project_document",
+                    "search_project_memories",
+                    "list_canvas_documents",
+                ],
+            },
+            {
+                "name": "argument-planner",
+                "description": "Builds argument maps, outlines, and structured plans in canvas.",
+                "tools": [
+                    "search_project_documents",
+                    "read_project_document",
+                    "search_project_memories",
+                    "list_canvas_documents",
+                    "save_canvas_markdown",
+                    "list_active_skills",
+                ],
+            },
+            {
                 "name": "drafter",
-                "description": "Canvas drafting, artifact generation, command execution, and publication.",
+                "description": "Writes and revises substantive draft content in canvas or project documents.",
+                "tools": [
+                    "search_project_documents",
+                    "read_project_document",
+                    "search_project_memories",
+                    "save_canvas_markdown",
+                    "list_canvas_documents",
+                ],
+            },
+            {
+                "name": "packager",
+                "description": "Packages approved content into delivery formats and captures artifacts.",
                 "tools": [
                     "list_directory",
-                    "search_project_documents",
                     "read_project_document",
                     "execute_command",
                     "capture_artifact",
-                    "save_canvas_markdown",
-                    "publish_canvas_document",
-                    "publish_workspace_file",
                     "list_canvas_documents",
                 ],
             },
@@ -270,6 +311,17 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                     "search_project_documents",
                     "search_project_memories",
                     "read_project_document",
+                    "list_canvas_documents",
+                ],
+            },
+            {
+                "name": "publisher",
+                "description": "Publishes approved canvas or workspace artifacts to project knowledge stores.",
+                "tools": [
+                    "list_canvas_documents",
+                    "publish_canvas_document",
+                    "publish_workspace_file",
+                    "capture_artifact",
                 ],
             },
         ],
@@ -328,26 +380,48 @@ def _system_prompt() -> str:
         "and memory proposals; specialized work should be delegated.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
-        "- subagent_type='researcher': evidence gathering, literature search, source discovery\n"
-        "- subagent_type='drafter': document creation, canvas work, artifact publishing\n"
-        "- subagent_type='critic': review output for evidence gaps, unsupported claims, citation quality\n\n"
+        "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
+        "- subagent_type='retriever': literature search, source staging, and retrieval from project materials\n"
+        "- subagent_type='researcher': synthesis of evidence into findings, gaps, and confidence\n"
+        "- subagent_type='argument-planner': create argument maps, outlines, and structured plans in canvas\n"
+        "- subagent_type='critic': review plans and drafts for evidence gaps, unsupported claims, and structural issues\n"
+        "- subagent_type='drafter': write and revise substantive draft content\n"
+        "- subagent_type='packager': generate output files and format-specific deliverables\n"
+        "- subagent_type='publisher': publish approved outputs and project artifacts\n"
+        "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
         "If the user wants to collect or add sources to the project, delegate immediately to "
-        "the researcher subagent. Source-staging tools are intentionally not direct supervisor tools.\n\n"
+        "the retriever subagent. Source-staging tools are intentionally not direct supervisor tools.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
-        "Delegate rather than doing everything yourself. The researcher finds evidence, "
-        "the drafter creates outputs, the critic improves quality.\n\n"
+        "Delegate rather than doing everything yourself. The retriever gathers sources, the researcher synthesizes them, "
+        "the planner structures the argument, the drafter writes, the critic improves quality, the packager formats, "
+        "and the publisher handles final publication.\n\n"
         "IMPORTANT: Each task() call is stateless — the subagent has no memory of prior calls. "
-        "The `description` parameter must be fully self-contained with all context the subagent needs: "
-        "the objective, relevant evidence/findings so far, constraints, and expected output format. "
-        "Do not say 'use the results from earlier' — paste the actual results into the description.\n\n"
+        "The `description` parameter must be fully self-contained with all context the subagent needs. "
+        "Every delegated handoff must include these sections:\n"
+        "Objective:\n"
+        "Known facts:\n"
+        "Relevant references or file paths:\n"
+        "Constraints:\n"
+        "Deliverable:\n"
+        "Max response size:\n"
+        "Do not say 'use the results from earlier' — paste the actual compact context into the description.\n\n"
+        "Subagents do not message each other directly. The supervisor is the context broker. "
+        "When one subagent's work must inform another, compress the findings into a short handoff and, if needed, "
+        "store larger material in canvas documents, /memory-files/, /artifacts/, or promoted project memory. "
+        "Pass references and summaries, not raw dumps.\n\n"
         "You can invoke multiple task() calls in parallel for independent work "
-        "(e.g., multiple researcher tasks for separate questions, or researcher gathering sources while drafter prepares a template).\n"
-        "When a research request naturally decomposes into independent lines of effort, launch multiple researcher tasks in parallel before synthesizing.\n\n"
+        "(e.g., multiple retriever tasks for separate source sets, or multiple researcher tasks for competing hypotheses).\n"
+        "When a request naturally decomposes into independent lines of effort, launch multiple subagents in parallel before synthesizing.\n\n"
+        "## Clarification\n"
+        "If the request is materially ambiguous or branches into distinct retrieval or drafting strategies, "
+        "use task(subagent_type='reviewer') before launching broad work. "
+        "If the reviewer finds ambiguity, ask the user a concise clarifying question with numbered recommended options "
+        "and always include a free-form custom option.\n\n"
         "## Planning\n"
-        "Before beginning complex work, use `write_todos` to create a visible plan. "
-        "Update todos as you progress through each step. "
-        "This helps the user see what you're doing and why.\n\n"
+        "Before beginning any multi-step, retrieval-heavy, or drafting-heavy task, use `write_todos` to create a visible plan. "
+        "Do this before the first subagent delegation. Update todos after every major delegation boundary. "
+        "This is mandatory for complex work because the UI depends on it.\n\n"
         "## Filesystem and commands\n"
         "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
         "edit_file, glob, grep, or execute. All file operations and command execution "
@@ -356,7 +430,8 @@ def _system_prompt() -> str:
         "When performing intelligence analysis, apply structured analytic techniques:\n\n"
         "### For Research and Evidence Gathering\n"
         "- Key Assumptions Check: identify and test assumptions before analysis begins\n"
-        "- Use the researcher subagent to gather evidence from multiple independent sources\n\n"
+        "- Use retriever subagents to gather evidence from multiple independent sources\n"
+        "- Use researcher subagents to synthesize the retrieved evidence, not to dump raw retrieval output\n\n"
         "### For Analysis\n"
         "- Analysis of Competing Hypotheses (ACH): generate multiple hypotheses, evaluate evidence for/against each\n"
         "- Argument Mapping: decompose the analytic question into claims, sub-claims, and supporting evidence\n"
@@ -364,17 +439,23 @@ def _system_prompt() -> str:
         "### End-to-End Analytic Workflow\n"
         "For a complete analytic product (bulletin, assessment, brief):\n"
         "1. write_todos: create a visible plan\n"
-        "2. Decompose the research question into 2-4 independent subquestions when possible\n"
-        "3. task(researcher) in parallel for each subquestion or hypothesis branch\n"
-        "4. Synthesize findings, apply ACH or argument mapping as appropriate, and identify confidence/gaps\n"
-        "5. task(drafter): create the structured product and update canvas/workspace artifacts\n"
-        "6. task(critic): evaluate against SAT standards and Four Sweeps\n"
-        "7. If critic finds critical issues: task(drafter) again with feedback\n"
-        "8. task(drafter): finalize and publish\n\n"
+        "2. task(reviewer) if the request is ambiguous or materially branches\n"
+        "3. Decompose the research question into 2-4 independent subquestions when possible\n"
+        "4. task(retriever) in parallel for each independent retrieval line that is safe to run concurrently\n"
+        "5. task(researcher) in parallel for each subquestion or hypothesis branch\n"
+        "6. Synthesize findings, apply ACH or argument mapping as appropriate, and identify confidence/gaps\n"
+        "7. task(argument-planner): create a structured plan or argument map in canvas\n"
+        "8. task(critic): review the argument plan before drafting when the task is substantial\n"
+        "9. task(drafter): create or revise the draft in canvas\n"
+        "10. task(critic): evaluate draft quality against SAT standards and Four Sweeps\n"
+        "11. If critic finds major issues: task(drafter) again with feedback\n"
+        "12. task(packager): generate requested deliverable formats\n"
+        "13. task(publisher): publish only after the user approves the product\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
-        "rather than exhaustive retrieval. When gathering large amounts of data, "
-        "save raw results to workspace files and return only the analysis summary."
+        "rather than exhaustive retrieval. Respect provider rate limits by batching or narrowing work when needed. "
+        "When gathering large amounts of data, save raw results to workspace files or /memory-files/ "
+        "and return only the analysis summary."
     )
 
 
@@ -1499,28 +1580,50 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
     # System prompts instruct concise returns to prevent context bloat.
     return [
         {
-            "name": "researcher",
-            "description": "Searches literature, retrieves project sources and memories, stages sources for collection. Use for evidence gathering and source discovery.",
+            "name": "reviewer",
+            "description": "Clarifies ambiguous requests, proposes recommended choices, and normalizes task framing before heavy work begins.",
             "system_prompt": (
-                "You are the research specialist for Open Analyst. Your job is source discovery and evidence gathering.\n\n"
+                "You are the request reviewer for Open Analyst. Your job is to reduce ambiguity before expensive retrieval or drafting begins.\n\n"
+                "Workflow:\n"
+                "1. Inspect the task description and identify ambiguity, missing scope, or branching strategies\n"
+                "2. Use project documents, memories, canvas state, and active skills only when they help disambiguate the user's goal\n"
+                "3. If the request is already clear, say so and recommend the next specialist to call\n"
+                "4. If the request is ambiguous, return 2-4 numbered options, clearly mark the recommended option, and explain the tradeoff\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a concise review (under 250 words)\n"
+                "- Include: whether clarification is needed, recommended next subagent, and numbered options when relevant\n"
+                "- Do NOT perform broad retrieval or drafting yourself\n"
+                "- Do NOT message other subagents directly; the supervisor will relay your recommendation"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["search_project_documents"],
+                tool_map["search_project_memories"],
+                tool_map["list_canvas_documents"],
+                tool_map["list_active_skills"],
+            ],
+            "middleware": [],
+        },
+        {
+            "name": "retriever",
+            "description": "Fetches literature, stages sources, and gathers project evidence without drafting conclusions.",
+            "system_prompt": (
+                "You are the retrieval specialist for Open Analyst. Your job is source discovery, source staging, and targeted retrieval.\n\n"
                 "Workflow:\n"
                 "1. Use search_literature to find relevant papers and articles\n"
-                "2. Use search_project_documents to check what's already in the project\n"
+                "2. Use search_project_documents to check what already exists in the project\n"
                 "3. Use search_project_memories for relevant prior findings\n"
-                "4. Use read_project_document to get full text of promising sources\n"
-                "5. For academic papers, prefer stage_literature_collection so imports use canonical paper identifiers\n"
-                "6. Use stage_web_source only for non-paper web pages or when literature search cannot identify the source\n\n"
-                "If the assigned research contains multiple independent questions, actors, or hypotheses, "
-                "focus on your assigned slice and leave cross-slice synthesis to the supervisor.\n"
-                "When staging sources and no collection is already active, suggest a concise collection name derived from the topic.\n"
-                "After one or two targeted searches, synthesize rather than continuing to search.\n\n"
+                "4. Use read_project_document for promising in-project sources\n"
+                "5. Prefer stage_literature_collection for academic papers so imports use canonical identifiers\n"
+                "6. Use stage_web_source for non-paper web pages or when literature search cannot identify the source\n\n"
+                "Parallelism guidance:\n"
+                "- Safe to parallelize across independent queries, source sets, or provider slices\n"
+                "- Avoid redundant retries and avoid broad fan-out that is likely to trigger rate limits\n\n"
                 "IMPORTANT — Context management:\n"
-                "- Return ONLY a structured summary of findings (under 500 words)\n"
-                "- Include: key findings, source citations, confidence levels, and gaps\n"
-                "- Do NOT return raw search results, full abstracts, or tool output dumps\n"
-                "- If you gather large amounts of data, save raw results to /memory-files/ "
-                "for shared reference or to a workspace file for thread-local scratch work, "
-                "and return only the analysis summary"
+                "- Return ONLY a structured retrieval summary (under 350 words)\n"
+                "- Include: what was searched, what was staged or found, high-value sources, and unresolved gaps\n"
+                "- Do NOT draft conclusions beyond short retrieval notes\n"
+                "- Save larger raw material to /memory-files/ when needed and return only compact references"
             ),
             "model": model,
             "tools": [
@@ -1535,45 +1638,122 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             "skills": ["/skills/content-extraction/"],
         },
         {
+            "name": "researcher",
+            "description": "Synthesizes retrieved evidence into findings, competing hypotheses, confidence, and gaps.",
+            "system_prompt": (
+                "You are the research specialist for Open Analyst. Your job is evidence synthesis, not broad retrieval.\n\n"
+                "Workflow:\n"
+                "1. Review the retrieved evidence, project documents, memories, and any referenced canvas material\n"
+                "2. Identify key findings, evidence support, competing hypotheses, and confidence levels\n"
+                "3. Surface gaps, unresolved questions, and what additional retrieval would matter most\n\n"
+                "If the assigned research contains multiple independent questions, actors, or hypotheses, "
+                "focus on your assigned slice and leave cross-slice synthesis to the supervisor.\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a structured summary of findings (under 500 words)\n"
+                "- Include: key findings, evidence support, confidence levels, competing hypotheses, and gaps\n"
+                "- Do NOT return raw tool output dumps or long source excerpts\n"
+                "- If the task references large evidence packs, cite the specific documents or /memory-files/ paths instead of copying them"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["search_project_documents"],
+                tool_map["read_project_document"],
+                tool_map["search_project_memories"],
+                tool_map["list_canvas_documents"],
+            ],
+            "middleware": [],
+            "skills": ["/skills/content-extraction/"],
+        },
+        {
+            "name": "argument-planner",
+            "description": "Creates argument maps, outlines, and structured paper or report plans in canvas.",
+            "system_prompt": (
+                "You are the argument planning specialist for Open Analyst. Your job is to turn research into a usable plan.\n\n"
+                "Workflow:\n"
+                "1. Review research findings, project memories, current canvas documents, and active skill expectations\n"
+                "2. Build a structured plan with claims, subclaims, supporting evidence, gaps, and next drafting moves\n"
+                "3. Save the plan to canvas markdown when the task calls for a report, paper, or briefing outline\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a concise planning summary (under 300 words)\n"
+                "- Include: plan title, canvas document name if created, major sections, and unresolved issues\n"
+                "- Keep the full outline in canvas, not in your response"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["search_project_documents"],
+                tool_map["read_project_document"],
+                tool_map["search_project_memories"],
+                tool_map["list_canvas_documents"],
+                tool_map["save_canvas_markdown"],
+                tool_map["list_active_skills"],
+            ],
+            "middleware": [],
+            "skills": [
+                "/skills/arlis-bulletin/",
+                "/skills/schedule/",
+            ],
+        },
+        {
             "name": "drafter",
-            "description": "Creates documents, writes to canvas, runs commands (pandoc, python), publishes artifacts. Use for document creation and structured product generation.",
+            "description": "Creates and revises substantive draft content in canvas or project documents.",
             "system_prompt": (
                 "You are the drafting specialist for Open Analyst. You turn research and evidence into polished outputs.\n\n"
                 "Workflow:\n"
                 "1. Review the evidence and plan provided in the task description\n"
                 "2. Use search_project_documents or read_project_document to retrieve source material if needed\n"
                 "3. Use save_canvas_markdown to create or update drafts\n"
-                "4. Use execute_command for document generation (pandoc, python scripts)\n"
-                "5. Use publish_canvas_document or publish_workspace_file to finalize outputs\n"
-                "6. Use capture_artifact to store generated files\n\n"
+                "4. Stage the draft for critique or user review in canvas\n"
+                "5. Leave packaging and publishing to the dedicated specialists\n\n"
                 "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
-                "- Include: artifact title, format, location, and any issues encountered\n"
+                "- Include: draft title, where it was staged, and any unresolved issues\n"
                 "- Do NOT return the full document content in your response\n"
-                "- Use /artifacts/ or /memory-files/ for shared large files that collaborators should also see\n"
-                "- The artifact is already saved; the supervisor only needs to know it succeeded"
+                "- Keep the full draft in canvas or referenced files; the supervisor only needs the summary"
             ),
             "model": model,
             "tools": [
-                tool_map["list_directory"],
                 tool_map["search_project_documents"],
                 tool_map["read_project_document"],
-                tool_map["execute_command"],
-                tool_map["capture_artifact"],
+                tool_map["search_project_memories"],
                 tool_map["save_canvas_markdown"],
-                tool_map["publish_canvas_document"],
-                tool_map["publish_workspace_file"],
                 tool_map["list_canvas_documents"],
             ],
             "middleware": [],
             "skills": [
                 "/skills/arlis-bulletin/",
+                "/skills/schedule/",
+            ],
+        },
+        {
+            "name": "packager",
+            "description": "Packages approved content into delivery formats and captures artifacts.",
+            "system_prompt": (
+                "You are the packaging specialist for Open Analyst. Your job is format-specific output generation.\n\n"
+                "Workflow:\n"
+                "1. Read the approved canvas or workspace content referenced in the task\n"
+                "2. Use execute_command and packaging skills to produce the requested format\n"
+                "3. Use capture_artifact to register generated files for downstream publication or download\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a concise packaging summary (under 200 words)\n"
+                "- Include: output format, filenames, artifact locations, and any generation issues\n"
+                "- Do NOT restate the document content\n"
+                "- Leave publication to the publisher"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["list_directory"],
+                tool_map["read_project_document"],
+                tool_map["execute_command"],
+                tool_map["capture_artifact"],
+                tool_map["list_canvas_documents"],
+            ],
+            "middleware": [],
+            "skills": [
                 "/skills/docx/",
                 "/skills/xlsx/",
                 "/skills/pptx/",
                 "/skills/pdf/",
-                "/skills/schedule/",
             ],
         },
         {
@@ -1607,20 +1787,44 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 tool_map["search_project_documents"],
                 tool_map["search_project_memories"],
                 tool_map["read_project_document"],
+                tool_map["list_canvas_documents"],
             ],
             "middleware": [],
             # Critic doesn't need skills — it reviews, not creates
         },
         {
+            "name": "publisher",
+            "description": "Publishes approved outputs to project knowledge stores and final destinations.",
+            "system_prompt": (
+                "You are the publication specialist for Open Analyst. Your job is final publication after approval.\n\n"
+                "Workflow:\n"
+                "1. Verify which canvas document or workspace artifact has been approved for publication\n"
+                "2. Use the appropriate publish tool to publish it\n"
+                "3. Capture any resulting artifact metadata that downstream users need\n\n"
+                "IMPORTANT — Context management:\n"
+                "- Return ONLY a brief publication summary (under 150 words)\n"
+                "- Include: what was published, where it went, and any follow-up actions\n"
+                "- Do NOT revise content here; publication is not drafting"
+            ),
+            "model": model,
+            "tools": [
+                tool_map["list_canvas_documents"],
+                tool_map["publish_canvas_document"],
+                tool_map["publish_workspace_file"],
+                tool_map["capture_artifact"],
+            ],
+            "middleware": [],
+        },
+        {
             # Override the DeepAgents auto-included general-purpose subagent.
             # Keep it narrow so it acts as a context-isolation fallback rather
-            # than bypassing the specialized researcher/drafter/critic flow.
+            # than bypassing the specialized reviewer/retriever/planner/drafter flow.
             "name": "general-purpose",
-            "description": "Fallback analyst for cross-cutting synthesis tasks that do not fit researcher, drafter, or critic roles.",
+            "description": "Fallback analyst for cross-cutting synthesis tasks that do not fit the named specialists.",
             "system_prompt": (
                 "You are a narrow fallback analyst for Open Analyst.\n\n"
                 "Use this role only for cross-cutting synthesis that does not clearly belong to the "
-                "researcher, drafter, or critic. You may inspect project context and prepare short "
+                "reviewer, retriever, researcher, argument-planner, drafter, critic, packager, or publisher. You may inspect project context and prepare short "
                 "intermediate syntheses, but you must not execute commands or publish artifacts.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise summary of results (under 500 words)\n"

@@ -17,13 +17,16 @@ interface AgentThread {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  status?: string | null;
 }
 
 interface SidebarThread {
   id: string;
-  title: string | null;
+  title: string;
+  summary: string | null;
   status: string | null;
   updatedAt: string | Date | null;
+  metadata: Record<string, unknown>;
 }
 
 async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[]> {
@@ -40,9 +43,24 @@ async function fetchThreadsForProject(projectId: string): Promise<SidebarThread[
     const threads: AgentThread[] = await res.json();
     return threads.map((t) => ({
       id: t.thread_id,
-      title: typeof t.metadata?.title === "string" ? t.metadata.title : "Thread",
-      status: typeof t.metadata?.status === "string" ? t.metadata.status : null,
+      title:
+        typeof t.metadata?.title === "string" && t.metadata.title.trim()
+          ? t.metadata.title.trim()
+          : typeof t.metadata?.summary === "string" && t.metadata.summary.trim()
+            ? t.metadata.summary.trim()
+            : "Untitled thread",
+      summary:
+        typeof t.metadata?.summary === "string" && t.metadata.summary.trim()
+          ? t.metadata.summary.trim()
+          : null,
+      status:
+        typeof t.status === "string"
+          ? t.status
+          : typeof t.metadata?.status === "string"
+            ? t.metadata.status
+            : null,
       updatedAt: t.updated_at || null,
+      metadata: t.metadata || {},
     }));
   } catch {
     // Agent Server unreachable — return empty list

@@ -48,9 +48,9 @@ export function ThreadContextPanel({
     <div className="h-full overflow-y-auto bg-surface p-5 space-y-5">
       <div>
         <div className="text-xs uppercase tracking-[0.16em] text-text-muted mb-1">
-          Thread Context
+          Project Context
         </div>
-        <h2 className="text-lg font-semibold">Tools, connectors, and memory</h2>
+        <h2 className="text-lg font-semibold">Connectors, tools, skills, and memory</h2>
       </div>
 
       <section className="rounded-xl border border-border bg-background-secondary p-4">
