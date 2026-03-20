@@ -10,6 +10,12 @@ Open Analyst has three active services:
 
 The runtime is the core agent system. The browser now connects directly to the Agent Server for threads, runs, streaming, interrupts, and resume. The web app still owns product APIs such as project CRUD, artifact routes, source-ingest routes, canvas routes, and memory management. Analyst MCP remains the specialized external acquisition service used for literature search, collection, and artifact download.
 
+The supported architecture is explicitly Agent Server-first and Deep Agents-first:
+
+- Agent Server owns durable execution, runs, threads, checkpoints, interrupts, and store-backed persistence.
+- Deep Agents owns planning, delegation, subagent coordination, and tool-driven work.
+- The browser is a product shell and direct Agent Server client, not a parallel assistant runtime.
+
 ## Request Flow
 
 1. The browser creates or opens an Agent Server thread directly.
@@ -24,6 +30,13 @@ The runtime is the core agent system. The browser now connects directly to the A
    - `interrupt`
    - `error`
 7. If interrupted, the browser resumes execution directly against Agent Server using the same thread metadata.
+
+Important distinction:
+
+- thread state and thread metadata are persisted by Agent Server
+- runtime context is still a per-invocation contract
+
+So the server must derive full runtime context for every run entrypoint. Persisted metadata is a routing hint, not a substitute for required graph context.
 
 ## User-Facing Model
 
@@ -44,7 +57,7 @@ The chat path is now thread-first and Agent Server-native. The older `api/runtim
 
 Used for:
 
-- application tables via Drizzle
+- application tables for project shell state and per-user settings via explicit SQL
 - pgvector document retrieval
 - LangGraph checkpointer state
 - LangGraph store-backed long-term memory
@@ -52,11 +65,12 @@ Used for:
 
 ### S3 Or Local Artifact Storage
 
-Artifact routing works like this:
+Shared large-file routing works like this:
 
 - blank `ARTIFACT_STORAGE_BACKEND` -> local artifact storage
 - `ARTIFACT_STORAGE_BACKEND=s3` -> S3 artifact storage
 - project settings can override the backend per project
+- Deep Agents routes `/artifacts/` and `/memory-files/` into that shared storage layer
 
 ### Workspace Files
 
@@ -75,7 +89,7 @@ The runtime resolves workspace roots server-side. The supervisor delegates all f
 There are two primary retrieval paths:
 
 - project documents via pgvector-backed search
-- project long-term memories via the LangGraph store, with app memory records synced into that store
+- project long-term memories via the LangGraph store
 
 Research-heavy turns can additionally use Analyst MCP literature search through explicit runtime tools.
 

@@ -15,6 +15,7 @@ release/
 test-results/
 __pycache__/
 *.pyc
+*.egg-info/
 
 # Bundled Node.js binaries
 resources/node/

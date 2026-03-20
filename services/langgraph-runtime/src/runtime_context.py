@@ -157,6 +157,13 @@ def get_default_workspace_root() -> Path:
     return get_config_dir() / "workspaces"
 
 
+def get_default_artifact_root() -> Path:
+    configured = _trimmed_or_none(settings.artifact_local_dir)
+    if configured:
+        return Path(configured)
+    return get_config_dir() / "captures"
+
+
 def resolve_project_workspace(project: dict[str, Any]) -> str:
     workspace_root = _trimmed_or_none(project.get("workspace_local_root"))
     workspace_slug = _trimmed_or_none(project.get("workspace_slug")) or build_project_workspace_slug(
@@ -164,6 +171,47 @@ def resolve_project_workspace(project: dict[str, Any]) -> str:
         _trimmed(project.get("id")),
     )
     return str((Path(workspace_root) if workspace_root else get_default_workspace_root()) / workspace_slug)
+
+
+def _join_storage_key(*parts: Any) -> str:
+    cleaned = [str(part or "").strip().strip("/") for part in parts if str(part or "").strip()]
+    return "/".join(cleaned)
+
+
+def resolve_project_shared_storage(project: dict[str, Any]) -> dict[str, str]:
+    workspace_slug = _trimmed_or_none(project.get("workspace_slug")) or build_project_workspace_slug(
+        _trimmed(project.get("name")) or "Untitled Project",
+        _trimmed(project.get("id")),
+    )
+    setting = _trimmed_or_none(project.get("artifact_backend")) or "env"
+    backend = settings.artifact_storage_backend if setting == "env" else setting
+    if backend == "s3":
+        bucket = _trimmed_or_none(project.get("artifact_s3_bucket")) or _trimmed_or_none(settings.artifact_s3_bucket)
+        region = _trimmed_or_none(project.get("artifact_s3_region")) or _trimmed_or_none(settings.artifact_s3_region) or "us-east-1"
+        endpoint = _trimmed_or_none(project.get("artifact_s3_endpoint")) or _trimmed_or_none(settings.artifact_s3_endpoint)
+        base_prefix = _trimmed_or_none(project.get("artifact_s3_prefix")) or _trimmed_or_none(settings.artifact_s3_prefix) or "open-analyst-vnext"
+        return {
+            "backend": "s3",
+            "local_root": "",
+            "bucket": bucket or "",
+            "region": region,
+            "endpoint": endpoint or "",
+            "prefix": _join_storage_key(base_prefix, workspace_slug),
+        }
+
+    local_root = _trimmed_or_none(project.get("artifact_local_root"))
+    if local_root:
+        resolved_root = Path(local_root) / workspace_slug
+    else:
+        resolved_root = get_default_artifact_root() / workspace_slug
+    return {
+        "backend": "local",
+        "local_root": str(resolved_root),
+        "bucket": "",
+        "region": "",
+        "endpoint": "",
+        "prefix": "",
+    }
 
 
 def _parse_frontmatter(raw: str) -> dict[str, Any]:
@@ -326,13 +374,23 @@ class RuntimeContextService:
         configured_default_connectors = _string_list(profile.get("default_connector_ids"))
         active_connector_ids = configured_default_connectors or enabled_connector_ids
         now = datetime.now(timezone.utc)
+        shared_storage = resolve_project_shared_storage(project)
+        workspace_slug = _trimmed(project.get("workspace_slug")) or build_project_workspace_slug(
+            _trimmed(project.get("name")),
+            _trimmed(project.get("id")),
+        )
 
         return RuntimeProjectContext(
             project_id=_trimmed(project["id"]),
             project_name=_trimmed(project.get("name")),
             workspace_path=resolve_project_workspace(project),
-            workspace_slug=_trimmed(project.get("workspace_slug"))
-            or build_project_workspace_slug(_trimmed(project.get("name")), _trimmed(project.get("id"))),
+            workspace_slug=workspace_slug,
+            shared_storage_backend="s3" if shared_storage["backend"] == "s3" else "local",
+            shared_storage_local_root=shared_storage["local_root"],
+            shared_storage_bucket=shared_storage["bucket"],
+            shared_storage_region=shared_storage["region"],
+            shared_storage_endpoint=shared_storage["endpoint"],
+            shared_storage_prefix=shared_storage["prefix"],
             current_date=now.date().isoformat(),
             current_datetime_utc=now.isoformat().replace("+00:00", "Z"),
             analysis_mode=_trimmed(analysis_mode) or "chat",
@@ -366,7 +424,13 @@ class RuntimeContextService:
                 id,
                 name,
                 workspace_slug,
-                workspace_local_root
+                workspace_local_root,
+                artifact_backend,
+                artifact_local_root,
+                artifact_s3_bucket,
+                artifact_s3_region,
+                artifact_s3_endpoint,
+                artifact_s3_prefix
             FROM projects
             WHERE id = %s
             LIMIT 1

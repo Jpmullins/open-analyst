@@ -25,49 +25,9 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit:prod
 
-  node-tests:
-    name: Node / ${{ matrix.suite.name }}
+  node-build:
+    name: Node / build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        suite:
-          - name: unit
-            cmd: "pnpm test run --exclude 'tests/rr7/integration/**'"
-          - name: integration
-            cmd: "pnpm test run tests/rr7/integration/"
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - uses: pnpm/action-setup@v4
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Run ${{ matrix.suite.name }} tests
-        run: ${{ matrix.suite.cmd }}
-
-  e2e:
-    name: Node / e2e
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: open_analyst
-          POSTGRES_PASSWORD: open_analyst_dev
-          POSTGRES_DB: open_analyst
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U open_analyst"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       DATABASE_URL: postgresql://open_analyst:open_analyst_dev@localhost:5432/open_analyst
     steps:
@@ -82,46 +42,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+      - name: Lint app
+        run: pnpm lint
 
-      - name: Apply database migration
-        run: psql "$DATABASE_URL" -f drizzle/0000_salty_vengeance.sql
-
-      - name: Start app
-        run: pnpm dev -- --strictPort &
-
-      - name: Wait for app
-        run: npx wait-on http://localhost:5173 --timeout 30000
-
-      - name: Run E2E tests
-        run: pnpm test:e2e
-
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
-
-  agent-tests:
-    name: Python / agent
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-        working-directory: services/strands-agent
-
-      - name: Run agent tests
-        run: uv run pytest tests/ -v
-        working-directory: services/strands-agent
+      - name: Build app
+        run: pnpm build

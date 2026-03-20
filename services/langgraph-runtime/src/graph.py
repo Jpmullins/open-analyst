@@ -22,6 +22,7 @@ try:
     from deepagents import create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
     from deepagents.backends.store import StoreBackend
+    from shared_storage_backend import S3Backend
 except ImportError:  # pragma: no cover
     logger.info("deepagents not installed — agent creation will be unavailable")
     create_deep_agent = None
@@ -29,6 +30,7 @@ except ImportError:  # pragma: no cover
     FilesystemBackend = None
     StateBackend = None
     StoreBackend = None
+    S3Backend = None
 
 
 try:
@@ -120,10 +122,6 @@ def _coerce_context_mapping(value: Any) -> dict[str, Any]:
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
         dumped = model_dump()
-        return dumped if isinstance(dumped, dict) else {}
-    legacy_dict = getattr(value, "dict", None)
-    if callable(legacy_dict):
-        dumped = legacy_dict()
         return dumped if isinstance(dumped, dict) else {}
     raw_dict = getattr(value, "__dict__", None)
     if isinstance(raw_dict, dict):
@@ -1520,7 +1518,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "- Return ONLY a structured summary of findings (under 500 words)\n"
                 "- Include: key findings, source citations, confidence levels, and gaps\n"
                 "- Do NOT return raw search results, full abstracts, or tool output dumps\n"
-                "- If you gather large amounts of data, save raw results to a workspace file "
+                "- If you gather large amounts of data, save raw results to /memory-files/ "
+                "for shared reference or to a workspace file for thread-local scratch work, "
                 "and return only the analysis summary"
             ),
             "model": model,
@@ -1552,6 +1551,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
                 "- Include: artifact title, format, location, and any issues encountered\n"
                 "- Do NOT return the full document content in your response\n"
+                "- Use /artifacts/ or /memory-files/ for shared large files that collaborators should also see\n"
                 "- The artifact is already saved; the supervisor only needs to know it succeeded"
             ),
             "model": model,
@@ -1654,6 +1654,30 @@ def _build_backend() -> Any:
         config = _get_project_config(runtime)
         workspace_path = str(config.get("workspace_path", "") or "")
         default_root = _workspace_root(workspace_path)
+        shared_storage_backend = str(config.get("shared_storage_backend", "local") or "local").strip().lower()
+        shared_storage_local_root = str(config.get("shared_storage_local_root", "") or "").strip()
+        shared_storage_bucket = str(config.get("shared_storage_bucket", "") or "").strip()
+        shared_storage_region = str(config.get("shared_storage_region", "") or "").strip()
+        shared_storage_endpoint = str(config.get("shared_storage_endpoint", "") or "").strip()
+        shared_storage_prefix = str(config.get("shared_storage_prefix", "") or "").strip().strip("/")
+
+        def build_shared_route_backend(route_name: str) -> Any:
+            route_suffix = route_name.strip().strip("/")
+            if shared_storage_backend == "s3":
+                if S3Backend is None:
+                    raise RuntimeError("Shared S3 backend is configured but unavailable")
+                if not shared_storage_bucket:
+                    raise RuntimeError("Shared S3 backend requires a bucket")
+                route_prefix = "/".join(part for part in [shared_storage_prefix, route_suffix] if part)
+                return S3Backend(
+                    bucket=shared_storage_bucket,
+                    prefix=route_prefix,
+                    region=shared_storage_region,
+                    endpoint=shared_storage_endpoint,
+                )
+            shared_root = Path(shared_storage_local_root or default_root) / route_suffix
+            return FilesystemBackend(root_dir=shared_root, virtual_mode=True)
+
         return CompositeBackend(
             default=(
                 FilesystemBackend(
@@ -1665,6 +1689,8 @@ def _build_backend() -> Any:
             ),
             routes={
                 "/memories/": StoreBackend(runtime, namespace=namespace),
+                "/memory-files/": build_shared_route_backend("memory-files"),
+                "/artifacts/": build_shared_route_backend("artifacts"),
                 "/skills/": FilesystemBackend(root_dir=_skills_root(), virtual_mode=True),
             },
         )

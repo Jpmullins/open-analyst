@@ -1,41 +1,46 @@
-import { eq, desc, and, or, sql } from "drizzle-orm";
-import { db } from "../index.server";
-import {
-  collections,
-  documents,
-  type Collection,
-  type Document,
-} from "../schema";
+import { queryRow, queryRows } from "../index.server";
+import { type Collection, type Document } from "../schema";
 import {
   buildKnowledgeEmbeddingText,
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
 } from "~/lib/knowledge-embedding.server";
 
+function jsonParam(value: unknown, fallback: unknown): string {
+  return JSON.stringify(value && typeof value === "object" ? value : fallback);
+}
+
 // --- Collections ---
 
-export async function listCollections(
-  projectId: string
-): Promise<Collection[]> {
-  return db
-    .select()
-    .from(collections)
-    .where(eq(collections.projectId, projectId))
-    .orderBy(desc(collections.updatedAt));
+export async function listCollections(projectId: string): Promise<Collection[]> {
+  return queryRows<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1
+      ORDER BY updated_at DESC
+    `,
+    [projectId],
+  );
 }
 
 export async function createCollection(
   projectId: string,
   input: { name?: string; description?: string }
 ): Promise<Collection> {
-  const [collection] = await db
-    .insert(collections)
-    .values({
+  const collection = await queryRow<Collection>(
+    `
+      INSERT INTO collections (project_id, name, description)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `,
+    [
       projectId,
-      name: String(input.name || "Untitled Collection").trim(),
-      description: String(input.description || "").trim(),
-    })
-    .returning();
+      String(input.name || "Untitled Collection").trim(),
+      String(input.description || "").trim(),
+    ],
+  );
+  if (!collection) throw new Error("Collection insert failed");
   return collection;
 }
 
@@ -43,17 +48,15 @@ export async function getCollection(
   projectId: string,
   collectionId: string
 ): Promise<Collection | undefined> {
-  const [collection] = await db
-    .select()
-    .from(collections)
-    .where(
-      and(
-        eq(collections.projectId, projectId),
-        eq(collections.id, collectionId)
-      )
-    )
-    .limit(1);
-  return collection;
+  return queryRow<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [projectId, collectionId],
+  );
 }
 
 export async function ensureCollection(
@@ -64,105 +67,85 @@ export async function ensureCollection(
   const trimmed = String(name || "").trim();
   if (!trimmed) throw new Error("Collection name is required");
 
-  // Try to find existing (case-insensitive)
-  const [existing] = await db
-    .select()
-    .from(collections)
-    .where(
-      and(
-        eq(collections.projectId, projectId),
-        sql`lower(${collections.name}) = lower(${trimmed})`
-      )
-    )
-    .limit(1);
-
+  const existing = await queryRow<Collection>(
+    `
+      SELECT *
+      FROM collections
+      WHERE project_id = $1 AND lower(name) = lower($2)
+      LIMIT 1
+    `,
+    [projectId, trimmed],
+  );
   if (existing) return existing;
 
   try {
-    const [collection] = await db
-      .insert(collections)
-      .values({
-        projectId,
-        name: trimmed,
-        description: String(description || "").trim(),
-      })
-      .returning();
+    const collection = await queryRow<Collection>(
+      `
+        INSERT INTO collections (project_id, name, description)
+        VALUES ($1, $2, $3)
+        RETURNING *
+      `,
+      [projectId, trimmed, String(description || "").trim()],
+    );
+    if (!collection) throw new Error("Collection insert failed");
     return collection;
-  } catch (error: unknown) {
-    // Race condition: another request created it first, fetch it
-    const [raced] = await db
-      .select()
-      .from(collections)
-      .where(
-        and(
-          eq(collections.projectId, projectId),
-          sql`lower(${collections.name}) = lower(${trimmed})`
-        )
-      )
-      .limit(1);
+  } catch (error) {
+    const raced = await queryRow<Collection>(
+      `
+        SELECT *
+        FROM collections
+        WHERE project_id = $1 AND lower(name) = lower($2)
+        LIMIT 1
+      `,
+      [projectId, trimmed],
+    );
     if (raced) return raced;
     throw error;
   }
 }
 
-export async function getCollectionDocumentCounts(
-  projectId: string
-): Promise<Record<string, number>> {
-  const rows = await db
-    .select({
-      collectionId: documents.collectionId,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .groupBy(documents.collectionId);
-
+export async function getCollectionDocumentCounts(projectId: string): Promise<Record<string, number>> {
+  const rows = await queryRows<{ collectionId: string | null; count: number }>(
+    `
+      SELECT collection_id, count(*)::int AS count
+      FROM documents
+      WHERE project_id = $1
+      GROUP BY collection_id
+    `,
+    [projectId],
+  );
   const counts: Record<string, number> = {};
   for (const row of rows) {
-    if (row.collectionId) {
-      counts[row.collectionId] = row.count;
-    }
+    if (row.collectionId) counts[row.collectionId] = Number(row.count);
   }
   return counts;
 }
 
 // --- Documents ---
 
-export async function listDocuments(
-  projectId: string,
-  collectionId?: string
-): Promise<Document[]> {
-  if (collectionId) {
-    return db
-      .select()
-      .from(documents)
-      .where(
-        and(
-          eq(documents.projectId, projectId),
-          eq(documents.collectionId, collectionId)
-        )
-      )
-      .orderBy(desc(documents.updatedAt));
-  }
-  return db
-    .select()
-    .from(documents)
-    .where(eq(documents.projectId, projectId))
-    .orderBy(desc(documents.updatedAt));
+export async function listDocuments(projectId: string, collectionId?: string): Promise<Document[]> {
+  return queryRows<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+      ORDER BY updated_at DESC
+    `,
+    [projectId, collectionId ?? null],
+  );
 }
 
-export async function getDocument(
-  projectId: string,
-  documentId: string
-): Promise<Document | undefined> {
-  const [doc] = await db
-    .select()
-    .from(documents)
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .limit(1);
-  return doc;
+export async function getDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+  return queryRow<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [projectId, documentId],
+  );
 }
 
 export async function getDocumentBySourceUri(
@@ -172,22 +155,17 @@ export async function getDocumentBySourceUri(
 ): Promise<Document | undefined> {
   const trimmed = String(sourceUri || "").trim();
   if (!trimmed) return undefined;
-
-  const predicates = [
-    eq(documents.projectId, projectId),
-    eq(documents.sourceUri, trimmed),
-  ];
-  const trimmedSourceType = String(sourceType || "").trim();
-  if (trimmedSourceType) {
-    predicates.push(eq(documents.sourceType, trimmedSourceType));
-  }
-
-  const [doc] = await db
-    .select()
-    .from(documents)
-    .where(and(...predicates))
-    .limit(1);
-  return doc;
+  return queryRow<Document>(
+    `
+      SELECT *
+      FROM documents
+      WHERE project_id = $1
+        AND source_uri = $2
+        AND ($3::text IS NULL OR source_type = $3::text)
+      LIMIT 1
+    `,
+    [projectId, trimmed, String(sourceType || "").trim() || null],
+  );
 }
 
 export async function createDocument(
@@ -202,22 +180,33 @@ export async function createDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
-  const [doc] = await db
-    .insert(documents)
-    .values({
+  const doc = await queryRow<Document>(
+    `
+      INSERT INTO documents (
+        project_id,
+        collection_id,
+        title,
+        source_type,
+        source_uri,
+        storage_uri,
+        content,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      RETURNING *
+    `,
+    [
       projectId,
-      collectionId: input.collectionId || null,
-      title: String(input.title || "Untitled Source").trim(),
-      sourceType: String(input.sourceType || "manual"),
-      sourceUri: String(input.sourceUri || ""),
-      storageUri: input.storageUri || null,
-      content: String(input.content || ""),
-      metadata:
-        input.metadata && typeof input.metadata === "object"
-          ? input.metadata
-          : {},
-    })
-    .returning();
+      input.collectionId || null,
+      String(input.title || "Untitled Source").trim(),
+      String(input.sourceType || "manual"),
+      String(input.sourceUri || ""),
+      input.storageUri || null,
+      String(input.content || ""),
+      jsonParam(input.metadata, {}),
+    ],
+  );
+  if (!doc) throw new Error("Document insert failed");
   return doc;
 }
 
@@ -234,37 +223,46 @@ export async function updateDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      collectionId:
-        input.collectionId !== undefined ? input.collectionId || null : undefined,
-      title:
-        input.title !== undefined
-          ? String(input.title || "Untitled Source").trim()
-          : undefined,
-      sourceType:
-        input.sourceType !== undefined
-          ? String(input.sourceType || "manual")
-          : undefined,
-      sourceUri:
-        input.sourceUri !== undefined ? String(input.sourceUri || "") : undefined,
-      storageUri:
-        input.storageUri !== undefined ? input.storageUri || null : undefined,
-      content:
-        input.content !== undefined ? String(input.content || "") : undefined,
-      metadata:
-        input.metadata && typeof input.metadata === "object"
-          ? input.metadata
-          : input.metadata === undefined
-            ? undefined
-            : {},
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const clauses: string[] = ["updated_at = NOW()"];
+  const params: unknown[] = [];
+  if (input.collectionId !== undefined) {
+    params.push(input.collectionId || null);
+    clauses.push(`collection_id = $${params.length}`);
+  }
+  if (input.title !== undefined) {
+    params.push(String(input.title || "Untitled Source").trim());
+    clauses.push(`title = $${params.length}`);
+  }
+  if (input.sourceType !== undefined) {
+    params.push(String(input.sourceType || "manual"));
+    clauses.push(`source_type = $${params.length}`);
+  }
+  if (input.sourceUri !== undefined) {
+    params.push(String(input.sourceUri || ""));
+    clauses.push(`source_uri = $${params.length}`);
+  }
+  if (input.storageUri !== undefined) {
+    params.push(input.storageUri || null);
+    clauses.push(`storage_uri = $${params.length}`);
+  }
+  if (input.content !== undefined) {
+    params.push(String(input.content || ""));
+    clauses.push(`content = $${params.length}`);
+  }
+  if (input.metadata !== undefined) {
+    params.push(jsonParam(input.metadata, {}));
+    clauses.push(`metadata = $${params.length}::jsonb`);
+  }
+  params.push(projectId, documentId);
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET ${clauses.join(", ")}
+      WHERE project_id = $${params.length - 1} AND id = $${params.length}
+      RETURNING *
+    `,
+    params,
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
@@ -274,16 +272,15 @@ export async function updateDocumentMetadata(
   documentId: string,
   metadata: Record<string, unknown>
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      metadata,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET metadata = $1::jsonb, updated_at = NOW()
+      WHERE project_id = $2 AND id = $3
+      RETURNING *
+    `,
+    [jsonParam(metadata, {}), projectId, documentId],
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
@@ -293,17 +290,19 @@ export async function updateDocumentEmbedding(
   documentId: string,
   embedding: number[] | null
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      embedding,
-      embeddingVector: embedding,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const vectorLiteral = embedding?.length ? toVectorLiteral(embedding) : null;
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET
+        embedding = $1::jsonb,
+        embedding_vector = CASE WHEN $2::text IS NULL THEN NULL ELSE $2::vector END,
+        updated_at = NOW()
+      WHERE project_id = $3 AND id = $4
+      RETURNING *
+    `,
+    [JSON.stringify(embedding), vectorLiteral, projectId, documentId],
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
@@ -313,34 +312,34 @@ export async function updateDocumentEmbeddingVector(
   documentId: string,
   embeddingVector: number[] | null
 ): Promise<Document> {
-  const [doc] = await db
-    .update(documents)
-    .set({
-      embeddingVector,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
+  const vectorLiteral = embeddingVector?.length ? toVectorLiteral(embeddingVector) : null;
+  const doc = await queryRow<Document>(
+    `
+      UPDATE documents
+      SET
+        embedding_vector = CASE WHEN $1::text IS NULL THEN NULL ELSE $1::vector END,
+        updated_at = NOW()
+      WHERE project_id = $2 AND id = $3
+      RETURNING *
+    `,
+    [vectorLiteral, projectId, documentId],
+  );
   if (!doc) throw new Error(`Document not found: ${documentId}`);
   return doc;
 }
 
-export async function deleteDocument(
-  projectId: string,
-  documentId: string
-): Promise<Document | undefined> {
-  const [deleted] = await db
-    .delete(documents)
-    .where(
-      and(eq(documents.projectId, projectId), eq(documents.id, documentId))
-    )
-    .returning();
-  return deleted;
+export async function deleteDocument(projectId: string, documentId: string): Promise<Document | undefined> {
+  return queryRow<Document>(
+    `
+      DELETE FROM documents
+      WHERE project_id = $1 AND id = $2
+      RETURNING *
+    `,
+    [projectId, documentId],
+  );
 }
 
-// --- RAG query (in-memory TF-IDF, same as before) ---
+// --- RAG query (semantic first, text fallback) ---
 
 export interface RagResult {
   id: string;
@@ -510,28 +509,34 @@ async function queryDocumentsByVector(
   score: number;
 }>> {
   const normalized = normalizeEmbedding(embedding);
-  if (!normalized.length) {
-    return [];
-  }
+  if (!normalized.length) return [];
   const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
-  const vectorLiteral = sql.raw(`'${toVectorLiteral(normalized)}'::vector`);
-  const clauses = [eq(documents.projectId, projectId), sql`${documents.embeddingVector} is not null`];
-  if (options.collectionId) {
-    clauses.push(eq(documents.collectionId, options.collectionId));
-  }
-  const rows = await db
-    .select({
-      id: documents.id,
-      title: documents.title,
-      sourceUri: documents.sourceUri,
-      content: documents.content,
-      metadata: documents.metadata,
-      score: sql<number>`greatest(0, (1 - (${documents.embeddingVector} <=> ${vectorLiteral})) * 8)`,
-    })
-    .from(documents)
-    .where(and(...clauses))
-    .orderBy(sql`${documents.embeddingVector} <=> ${vectorLiteral}`)
-    .limit(limit);
+  const vectorLiteral = toVectorLiteral(normalized);
+  const rows = await queryRows<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    score: number;
+  }>(
+    `
+      SELECT
+        id,
+        title,
+        source_uri,
+        content,
+        metadata,
+        greatest(0, (1 - (embedding_vector <=> $2::vector)) * 8) AS score
+      FROM documents
+      WHERE project_id = $1
+        AND embedding_vector IS NOT NULL
+        AND ($3::uuid IS NULL OR collection_id = $3::uuid)
+      ORDER BY embedding_vector <=> $2::vector
+      LIMIT $4
+    `,
+    [projectId, vectorLiteral, options.collectionId ?? null, limit],
+  );
   return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
 }
 
@@ -549,34 +554,41 @@ async function queryDocumentsByTextFallback(
 }>> {
   const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
   const terms = variants.map((variant) => variant.trim()).filter(Boolean).slice(0, 6);
-  if (!terms.length) {
-    return [];
-  }
+  if (!terms.length) return [];
 
-  const searchPredicates = terms.map((term) =>
-    or(
-      sql`${documents.title} ilike ${`%${term}%`}`,
-      sql`${documents.content} ilike ${`%${term}%`}`,
-    ),
+  const params: unknown[] = [projectId, options.collectionId ?? null];
+  const searchPredicates = terms.map((term) => {
+    params.push(`%${term}%`, `%${term}%`);
+    const start = params.length - 1;
+    return `(title ILIKE $${start} OR content ILIKE $${start + 1})`;
+  });
+  params.push(Math.max(limit * 3, 18));
+
+  const rows = await queryRows<{
+    id: string;
+    title: string | null;
+    sourceUri: string | null;
+    content: string;
+    metadata: unknown;
+    updatedAt: Date | null;
+  }>(
+    `
+      SELECT
+        id,
+        title,
+        source_uri,
+        content,
+        metadata,
+        updated_at
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+        AND (${searchPredicates.join(" OR ")})
+      ORDER BY updated_at DESC
+      LIMIT $${params.length}
+    `,
+    params,
   );
-  const clauses = [
-    eq(documents.projectId, projectId),
-    ...(options.collectionId ? [eq(documents.collectionId, options.collectionId)] : []),
-    or(...searchPredicates),
-  ];
-  const rows = await db
-    .select({
-      id: documents.id,
-      title: documents.title,
-      sourceUri: documents.sourceUri,
-      content: documents.content,
-      metadata: documents.metadata,
-      updatedAt: documents.updatedAt,
-    })
-    .from(documents)
-    .where(and(...clauses))
-    .orderBy(desc(documents.updatedAt))
-    .limit(Math.max(limit * 3, 18));
 
   return rows
     .map((row) => {
@@ -584,18 +596,14 @@ async function queryDocumentsByTextFallback(
       const score = terms.reduce((current, term) => {
         const normalized = term.toLowerCase();
         if (!normalized) return current;
-        if (lowered.includes(normalized)) {
-          return current + 2.5;
-        }
+        if (lowered.includes(normalized)) return current + 2.5;
         const tokens = tokenizeQuery(normalized);
-        return current + tokens.reduce((tokenScore, token) => (
-          lowered.includes(token) ? tokenScore + 0.35 : tokenScore
-        ), 0);
+        return current + tokens.reduce(
+          (tokenScore, token) => (lowered.includes(token) ? tokenScore + 0.35 : tokenScore),
+          0,
+        );
       }, 0);
-      return {
-        ...row,
-        score,
-      };
+      return { ...row, score };
     })
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -603,14 +611,15 @@ async function queryDocumentsByTextFallback(
 }
 
 async function countDocuments(projectId: string, collectionId?: string): Promise<number> {
-  const clauses = [
-    eq(documents.projectId, projectId),
-    ...(collectionId ? [eq(documents.collectionId, collectionId)] : []),
-  ];
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(documents)
-    .where(and(...clauses));
+  const row = await queryRow<{ count: number }>(
+    `
+      SELECT count(*)::int AS count
+      FROM documents
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+    `,
+    [projectId, collectionId ?? null],
+  );
   return Number(row?.count || 0);
 }
 

@@ -1,22 +1,24 @@
-import { and, asc, desc, eq } from "drizzle-orm";
-import { db } from "../index.server";
-import {
-  evidenceItems,
-  type EvidenceItem,
-} from "../schema";
+import { queryRow, queryRows } from "../index.server";
+import { type EvidenceItem } from "../schema";
+
+function jsonParam(value: unknown, fallback: unknown): string {
+  return JSON.stringify(value !== undefined ? value : fallback);
+}
 
 export async function listEvidenceItems(
   projectId: string,
   options: { collectionId?: string } = {}
 ): Promise<EvidenceItem[]> {
-  const clauses = [eq(evidenceItems.projectId, projectId)];
-  if (options.collectionId) clauses.push(eq(evidenceItems.collectionId, options.collectionId));
-
-  return db
-    .select()
-    .from(evidenceItems)
-    .where(and(...clauses))
-    .orderBy(desc(evidenceItems.updatedAt));
+  return queryRows<EvidenceItem>(
+    `
+      SELECT *
+      FROM evidence_items
+      WHERE project_id = $1
+        AND ($2::uuid IS NULL OR collection_id = $2::uuid)
+      ORDER BY updated_at DESC
+    `,
+    [projectId, options.collectionId ?? null],
+  );
 }
 
 export async function createEvidenceItem(
@@ -35,23 +37,41 @@ export async function createEvidenceItem(
     metadata?: Record<string, unknown>;
   }
 ): Promise<EvidenceItem> {
-  const [item] = await db
-    .insert(evidenceItems)
-    .values({
+  const item = await queryRow<EvidenceItem>(
+    `
+      INSERT INTO evidence_items (
+        project_id,
+        collection_id,
+        document_id,
+        artifact_id,
+        title,
+        evidence_type,
+        source_uri,
+        citation_text,
+        extracted_text,
+        confidence,
+        provenance,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
+      RETURNING *
+    `,
+    [
       projectId,
-      collectionId: input.collectionId || null,
-      documentId: input.documentId || null,
-      artifactId: input.artifactId || null,
-      title: String(input.title || "Untitled Evidence").trim(),
-      evidenceType: String(input.evidenceType || "note"),
-      sourceUri: input.sourceUri || null,
-      citationText: String(input.citationText || ""),
-      extractedText: String(input.extractedText || ""),
-      confidence: String(input.confidence || "medium"),
-      provenance: input.provenance || {},
-      metadata: input.metadata || {},
-    })
-    .returning();
+      input.collectionId || null,
+      input.documentId || null,
+      input.artifactId || null,
+      String(input.title || "Untitled Evidence").trim(),
+      String(input.evidenceType || "note"),
+      input.sourceUri || null,
+      String(input.citationText || ""),
+      String(input.extractedText || ""),
+      String(input.confidence || "medium"),
+      jsonParam(input.provenance, {}),
+      jsonParam(input.metadata, {}),
+    ],
+  );
+  if (!item) throw new Error("Evidence insert failed");
   return item;
 }
 
@@ -59,12 +79,15 @@ export async function getEvidenceItem(
   projectId: string,
   evidenceId: string
 ): Promise<EvidenceItem | undefined> {
-  const [item] = await db
-    .select()
-    .from(evidenceItems)
-    .where(and(eq(evidenceItems.projectId, projectId), eq(evidenceItems.id, evidenceId)))
-    .limit(1);
-  return item;
+  return queryRow<EvidenceItem>(
+    `
+      SELECT *
+      FROM evidence_items
+      WHERE project_id = $1 AND id = $2
+      LIMIT 1
+    `,
+    [projectId, evidenceId],
+  );
 }
 
 export async function updateEvidenceItem(
@@ -80,20 +103,46 @@ export async function updateEvidenceItem(
     artifactId?: string | null;
   }
 ): Promise<EvidenceItem> {
-  const values: Record<string, unknown> = { updatedAt: new Date() };
-  if (typeof updates.title === "string") values.title = updates.title.trim();
-  if (typeof updates.citationText === "string") values.citationText = updates.citationText;
-  if (typeof updates.extractedText === "string") values.extractedText = updates.extractedText;
-  if (typeof updates.confidence === "string") values.confidence = updates.confidence;
-  if (updates.provenance !== undefined) values.provenance = updates.provenance;
-  if (updates.metadata !== undefined) values.metadata = updates.metadata;
-  if (updates.artifactId !== undefined) values.artifactId = updates.artifactId;
-
-  const [item] = await db
-    .update(evidenceItems)
-    .set(values)
-    .where(and(eq(evidenceItems.projectId, projectId), eq(evidenceItems.id, evidenceId)))
-    .returning();
+  const clauses: string[] = ["updated_at = NOW()"];
+  const params: unknown[] = [];
+  if (typeof updates.title === "string") {
+    params.push(updates.title.trim());
+    clauses.push(`title = $${params.length}`);
+  }
+  if (typeof updates.citationText === "string") {
+    params.push(updates.citationText);
+    clauses.push(`citation_text = $${params.length}`);
+  }
+  if (typeof updates.extractedText === "string") {
+    params.push(updates.extractedText);
+    clauses.push(`extracted_text = $${params.length}`);
+  }
+  if (typeof updates.confidence === "string") {
+    params.push(updates.confidence);
+    clauses.push(`confidence = $${params.length}`);
+  }
+  if (updates.provenance !== undefined) {
+    params.push(jsonParam(updates.provenance, {}));
+    clauses.push(`provenance = $${params.length}::jsonb`);
+  }
+  if (updates.metadata !== undefined) {
+    params.push(jsonParam(updates.metadata, {}));
+    clauses.push(`metadata = $${params.length}::jsonb`);
+  }
+  if (updates.artifactId !== undefined) {
+    params.push(updates.artifactId);
+    clauses.push(`artifact_id = $${params.length}`);
+  }
+  params.push(projectId, evidenceId);
+  const item = await queryRow<EvidenceItem>(
+    `
+      UPDATE evidence_items
+      SET ${clauses.join(", ")}
+      WHERE project_id = $${params.length - 1} AND id = $${params.length}
+      RETURNING *
+    `,
+    params,
+  );
   if (!item) throw new Error(`Evidence not found: ${evidenceId}`);
   return item;
 }

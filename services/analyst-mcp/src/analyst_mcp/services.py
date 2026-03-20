@@ -969,27 +969,7 @@ class DownloadService:
                 api_base_url=context.api_base_url.strip(),
             )
 
-        scopes = [primary]
-        legacy_backend = self.settings.storage_backend.lower()
-        if context.project_id or context.workspace_slug:
-            if legacy_backend == "s3":
-                scopes.append(
-                    StorageScope(
-                        backend="s3",
-                        bucket=(self.settings.s3_bucket or "").strip(),
-                        region=self.settings.aws_region,
-                        endpoint=self.settings.minio_endpoint or None,
-                        key_prefix="",
-                    )
-                )
-            else:
-                scopes.append(
-                    StorageScope(
-                        backend="local",
-                        local_root=self.settings.storage_root,
-                    )
-                )
-        return scopes
+        return [primary]
 
     def _object_store(self, scope: StorageScope) -> LocalObjectStore | S3ObjectStore:
         if scope.backend == "local":

@@ -1,6 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db, DEV_USER_ID } from "../index.server";
-import { settings, type Settings } from "../schema";
+import { DEV_USER_ID, queryRow } from "../index.server";
+import { type Settings } from "../schema";
 
 export interface SettingsData {
   activeProjectId: string | null;
@@ -34,14 +33,16 @@ function toSettingsData(row: Settings): SettingsData {
   };
 }
 
-export async function getSettings(
-  userId: string = DEV_USER_ID
-): Promise<SettingsData> {
-  const [row] = await db
-    .select()
-    .from(settings)
-    .where(eq(settings.userId, userId))
-    .limit(1);
+export async function getSettings(userId: string = DEV_USER_ID): Promise<SettingsData> {
+  const row = await queryRow<Settings>(
+    `
+      SELECT *
+      FROM settings
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
   if (!row) return { ...DEFAULTS };
   return toSettingsData(row);
 }
@@ -50,27 +51,50 @@ export async function upsertSettings(
   updates: Partial<SettingsData>,
   userId: string = DEV_USER_ID
 ): Promise<SettingsData> {
-  const values: Record<string, unknown> = { updatedAt: new Date() };
-  if (updates.activeProjectId !== undefined)
-    values.activeProjectId = updates.activeProjectId;
-  if (typeof updates.model === "string") values.model = updates.model;
-  if (updates.workingDir !== undefined) values.workingDir = updates.workingDir;
-  if (typeof updates.workingDirType === "string")
-    values.workingDirType = updates.workingDirType;
-  if (updates.s3Uri !== undefined) values.s3Uri = updates.s3Uri;
-  if (typeof updates.agentBackend === "string")
-    values.agentBackend = updates.agentBackend;
-  if (typeof updates.devLogsEnabled === "boolean")
-    values.devLogsEnabled = updates.devLogsEnabled;
-
-  const [row] = await db
-    .insert(settings)
-    .values({ userId, ...values })
-    .onConflictDoUpdate({
-      target: settings.userId,
-      set: values,
-    })
-    .returning();
-
+  const row = await queryRow<Settings>(
+    `
+      INSERT INTO settings (
+        user_id,
+        active_project_id,
+        model,
+        working_dir,
+        working_dir_type,
+        s3_uri,
+        agent_backend,
+        dev_logs_enabled,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      ON CONFLICT (user_id) DO UPDATE
+      SET
+        active_project_id = CASE WHEN $9::boolean THEN EXCLUDED.active_project_id ELSE settings.active_project_id END,
+        model = CASE WHEN $10::boolean THEN EXCLUDED.model ELSE settings.model END,
+        working_dir = CASE WHEN $11::boolean THEN EXCLUDED.working_dir ELSE settings.working_dir END,
+        working_dir_type = CASE WHEN $12::boolean THEN EXCLUDED.working_dir_type ELSE settings.working_dir_type END,
+        s3_uri = CASE WHEN $13::boolean THEN EXCLUDED.s3_uri ELSE settings.s3_uri END,
+        agent_backend = CASE WHEN $14::boolean THEN EXCLUDED.agent_backend ELSE settings.agent_backend END,
+        dev_logs_enabled = CASE WHEN $15::boolean THEN EXCLUDED.dev_logs_enabled ELSE settings.dev_logs_enabled END,
+        updated_at = NOW()
+      RETURNING *
+    `,
+    [
+      userId,
+      updates.activeProjectId !== undefined ? updates.activeProjectId : null,
+      typeof updates.model === "string" ? updates.model : null,
+      updates.workingDir !== undefined ? updates.workingDir : null,
+      typeof updates.workingDirType === "string" ? updates.workingDirType : null,
+      updates.s3Uri !== undefined ? updates.s3Uri : null,
+      typeof updates.agentBackend === "string" ? updates.agentBackend : null,
+      typeof updates.devLogsEnabled === "boolean" ? updates.devLogsEnabled : null,
+      updates.activeProjectId !== undefined,
+      typeof updates.model === "string",
+      updates.workingDir !== undefined,
+      typeof updates.workingDirType === "string",
+      updates.s3Uri !== undefined,
+      typeof updates.agentBackend === "string",
+      typeof updates.devLogsEnabled === "boolean",
+    ],
+  );
+  if (!row) throw new Error("Settings upsert failed");
   return toSettingsData(row);
 }

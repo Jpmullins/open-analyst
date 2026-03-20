@@ -203,9 +203,3 @@ export function SubagentCards({ subagents }: { subagents: SubagentData[] }) {
     </div>
   );
 }
-
-// Keep the old export name for backward compatibility
-export function SubagentList({ subagents }: { subagents: Map<string, SubagentData> }) {
-  if (subagents.size === 0) return null;
-  return <SubagentCards subagents={Array.from(subagents.values())} />;
-}

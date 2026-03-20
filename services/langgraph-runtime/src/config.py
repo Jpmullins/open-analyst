@@ -16,6 +16,12 @@ class RuntimeSettings(BaseSettings):
     open_analyst_web_url: str = Field(default="", alias="OPEN_ANALYST_WEB_URL")
     open_analyst_web_port: int = Field(default=5173, alias="OPEN_ANALYST_WEB_PORT")
     project_workspaces_root: str = Field(default="", alias="PROJECT_WORKSPACES_ROOT")
+    artifact_storage_backend: str = Field(default="local", alias="ARTIFACT_STORAGE_BACKEND")
+    artifact_local_dir: str = Field(default="", alias="ARTIFACT_LOCAL_DIR")
+    artifact_s3_bucket: str = Field(default="", alias="ARTIFACT_S3_BUCKET")
+    artifact_s3_region: str = Field(default="us-east-1", alias="ARTIFACT_S3_REGION")
+    artifact_s3_prefix: str = Field(default="open-analyst-vnext", alias="ARTIFACT_S3_PREFIX")
+    artifact_s3_endpoint: str = Field(default="", alias="ARTIFACT_S3_ENDPOINT")
     cors_allowed_origins_raw: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ALLOWED_ORIGINS",

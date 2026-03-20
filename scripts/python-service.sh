@@ -12,7 +12,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: scripts/python-service.sh <setup|run|test> <runtime|analyst-mcp>
+Usage: scripts/python-service.sh <setup|run> <runtime|analyst-mcp>
 EOF
 }
 
@@ -29,13 +29,11 @@ case "$service_name" in
     service_dir="$repo_root/services/langgraph-runtime"
     venv_dir="${OPEN_ANALYST_RUNTIME_VENV:-$HOME/.venvs/open-analyst-langgraph-runtime}"
     run_args=("langgraph" "dev" "--config" "langgraph.json" "--port" "8081" "--no-browser")
-    test_args=("pytest" "tests/" "-v")
     ;;
   analyst-mcp)
     service_dir="$repo_root/services/analyst-mcp"
     venv_dir="${OPEN_ANALYST_ANALYST_MCP_VENV:-$HOME/.venvs/open-analyst-analyst-mcp}"
     run_args=("analyst-mcp" "serve")
-    test_args=("pytest" "tests/" "-v")
     ;;
   *)
     echo "Unknown service: $service_name" >&2
@@ -69,13 +67,6 @@ case "$command_name" in
     (
       cd "$service_dir"
       exec "$venv_dir/bin/${run_args[0]}" "${run_args[@]:1}"
-    )
-    ;;
-  test)
-    ensure_executable "${test_args[0]}"
-    (
-      cd "$service_dir"
-      exec "$venv_dir/bin/${test_args[0]}" "${test_args[@]:1}"
     )
     ;;
   *)

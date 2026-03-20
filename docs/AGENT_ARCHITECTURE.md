@@ -14,6 +14,12 @@ The runtime in [`services/langgraph-runtime`](/home/ubuntu/code/ARLIS/open-analy
 - FastAPI middleware in [`services/langgraph-runtime/src/webapp.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/webapp.py) that normalizes thread metadata, injects server-built runtime context, and handles direct-browser CORS
 - Server-owned context assembly in [`services/langgraph-runtime/src/runtime_context.py`](/home/ubuntu/code/ARLIS/open-analyst/services/langgraph-runtime/src/runtime_context.py)
 
+This split is intentional:
+
+- Agent Server owns durable runtime concerns
+- Deep Agents owns planning and delegation concerns
+- Open Analyst owns app-specific runtime context derivation and product APIs
+
 ## Supervisor (Main Agent)
 
 The supervisor is a thin coordinator. It has only 6 tools:
@@ -72,6 +78,8 @@ The runtime uses `interrupt_on` for high-impact tools:
 
 When interrupted, the LangGraph checkpointer saves state. The browser resumes directly against Agent Server with the persisted thread metadata. The old same-origin runtime proxy no longer exists.
 
+Persisted thread metadata helps routing and resume, but it is not itself the full invocation context. The server still needs to derive typed runtime context for each run entrypoint.
+
 ## Memory Model
 
 ### Short-Term Memory
@@ -120,4 +128,4 @@ The runtime streams typed events:
 - `stage_literature_collection` still uses a custom raw interrupt path and always requires approval; it has not yet been converted to the native HITL tool-policy flow.
 - Researcher and drafter subagents still rely on default Deep Agents filesystem behavior plus prompt discipline; tool-surface restrictions are not yet fully middleware/backend-driven.
 - Server-side runtime-context assembly currently duplicates some app logic for skills/connectors/config discovery. It is functional, but it is still duplicated.
-- Resume/context enrichment is reliable for the web UI path because the UI sends persisted thread metadata. Generic external clients that omit metadata on `/threads/:id/runs*` are not yet rehydrated server-side.
+- Resume/context enrichment is reliable for the web UI path because the UI sends persisted routing metadata. Generic external clients that omit metadata on `/threads/:id/runs*` are not yet rehydrated server-side.

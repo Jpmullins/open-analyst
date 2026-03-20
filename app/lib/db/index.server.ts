@@ -1,6 +1,4 @@
-import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import * as schema from "./schema";
 
 const { Pool } = pg;
 
@@ -20,8 +18,51 @@ function getPool(): pg.Pool {
   return pool;
 }
 
-export const db = drizzle(getPool(), { schema });
+function toCamelCase(value: string): string {
+  return value.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+}
 
-export type Database = typeof db;
+function normalizeRow<T>(row: Record<string, unknown>): T {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [toCamelCase(key), value])
+  ) as T;
+}
+
+type QueryExecutor = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
+
+export async function queryRows<T>(
+  text: string,
+  params: unknown[] = [],
+  executor?: QueryExecutor,
+): Promise<T[]> {
+  const result = await (executor || getPool()).query(text, params);
+  return result.rows.map((row) => normalizeRow<T>(row as Record<string, unknown>));
+}
+
+export async function queryRow<T>(
+  text: string,
+  params: unknown[] = [],
+  executor?: QueryExecutor,
+): Promise<T | undefined> {
+  const rows = await queryRows<T>(text, params, executor);
+  return rows[0];
+}
+
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export type Database = pg.Pool;
 
 export { pool, getPool };

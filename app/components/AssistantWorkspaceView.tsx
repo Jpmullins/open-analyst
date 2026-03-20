@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useMatches, useNavigate, useSearchParams } from "react-router";
-import { BookOpen, BrainCircuit, FlaskConical, PanelRightOpen, Plug, Settings2, Sparkles, Square, Wrench } from "lucide-react";
+import { BookOpen, Bot, BrainCircuit, FlaskConical, ListTodo, PanelRightOpen, Plug, Settings2, ShieldAlert, Sparkles, Square, Wrench } from "lucide-react";
 import { useAnalystStream } from "~/hooks/useAnalystStream";
 import { useAppStore } from "~/lib/store";
 import type { Message } from "~/lib/types";
@@ -16,6 +16,43 @@ interface AssistantWorkspaceViewProps {
   threadMetadata?: {
     collectionId?: string | null;
     analysisMode?: string | null;
+  };
+}
+
+type StreamTodo = {
+  id?: string;
+  title?: string;
+  content?: string;
+  status?: string;
+  actor?: string;
+};
+
+type StreamInterrupt = {
+  value?: Record<string, unknown>;
+  when?: string;
+};
+
+type StreamSubagent = {
+  id?: string;
+  status?: string;
+  toolCall?: {
+    args?: Record<string, unknown>;
+  };
+};
+
+function normalizeTodo(raw: unknown): StreamTodo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const todo = raw as Record<string, unknown>;
+  return {
+    id: typeof todo.id === "string" ? todo.id : undefined,
+    title: typeof todo.title === "string"
+      ? todo.title
+      : typeof todo.content === "string"
+        ? todo.content
+        : undefined,
+    content: typeof todo.content === "string" ? todo.content : undefined,
+    status: typeof todo.status === "string" ? todo.status : undefined,
+    actor: typeof todo.actor === "string" ? todo.actor : undefined,
   };
 }
 
@@ -196,6 +233,42 @@ export function AssistantWorkspaceView({
     if (!val || typeof val !== "object") return null;
     return { type: String(val.type || "tool_approval"), ...val };
   }, [stream.interrupt]);
+  const interruptValues = useMemo(() => {
+    const rawInterrupts = Array.isArray((stream as { interrupts?: unknown }).interrupts)
+      ? ((stream as { interrupts?: unknown[] }).interrupts || [])
+      : interruptValue
+        ? [{ value: interruptValue }]
+        : [];
+    return rawInterrupts
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const interrupt = item as StreamInterrupt;
+        const value = interrupt.value;
+        return value && typeof value === "object"
+          ? { type: String((value as Record<string, unknown>).type || "tool_approval"), ...(value as Record<string, unknown>) }
+          : null;
+      })
+      .filter((item): item is Record<string, unknown> => item !== null);
+  }, [interruptValue, stream]);
+  const planTodos = useMemo(() => {
+    const values = (stream.values || {}) as Record<string, unknown>;
+    const rawTodos = Array.isArray(values.todos)
+      ? values.todos
+      : Array.isArray(values.active_plan)
+        ? values.active_plan
+        : [];
+    return rawTodos.map(normalizeTodo).filter((item): item is StreamTodo => item !== null);
+  }, [stream.values]);
+  const activeSubagents = useMemo(() => {
+    const raw = Array.isArray((stream as { activeSubagents?: unknown }).activeSubagents)
+      ? ((stream as { activeSubagents?: unknown[] }).activeSubagents || [])
+      : [];
+    return raw.filter((item): item is StreamSubagent => !!item && typeof item === "object");
+  }, [stream]);
+  const completedTodoCount = useMemo(
+    () => planTodos.filter((todo) => todo.status === "completed" || todo.status === "complete").length,
+    [planTodos],
+  );
 
   const handleInterruptResume = async (resumeValue: Record<string, unknown>) => {
     setIsResuming(true);
@@ -447,6 +520,99 @@ export function AssistantWorkspaceView({
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+          {(planTodos.length > 0 || activeSubagents.length > 0 || interruptValues.length > 0) ? (
+            <div className="grid gap-4 lg:grid-cols-3">
+              <section className="card p-4 lg:col-span-2">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <ListTodo className="w-4 h-4 text-accent" />
+                    <h2 className="text-sm font-semibold text-text-primary">Active Plan</h2>
+                  </div>
+                  <span className="text-xs text-text-muted">
+                    {completedTodoCount}/{planTodos.length} complete
+                  </span>
+                </div>
+                {planTodos.length > 0 ? (
+                  <div className="space-y-2">
+                    {planTodos.map((todo, index) => {
+                      const status = todo.status || "pending";
+                      const isDone = status === "completed" || status === "complete";
+                      const isRunning = status === "running" || status === "in_progress";
+                      return (
+                        <div
+                          key={todo.id || `${todo.title || "todo"}-${index}`}
+                          className="flex items-start gap-3 rounded-xl border border-border bg-surface px-3 py-2.5"
+                        >
+                          <div className={`mt-0.5 h-2.5 w-2.5 rounded-full ${isDone ? "bg-success" : isRunning ? "bg-accent animate-pulse" : "bg-text-muted/50"}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-text-primary">
+                              {todo.title || todo.content || "Untitled step"}
+                            </p>
+                            <div className="mt-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-text-muted">
+                              <span>{status.replace(/_/g, " ")}</span>
+                              {todo.actor ? <span>{todo.actor}</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-muted">The supervisor has not published a visible plan yet.</p>
+                )}
+              </section>
+
+              <section className="card p-4 space-y-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Bot className="w-4 h-4 text-accent" />
+                    <h2 className="text-sm font-semibold text-text-primary">Parallel Work</h2>
+                  </div>
+                  {activeSubagents.length > 0 ? (
+                    <div className="space-y-2">
+                      {activeSubagents.map((subagent, index) => {
+                        const args = subagent.toolCall?.args || {};
+                        const type = String(args.subagent_type || "agent");
+                        const description = String(args.description || "").trim();
+                        return (
+                          <div key={subagent.id || `${type}-${index}`} className="rounded-xl border border-border bg-surface px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-text-primary">
+                                {type}
+                              </span>
+                              <span className="text-[11px] uppercase tracking-[0.14em] text-accent">
+                                {String(subagent.status || "running").replace(/_/g, " ")}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-text-secondary line-clamp-3">
+                              {description || "Working on a delegated task."}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-muted">No active subagents at the moment.</p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <ShieldAlert className="w-4 h-4 text-accent" />
+                    <h2 className="text-sm font-semibold text-text-primary">Approvals</h2>
+                  </div>
+                  {interruptValues.length > 0 ? (
+                    <div className="rounded-xl border border-warning/30 bg-warning/5 px-3 py-2.5 text-sm text-text-secondary">
+                      {interruptValues.length} pending approval{interruptValues.length === 1 ? "" : "s"} in this run.
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-muted">No pending approvals.</p>
+                  )}
+                </div>
+              </section>
+            </div>
+          ) : null}
+
           {renderedMessages.length === 0 && !stream.isLoading && !stream.isThreadLoading ? (
             <div className="card p-8 text-center">
               <h2 className="text-lg font-semibold mb-2">

@@ -7,7 +7,6 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - `app/`: React Router 7 UI plus same-origin `/api/*` routes
 - `services/langgraph-runtime/`: Deep Agents runtime, LangGraph persistence, retrieval, and orchestration
 - `services/analyst-mcp/`: external literature search, collection, and artifact acquisition service
-- `drizzle/`: SQL migrations for the application database
 - `skills/`: product skills loaded into the runtime
 
 ## Current Product Model
@@ -19,6 +18,7 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - A task record is the persisted chat thread.
 - The runtime is deepagents-first and uses LangGraph checkpoint/store persistence.
 - Analyst MCP is a connector service, not the main runtime.
+- The app shell persists project metadata and per-user UI settings with explicit SQL rather than an ORM/migration layer.
 - Source collection is approval-gated:
   - the runtime stages literature or web-source batches
   - approval from the Sources panel imports them into project documents
@@ -33,7 +33,7 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - `pnpm`
 - Python 3.12+
 - `uv`
-- Docker only if you want local Postgres or the browser test stack
+- Docker only if you want local Postgres
 - A working LiteLLM endpoint
 - PostgreSQL with `pgvector`
 
@@ -60,7 +60,6 @@ Common service defaults:
 ```bash
 pnpm install
 pnpm setup:python
-pnpm db:migrate
 pnpm dev:all
 ```
 
@@ -103,7 +102,7 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 ### Memory
 
 - Short-term thread state: LangGraph checkpoints
-- Durable project memory: LangGraph store plus app memory records
+- Durable project memory: LangGraph store
 - Retrieval corpus: embedded project documents and promoted memories in Postgres/pgvector
 
 ## Recommended AWS Setup
@@ -121,7 +120,6 @@ This repo is already configured to work with an external AWS Postgres database a
 - [Agent Architecture](/home/ubuntu/code/ARLIS/open-analyst/docs/AGENT_ARCHITECTURE.md)
 - [Deployment](/home/ubuntu/code/ARLIS/open-analyst/docs/DEPLOYMENT.md)
 - [Repository Map](/home/ubuntu/code/ARLIS/open-analyst/docs/REPOSITORY_MAP.md)
-- [Validation](/home/ubuntu/code/ARLIS/open-analyst/docs/VALIDATION.md)
 - [Analyst MCP README](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/README.md)
 
 ## Main Commands
@@ -132,9 +130,4 @@ This repo is already configured to work with an external AWS Postgres database a
 - `pnpm dev:all`: full local stack
 - `pnpm build`: production web build
 - `pnpm start`: serve built web app
-- `pnpm db:migrate`: apply Drizzle migrations
-- `pnpm test -- --run`: Vitest once
-- `pnpm test:e2e`: Playwright
-- `pnpm test:runtime`: runtime pytest
-- `pnpm test:analyst-mcp`: Analyst MCP pytest
-- `pnpm lint`: ESLint for the app/tests tree
+- `pnpm lint`: ESLint for the app tree

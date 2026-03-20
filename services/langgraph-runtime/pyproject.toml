@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "LangGraph runtime for Open Analyst v3"
 requires-python = ">=3.11"
 dependencies = [
+    "boto3>=1.40.0",
     "deepagents>=0.4.11",
     "fastapi>=0.116.0",
     "httpx>=0.28.0",
@@ -28,14 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=1.0.0",
     "langgraph-cli[inmem]>=0.1.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]

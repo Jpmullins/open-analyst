@@ -67,19 +67,13 @@ curl "$LITELLM_BASE_URL/models" -H "Authorization: Bearer $LITELLM_API_KEY"
 ## Startup Order
 
 1. Ensure the target database exists.
-2. Apply app migrations:
-
-```bash
-pnpm db:migrate
-```
-
-3. Build Python environments:
+2. Build Python environments:
 
 ```bash
 pnpm setup:python
 ```
 
-4. Start services:
+3. Start services:
 
 ```bash
 pnpm start
@@ -123,5 +117,6 @@ For local development the default assumption is:
 - blank `ARTIFACT_STORAGE_BACKEND` -> local persistence
 - `ARTIFACT_STORAGE_BACKEND=s3` -> S3 persistence
 - project-level overrides can still choose `local` or `s3`
+- Agent runtime project memories remain in LangGraph Store/Postgres; S3 is for shared large files and artifacts
 
 This behavior is intentional and should be preserved across environments.
