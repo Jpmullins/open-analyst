@@ -1059,7 +1059,8 @@ def _system_prompt() -> str:
         "If the request is materially ambiguous or branches into distinct retrieval or drafting strategies, "
         "use task(subagent_type='reviewer') before launching broad work. "
         "If the reviewer finds ambiguity, ask the user a concise clarifying question with numbered recommended options "
-        "and always include a free-form custom option.\n\n"
+        "and always include a free-form custom option. "
+        "For structured deliverables such as ARLIS bulletins, treat missing title/frame, audience, classification, or output expectations as ambiguity and get options in front of the user before drafting.\n\n"
         "## Planning\n"
         "Before beginning any multi-step, retrieval-heavy, or drafting-heavy task, use `write_todos` to create a visible plan. "
         "Do this before the first subagent delegation. Update todos after every major delegation boundary. "
@@ -1068,7 +1069,8 @@ def _system_prompt() -> str:
         "## Filesystem and commands\n"
         "You do NOT have direct filesystem access. Do not use ls, read_file, write_file, "
         "edit_file, glob, grep, or execute. All file operations and command execution "
-        "must be delegated to subagents via task().\n\n"
+        "must be delegated to subagents via task(). "
+        "Do not try to read SKILL.md from the supervisor. Route matched skills to the subagent that carries them.\n\n"
         "## Structured Analytic Techniques (SATs)\n"
         "When performing intelligence analysis, apply structured analytic techniques:\n\n"
         "### For Research and Evidence Gathering\n"
@@ -1093,7 +1095,8 @@ def _system_prompt() -> str:
         "10. task(critic): evaluate draft quality against SAT standards and Four Sweeps\n"
         "11. If critic finds major issues: task(drafter) again with feedback\n"
         "12. task(packager): generate requested deliverable formats\n"
-        "13. task(publisher): publish only after the user approves the product\n\n"
+        "13. task(publisher): publish only after the user approves the product\n"
+        "For file deliverables, especially ARLIS bulletins, a canvas draft alone is not complete. Completion requires a generated workspace file plus capture_artifact or publish_workspace_file so the output appears in project sources/artifacts.\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
         "rather than exhaustive retrieval. Respect provider rate limits by batching or narrowing work when needed. "
@@ -2939,8 +2942,9 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Inspect the task description and identify ambiguity, missing scope, or branching strategies\n"
                 "2. Use project documents, memories, canvas state, and active skills only when they help disambiguate the user's goal\n"
-                "3. If the request is already clear, say so and recommend the next specialist to call\n"
-                "4. If the request is ambiguous, return 2-4 numbered options, clearly mark the recommended option, and explain the tradeoff\n\n"
+                "3. For ARLIS bulletins and similar deliverables, treat missing product framing such as title angle, audience, classification, and desired output path as ambiguity\n"
+                "4. If the request is already clear, say so and recommend the next specialist to call\n"
+                "5. If the request is ambiguous, return 2-4 numbered options, clearly mark the recommended option, and explain the tradeoff\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise review (under 250 words)\n"
                 "- Include: whether clarification is needed, recommended next subagent, and numbered options when relevant\n"
@@ -3064,7 +3068,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "2. Use search_project_documents or read_project_document to retrieve source material if needed\n"
                 "3. Use save_canvas_markdown to create or update drafts\n"
                 "4. Stage the draft for critique or user review in canvas\n"
-                "5. Leave packaging and publishing to the dedicated specialists\n\n"
+                "5. Leave packaging and publishing to the dedicated specialists\n"
+                "6. For ARLIS bulletins, produce the analytic content and hand off packaging. Do not treat the canvas draft as the finished deliverable.\n\n"
                 "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
@@ -3094,7 +3099,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Read the approved canvas or workspace content referenced in the task\n"
                 "2. Use execute_command and packaging skills to produce the requested format\n"
-                "3. Use capture_artifact to register generated files for downstream publication or download\n\n"
+                "3. Use capture_artifact to register generated files for downstream publication or download\n"
+                "4. When the request is an ARLIS bulletin, follow the arlis-bulletin skill end to end: generate the .docx in the project workspace and capture it so it appears in project sources/artifacts\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise packaging summary (under 200 words)\n"
                 "- Include: output format, filenames, artifact locations, and any generation issues\n"
@@ -3111,6 +3117,7 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
             ],
             "middleware": list(subagent_middleware),
             "skills": [
+                "/skills/arlis-bulletin/",
                 "/skills/docx/",
                 "/skills/xlsx/",
                 "/skills/pptx/",

@@ -1,5 +1,6 @@
 import { queryDocuments } from "~/lib/db/queries/documents.server";
 import { parseJsonBody } from "~/lib/request-utils";
+import { normalizeUuid } from "~/lib/uuid";
 import type { Route } from "./+types/api.projects.$projectId.rag.query";
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -14,7 +15,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
   const result = await queryDocuments(params.projectId, query, {
     limit: body.limit,
-    collectionId: body.collectionId,
+    collectionId: normalizeUuid(body.collectionId) || undefined,
   });
   return Response.json(result);
 }

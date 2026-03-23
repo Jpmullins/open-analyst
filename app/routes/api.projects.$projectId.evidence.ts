@@ -1,10 +1,11 @@
 import { createEvidenceItem, listEvidenceItems } from "~/lib/db/queries/evidence.server";
 import { parseJsonBody } from "~/lib/request-utils";
+import { normalizeUuid } from "~/lib/uuid";
 import type { Route } from "./+types/api.projects.$projectId.evidence";
 
 export async function loader({ params, request }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const collectionId = url.searchParams.get("collectionId") || undefined;
+  const collectionId = normalizeUuid(url.searchParams.get("collectionId")) || undefined;
   const evidence = await listEvidenceItems(params.projectId, { collectionId });
   return Response.json({ evidence });
 }
@@ -16,7 +17,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   const evidence = await createEvidenceItem(params.projectId, {
-    collectionId: typeof body.collectionId === "string" ? body.collectionId : null,
+    collectionId: normalizeUuid(body.collectionId),
     documentId: typeof body.documentId === "string" ? body.documentId : null,
     artifactId: typeof body.artifactId === "string" ? body.artifactId : null,
     title: body.title,

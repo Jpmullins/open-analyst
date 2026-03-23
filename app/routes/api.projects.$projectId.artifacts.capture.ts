@@ -12,6 +12,7 @@ import {
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import { sanitizeFilename, inferMimeType, inferExtension } from "~/lib/file-utils";
 import { parseJsonBody } from "~/lib/request-utils";
+import { normalizeUuid } from "~/lib/uuid";
 import type { Route } from "./+types/api.projects.$projectId.artifacts.capture";
 
 async function extractTextFromBuffer(
@@ -155,7 +156,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const collectionName = String(body.collectionName || "Artifacts").trim();
-  const collectionId = String(body.collectionId || "").trim();
+  const collectionId = normalizeUuid(body.collectionId);
   const collection = collectionId
     ? { id: collectionId }
     : await ensureCollection(projectId, collectionName, "Generated artifacts");

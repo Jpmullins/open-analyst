@@ -19,6 +19,7 @@ import {
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import { buildProjectArtifactUrls } from "~/lib/project-storage.server";
 import { sanitizeFilename, inferExtension } from "~/lib/file-utils";
+import { normalizeUuid } from "~/lib/uuid";
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -138,13 +139,14 @@ async function resolveTargetCollection(
   input: { collectionId?: string | null; collectionName?: string | null }
 ) {
   const targetName = String(input.collectionName || "Research Inbox").trim() || "Research Inbox";
-  if (input.collectionId) {
+  const normalizedCollectionId = normalizeUuid(input.collectionId);
+  if (normalizedCollectionId) {
     const batches = await listSourceIngestBatches(projectId);
-    const existing = batches.find((batch) => batch.collectionId === input.collectionId);
+    const existing = batches.find((batch) => batch.collectionId === normalizedCollectionId);
     if (existing?.collectionName) {
-      return { id: input.collectionId, name: existing.collectionName };
+      return { id: normalizedCollectionId, name: existing.collectionName };
     }
-    return { id: input.collectionId, name: targetName };
+    return { id: normalizedCollectionId, name: targetName };
   }
   const collection = await ensureCollection(
     projectId,

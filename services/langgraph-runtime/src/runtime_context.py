@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+from uuid import UUID
 
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -104,6 +105,16 @@ def _trimmed_or_none(value: Any) -> str | None:
     return trimmed or None
 
 
+def _uuid_or_none(value: Any) -> str | None:
+    trimmed = _trimmed_or_none(value)
+    if not trimmed:
+        return None
+    try:
+        return str(UUID(trimmed))
+    except Exception:
+        return None
+
+
 def _json_object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -117,6 +128,38 @@ def _string_list(value: Any) -> list[str]:
         if trimmed:
             items.append(trimmed)
     return items
+
+
+def _normalize_text(value: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+(?:[._-][a-z0-9]+)?", _trimmed(value).lower()))
+
+
+def _extract_message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict) and str(item.get("type") or "").strip() == "text":
+            text = _trimmed(item.get("text"))
+            if text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _latest_user_text(messages: Any) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if _trimmed(message.get("role")).lower() != "user":
+            continue
+        text = _extract_message_text(message.get("content"))
+        if text:
+            return text
+    return ""
 
 
 def get_config_dir() -> Path:
@@ -287,6 +330,9 @@ def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list
                     "description": _trimmed(frontmatter.get("description")),
                     "enabled": False,
                     "tools": _string_list(frontmatter.get("tools")),
+                    "match_phrases": _string_list(frontmatter.get("matchPhrases")),
+                    "deny_phrases": _string_list(frontmatter.get("denyPhrases")),
+                    "file_extensions": _string_list(frontmatter.get("fileExtensions")),
                     "source": {"kind": "repository", "path": str(child)},
                 },
                 stored_by_id,
@@ -295,26 +341,90 @@ def _discover_repository_skills(stored_by_id: dict[str, dict[str, Any]]) -> list
     return discovered
 
 
-def list_active_skills() -> list[dict[str, Any]]:
+def _list_skills_catalog() -> list[dict[str, Any]]:
     stored = _load_json_array(get_config_dir() / "skills.json", DEFAULT_SKILL_RECORDS)
     stored_by_id = {str(item.get("id") or ""): item for item in stored}
     builtin = [_merge_skill(dict(item), stored_by_id) for item in DEFAULT_SKILL_RECORDS]
     repository = _discover_repository_skills(stored_by_id)
-    skills = builtin + repository
+    return builtin + repository
+
+
+def _skill_runtime_summary(skill: dict[str, Any]) -> dict[str, Any]:
+    source = _json_object(skill.get("source"))
+    return {
+        "id": _trimmed(skill.get("id")),
+        "name": _trimmed(skill.get("name")),
+        "description": _trimmed(skill.get("description")),
+        "enabled": bool(skill.get("enabled")),
+        "tools": _string_list(skill.get("tools")),
+        "source_kind": _trimmed_or_none(source.get("kind")),
+        "source": source,
+    }
+
+
+def _match_relevant_repository_skills(
+    skills: list[dict[str, Any]],
+    *,
+    prompt: str = "",
+    messages: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    prompt_text = _trimmed(prompt)
+    full_text = prompt_text or _latest_user_text(messages)
+    normalized_prompt = _normalize_text(prompt_text)
+    normalized_full_text = _normalize_text(full_text)
+    if not normalized_full_text:
+        return []
+
+    scored: list[tuple[int, str, dict[str, Any]]] = []
+    for skill in skills:
+        if _trimmed(skill.get("id")) == "repo-skill-skill-creator":
+            continue
+        source = _json_object(skill.get("source"))
+        if _trimmed(source.get("kind")) != "repository":
+            continue
+
+        score = 0
+        match_phrases = [_normalize_text(item) for item in _string_list(skill.get("match_phrases"))]
+        deny_phrases = [_normalize_text(item) for item in _string_list(skill.get("deny_phrases"))]
+        file_extensions = [
+            item.lower() if str(item).startswith(".") else f".{str(item).lower()}"
+            for item in _string_list(skill.get("file_extensions"))
+        ]
+
+        if any(phrase and phrase in normalized_full_text for phrase in deny_phrases):
+            continue
+
+        for phrase in match_phrases:
+            if phrase and phrase in normalized_full_text:
+                score += 18 if phrase in normalized_prompt else 12
+
+        aliases = {
+            _normalize_text(skill.get("name")),
+            _normalize_text(Path(_trimmed(source.get("path"))).name),
+        }
+        for alias in aliases:
+            if alias and alias in normalized_full_text:
+                score += 14 if alias in normalized_prompt else 10
+
+        lowered_full_text = full_text.lower()
+        for extension in file_extensions:
+            if extension and extension in lowered_full_text:
+                score += 8
+
+        if score > 0:
+            scored.append((score, _trimmed(skill.get("name")) or _trimmed(skill.get("id")), skill))
+
+    scored.sort(key=lambda item: (-item[0], item[1].lower()))
+    return [item[2] for item in scored[:4]]
+
+
+def list_active_skills() -> list[dict[str, Any]]:
+    skills = _list_skills_catalog()
     active: list[dict[str, Any]] = []
     for skill in skills:
         if not skill.get("enabled"):
             continue
-        active.append(
-            {
-                "id": _trimmed(skill.get("id")),
-                "name": _trimmed(skill.get("name")),
-                "description": _trimmed(skill.get("description")),
-                "enabled": True,
-                "tools": _string_list(skill.get("tools")),
-                "source_kind": _json_object(skill.get("source")).get("kind"),
-            }
-        )
+        active.append(_skill_runtime_summary(skill))
     return active
 
 
@@ -363,13 +473,28 @@ class RuntimeContextService:
         collection_id: str | None = None,
         analysis_mode: str | None = None,
         api_base_url: str = "",
+        prompt: str = "",
+        messages: list[dict[str, Any]] | None = None,
     ) -> RuntimeProjectContext:
         project = await self._load_project(project_id)
         if not project:
             raise ValueError(f"Project not found: {project_id}")
         profile = await self._load_project_profile(project_id)
         server_configs = list_mcp_servers()
-        active_skills = [skill for skill in list_active_skills() if skill["id"] != "repo-skill-skill-creator"]
+        raw_skills = [
+            skill
+            for skill in _list_skills_catalog()
+            if _trimmed(skill.get("id")) != "repo-skill-skill-creator"
+        ]
+        all_skills = [_skill_runtime_summary(skill) for skill in raw_skills]
+        active_skills = [skill for skill in all_skills if skill.get("enabled")]
+        matched_skills = _match_relevant_repository_skills(raw_skills, prompt=prompt, messages=messages)
+        pinned_skill_ids = [skill["id"] for skill in active_skills]
+        matched_skill_ids = [
+            _trimmed(skill.get("id"))
+            for skill in matched_skills
+            if _trimmed(skill.get("id")) and _trimmed(skill.get("id")) not in pinned_skill_ids
+        ]
         enabled_connector_ids = [server["id"] for server in server_configs if server.get("enabled")]
         configured_default_connectors = _string_list(profile.get("default_connector_ids"))
         active_connector_ids = configured_default_connectors or enabled_connector_ids
@@ -410,11 +535,11 @@ class RuntimeContextService:
                 }
                 for tool in LOCAL_TOOL_DEFINITIONS
             ],
-            available_skills=active_skills,
-            pinned_skill_ids=[skill["id"] for skill in active_skills],
-            matched_skill_ids=[],
+            available_skills=all_skills,
+            pinned_skill_ids=pinned_skill_ids,
+            matched_skill_ids=matched_skill_ids,
             api_base_url=_trimmed(api_base_url),
-            collection_id=_trimmed_or_none(collection_id),
+            collection_id=_uuid_or_none(collection_id),
         )
 
     async def _load_project(self, project_id: str) -> dict[str, Any] | None:

@@ -1,5 +1,6 @@
 import { queryRow, queryRows } from "../index.server";
 import { type EvidenceItem } from "../schema";
+import { normalizeUuid } from "~/lib/uuid";
 
 function jsonParam(value: unknown, fallback: unknown): string {
   return JSON.stringify(value !== undefined ? value : fallback);
@@ -9,6 +10,7 @@ export async function listEvidenceItems(
   projectId: string,
   options: { collectionId?: string } = {}
 ): Promise<EvidenceItem[]> {
+  const normalizedCollectionId = normalizeUuid(options.collectionId);
   return queryRows<EvidenceItem>(
     `
       SELECT *
@@ -17,7 +19,7 @@ export async function listEvidenceItems(
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
       ORDER BY updated_at DESC
     `,
-    [projectId, options.collectionId ?? null],
+    [projectId, normalizedCollectionId],
   );
 }
 
@@ -37,6 +39,7 @@ export async function createEvidenceItem(
     metadata?: Record<string, unknown>;
   }
 ): Promise<EvidenceItem> {
+  const normalizedCollectionId = normalizeUuid(input.collectionId);
   const item = await queryRow<EvidenceItem>(
     `
       INSERT INTO evidence_items (
@@ -58,7 +61,7 @@ export async function createEvidenceItem(
     `,
     [
       projectId,
-      input.collectionId || null,
+      normalizedCollectionId,
       input.documentId || null,
       input.artifactId || null,
       String(input.title || "Untitled Evidence").trim(),

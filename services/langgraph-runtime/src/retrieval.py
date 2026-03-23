@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import UUID
 
 import httpx
 import psycopg
@@ -33,6 +34,7 @@ class RuntimeRetrievalService:
         if not embedding:
             return []
 
+        normalized_collection_id = self._normalize_uuid(collection_id)
         effective_limit = limit or settings.retrieval_limit
         effective_min_score = min_score if min_score is not None else settings.retrieval_min_score
         vector_literal = self._vector_literal(embedding)
@@ -43,9 +45,9 @@ class RuntimeRetrievalService:
             "query_vector": vector_literal,
             "limit": max(effective_limit * 3, 12),
         }
-        if collection_id:
+        if normalized_collection_id:
             clauses.append("collection_id = %(collection_id)s")
-            params["collection_id"] = collection_id
+            params["collection_id"] = normalized_collection_id
 
         query_sql = f"""
             SELECT
@@ -265,6 +267,15 @@ class RuntimeRetrievalService:
     def _vector_literal(self, embedding: list[float]) -> str:
         normalized = [float(value) for value in embedding if isinstance(value, (int, float))]
         return "[" + ",".join(str(value) for value in normalized) + "]"
+
+    def _normalize_uuid(self, value: str | None) -> str | None:
+        trimmed = str(value or "").strip()
+        if not trimmed:
+            return None
+        try:
+            return str(UUID(trimmed))
+        except Exception:
+            return None
 
     def _snippet(self, content: str, query: str) -> str:
         lowered = content.lower()

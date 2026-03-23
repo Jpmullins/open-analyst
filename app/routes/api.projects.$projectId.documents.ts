@@ -4,11 +4,12 @@ import {
 } from "~/lib/db/queries/documents.server";
 import { refreshDocumentKnowledgeIndex } from "~/lib/knowledge-index.server";
 import { parseJsonBody } from "~/lib/request-utils";
+import { normalizeUuid } from "~/lib/uuid";
 import type { Route } from "./+types/api.projects.$projectId.documents";
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const collectionId = url.searchParams.get("collectionId") || "";
+  const collectionId = normalizeUuid(url.searchParams.get("collectionId"));
   const documents = await listDocuments(
     params.projectId,
     collectionId || undefined

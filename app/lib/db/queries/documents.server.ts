@@ -5,6 +5,7 @@ import {
   embedKnowledgeTexts,
   isKnowledgeEmbeddingConfigured,
 } from "~/lib/knowledge-embedding.server";
+import { normalizeUuid } from "~/lib/uuid";
 
 function jsonParam(value: unknown, fallback: unknown): string {
   return JSON.stringify(value && typeof value === "object" ? value : fallback);
@@ -124,6 +125,7 @@ export async function getCollectionDocumentCounts(projectId: string): Promise<Re
 // --- Documents ---
 
 export async function listDocuments(projectId: string, collectionId?: string): Promise<Document[]> {
+  const normalizedCollectionId = normalizeUuid(collectionId);
   return queryRows<Document>(
     `
       SELECT *
@@ -132,7 +134,7 @@ export async function listDocuments(projectId: string, collectionId?: string): P
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
       ORDER BY updated_at DESC
     `,
-    [projectId, collectionId ?? null],
+    [projectId, normalizedCollectionId ?? null],
   );
 }
 
@@ -180,6 +182,7 @@ export async function createDocument(
     metadata?: Record<string, unknown>;
   }
 ): Promise<Document> {
+  const normalizedCollectionId = normalizeUuid(input.collectionId);
   const doc = await queryRow<Document>(
     `
       INSERT INTO documents (
@@ -197,7 +200,7 @@ export async function createDocument(
     `,
     [
       projectId,
-      input.collectionId || null,
+      normalizedCollectionId,
       String(input.title || "Untitled Source").trim(),
       String(input.sourceType || "manual"),
       String(input.sourceUri || ""),
@@ -226,7 +229,7 @@ export async function updateDocument(
   const clauses: string[] = ["updated_at = NOW()"];
   const params: unknown[] = [];
   if (input.collectionId !== undefined) {
-    params.push(input.collectionId || null);
+    params.push(normalizeUuid(input.collectionId));
     clauses.push(`collection_id = $${params.length}`);
   }
   if (input.title !== undefined) {
@@ -421,9 +424,10 @@ export async function queryDocuments(
   query: string,
   options: { limit?: number; collectionId?: string } = {}
 ): Promise<RagQueryResult> {
+  const normalizedCollectionId = normalizeUuid(options.collectionId);
   const limit = Math.min(20, Math.max(1, Number(options.limit || 8)));
   const variants = buildQueryVariants(query);
-  const totalCandidates = await countDocuments(projectId, options.collectionId);
+  const totalCandidates = await countDocuments(projectId, normalizedCollectionId || undefined);
   const semanticQueryText = buildKnowledgeEmbeddingText({
     title: query,
     content: query,
@@ -445,7 +449,7 @@ export async function queryDocuments(
       }
       const vectorRows = await queryDocumentsByVector(projectId, queryEmbedding, {
         limit,
-        collectionId: options.collectionId,
+        collectionId: normalizedCollectionId || undefined,
       });
       return {
         query,
@@ -476,7 +480,7 @@ export async function queryDocuments(
 
   const fallbackRows = await queryDocumentsByTextFallback(projectId, variants, {
     limit,
-    collectionId: options.collectionId,
+    collectionId: normalizedCollectionId || undefined,
   });
 
   return {
@@ -508,6 +512,7 @@ async function queryDocumentsByVector(
   metadata: unknown;
   score: number;
 }>> {
+  const normalizedCollectionId = normalizeUuid(options.collectionId);
   const normalized = normalizeEmbedding(embedding);
   if (!normalized.length) return [];
   const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
@@ -535,7 +540,7 @@ async function queryDocumentsByVector(
       ORDER BY embedding_vector <=> $2::vector
       LIMIT $4
     `,
-    [projectId, vectorLiteral, options.collectionId ?? null, limit],
+    [projectId, vectorLiteral, normalizedCollectionId, limit],
   );
   return rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
 }
@@ -552,11 +557,12 @@ async function queryDocumentsByTextFallback(
   metadata: unknown;
   score: number;
 }>> {
+  const normalizedCollectionId = normalizeUuid(options.collectionId);
   const limit = Math.min(50, Math.max(1, Number(options.limit || 8)));
   const terms = variants.map((variant) => variant.trim()).filter(Boolean).slice(0, 6);
   if (!terms.length) return [];
 
-  const params: unknown[] = [projectId, options.collectionId ?? null];
+  const params: unknown[] = [projectId, normalizedCollectionId];
   const searchPredicates = terms.map((term) => {
     params.push(`%${term}%`, `%${term}%`);
     const start = params.length - 1;
@@ -611,6 +617,7 @@ async function queryDocumentsByTextFallback(
 }
 
 async function countDocuments(projectId: string, collectionId?: string): Promise<number> {
+  const normalizedCollectionId = normalizeUuid(collectionId);
   const row = await queryRow<{ count: number }>(
     `
       SELECT count(*)::int AS count
@@ -618,7 +625,7 @@ async function countDocuments(projectId: string, collectionId?: string): Promise
       WHERE project_id = $1
         AND ($2::uuid IS NULL OR collection_id = $2::uuid)
     `,
-    [projectId, collectionId ?? null],
+    [projectId, normalizedCollectionId],
   );
   return Number(row?.count || 0);
 }

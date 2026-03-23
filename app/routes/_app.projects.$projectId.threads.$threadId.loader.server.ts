@@ -1,5 +1,6 @@
 import { redirect } from "react-router";
 import { env } from "~/lib/env.server";
+import { normalizeUuid } from "~/lib/uuid";
 import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
@@ -35,9 +36,7 @@ export async function loader({
       workspaceContext,
       threadMetadata: {
         collectionId:
-          typeof metadata.collection_id === "string" && metadata.collection_id.trim()
-            ? metadata.collection_id.trim()
-            : null,
+          normalizeUuid(metadata.collection_id),
         analysisMode:
           typeof metadata.analysis_mode === "string" && metadata.analysis_mode.trim()
             ? metadata.analysis_mode.trim()

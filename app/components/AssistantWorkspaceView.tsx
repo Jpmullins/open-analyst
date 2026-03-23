@@ -12,6 +12,7 @@ import {
 import { useAnalystStream } from "~/hooks/useAnalystStream";
 import { useAppStore } from "~/lib/store";
 import type { Message } from "~/lib/types";
+import { normalizeUuid } from "~/lib/uuid";
 import type { WorkspaceContextData } from "~/lib/workspace-context.server";
 import { InterruptCard } from "./InterruptCard";
 import { MessageCard } from "./MessageCard";
@@ -256,9 +257,11 @@ export function AssistantWorkspaceView({
     return `${connectorCount} connectors, ${skillCount} skills, ${memoryCount} memories active in project context`;
   }, [workspaceContext]);
   const analysisMode = deepResearch ? "deep_research" : "chat";
-  const resolvedCollectionId = initialAgentThreadId
-    ? activeCollectionId ?? threadMetadata?.collectionId ?? null
-    : activeCollectionId;
+  const resolvedCollectionId = normalizeUuid(
+    initialAgentThreadId
+      ? activeCollectionId ?? threadMetadata?.collectionId ?? null
+      : activeCollectionId
+  );
   const resolvedAnalysisMode = initialAgentThreadId
     ? (threadMetadata?.analysisMode || "chat")
     : analysisMode;

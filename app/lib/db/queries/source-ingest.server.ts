@@ -3,6 +3,7 @@ import {
   type SourceIngestBatch,
   type SourceIngestItem,
 } from "../schema";
+import { normalizeUuid } from "~/lib/uuid";
 
 export type SourceIngestBatchWithItems = SourceIngestBatch & {
   items: SourceIngestItem[];
@@ -107,6 +108,7 @@ export async function createSourceIngestBatch(
     }>;
   }
 ): Promise<SourceIngestBatchWithItems> {
+  const normalizedCollectionId = normalizeUuid(input.collectionId);
   const batch = await queryRow<SourceIngestBatch>(
     `
       INSERT INTO source_ingest_batches (
@@ -126,7 +128,7 @@ export async function createSourceIngestBatch(
     `,
     [
       projectId,
-      input.collectionId || null,
+      normalizedCollectionId,
       String(input.collectionName || "Research Inbox").trim(),
       String(input.origin || "literature").trim(),
       String(input.status || "staged").trim(),
@@ -192,7 +194,7 @@ export async function updateSourceIngestBatch(
   const clauses: string[] = ["updated_at = NOW()"];
   const params: unknown[] = [];
   if (updates.collectionId !== undefined) {
-    params.push(updates.collectionId);
+    params.push(normalizeUuid(updates.collectionId));
     clauses.push(`collection_id = $${params.length}`);
   }
   if (updates.collectionName !== undefined) {
