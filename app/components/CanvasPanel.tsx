@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRevalidator } from "react-router";
 import { FilePlus2, GripVertical, Save, Upload, X } from "lucide-react";
 import {
   headlessCreateCanvasDocument,
@@ -29,6 +30,7 @@ function getInitialNavWidth() {
 }
 
 export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
+  const { revalidate } = useRevalidator();
   const [documents, setDocuments] = useState<HeadlessCanvasDocument[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -186,6 +188,7 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
           body: JSON.stringify({
             addToSources: publishToSources,
             changeSummary: "Published from canvas",
+            collectionName: publishToSources ? "Reports" : undefined,
           }),
         }
       );
@@ -193,7 +196,12 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
         throw new Error("Failed to publish canvas document");
       }
       await refreshDocuments(activeDocument.id);
-      setStatusText(publishToSources ? "Published to artifact storage and added to sources." : "Published to artifact storage.");
+      revalidate();
+      setStatusText(
+        publishToSources
+          ? "Published to artifact storage and added to Reports."
+          : "Published to artifact storage."
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatusText(`Publish failed: ${message}`);
@@ -254,7 +262,7 @@ export function CanvasPanel({ projectId, onClose }: CanvasPanelProps) {
             checked={publishToSources}
             onChange={(event) => setPublishToSources(event.target.checked)}
           />
-          Add published copy to sources
+          Add published copy to Reports
         </label>
       </div>
 

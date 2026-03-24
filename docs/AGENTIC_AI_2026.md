@@ -2,135 +2,80 @@
 
 ## Summary
 
-Open Analyst treats agentic AI as a runtime architecture, not a prompt style.
+Open Analyst treats agentic AI as runtime behavior, not as a thin chat prompt.
 
-A deeply agentic system has all of the following:
+A capable analyst system needs:
 
-- perception over real environment signals
+- perception over project state and external evidence
 - reasoning and multistep planning
-- short-term and long-term memory
+- durable short-term and long-term memory
 - tool-based action
 - explicit goal tracking
-- adaptation from outcomes and feedback
-- collaboration with users and specialist agents
+- adaptation from feedback and approvals
+- collaboration between a supervisor, specialist agents, and the user
 
-This is the standard for the repo.
+## Working Definition
 
-## 2026 Working Definition
-
-The 2026 ecosystem has mostly converged on the same split:
+The current ecosystem has converged on a practical split:
 
 - the model handles reasoning, synthesis, and tool selection
-- the runtime handles durable execution, state, checkpoints, streaming, and interrupts
-- the agent harness handles planning, delegation, memory usage, and tool orchestration
+- the runtime handles execution state, streaming, checkpoints, and interrupts
+- the agent harness handles planning, delegation, memory use, and tool policy
 
-That means a modern agent is not just "chat plus function calling." It is a goal-oriented system that can:
+That means a modern agent is not just chat plus function calls. It is a durable, tool-using, stateful system.
 
-- inspect its environment
-- create and revise plans
-- use tools repeatedly
-- persist progress across turns
-- recover from interruptions
-- delegate work to specialized actors
-- store and recall prior findings
-
-## What Counts As Agentic Versus Non-Agentic
-
-### Reactive chatbot
-
-- single-turn or lightly threaded conversation
-- optional tool calls
-- little or no durable execution
-- little or no explicit planning
-
-### Tool-calling assistant
-
-- can invoke APIs or tools
-- may still be mostly reactive
-- usually lacks durable state, subagents, and goal tracking
-
-### Durable agent runtime
-
-- threads, runs, checkpoints, interrupts, and persistence
-- context and state passed through a runtime contract
-- can survive retries, resumes, and long workflows
-
-### Deep agent harness
-
-- explicit planning
-- subagent delegation
-- memory management
-- context compaction
-- stronger control over tool surfaces and autonomy
-
-Open Analyst is targeting the last two categories together.
-
-## Mapping This To Open Analyst
+## What This Means In Open Analyst
 
 ### Perception
 
-Open Analyst agents perceive through:
+Open Analyst perceives through:
 
 - user prompts and thread history
 - typed runtime context derived from project state
-- project retrieval over indexed documents and memories
-- Analyst MCP tools for external literature and acquisition
-- workspace files and app APIs when delegated subagents need them
-
-### Cognition and reasoning
-
-The supervisor should:
-
-- interpret the goal
-- create or update a plan
-- choose when to delegate
-- decide when retrieval is needed
-- synthesize only after evidence is sufficient
-
-Subagents should isolate context and focus on bounded roles such as research, drafting, or critique.
+- retrieval over project documents and memories
+- Analyst MCP literature and acquisition tools
+- delegated file and command work when packaging is required
 
 ### Memory
 
-Open Analyst uses multiple memory layers:
+Open Analyst uses layered memory:
 
 - short-term memory: Agent Server thread history and checkpoints
-- long-term memory: LangGraph store-backed memories and project memory records
-- retrieval memory: pgvector-backed project documents plus stored memories and captured artifacts
+- long-term memory: LangGraph store-backed project memories
+- retrieval memory: pgvector-backed documents, reports, and promoted memories
 
 ### Action
 
-Action happens through tools, not hidden prompts. That includes:
+Action happens through explicit tools:
 
-- retrieval and search
-- MCP calls
-- artifact and canvas operations
-- controlled filesystem and command execution through subagents
-- HITL-gated publishing or command execution
+- search and retrieval
+- source approval and import
+- canvas editing
+- artifact capture
+- report publication
+- delegated command execution when packaging is necessary
 
-### Planning and adaptation
+### Planning
 
-Planning should be explicit. The runtime should preserve enough structure for the agent to:
+Open Analyst uses explicit structured modes rather than a single undifferentiated interaction policy:
 
-- show progress
-- recover after interruption
-- revise plans when evidence changes
-- capture useful outcomes into memory
+- `Chat` for lightweight conversation
+- `Research` for evidence gathering and synthesis
+- `Product` for planning, drafting, packaging, and publishing
 
-## Architectural Implications For Open Analyst
+That keeps the product conversational without losing workflow rigor.
+
+## Architectural Implications
 
 ### Agent Server-first
 
 Agent Server should remain the owner of:
 
-- assistants
 - threads
 - runs
 - checkpoints
 - streaming
 - interrupts and resume
-- persistent store access
-
-The app should not rebuild a parallel chat runtime around it.
 
 ### Deep Agents-first
 
@@ -139,37 +84,26 @@ Deep Agents should remain the owner of:
 - planning
 - subagent delegation
 - memory usage patterns
+- context compaction
 - tool orchestration
-- context compaction and internal work loops
 
-The app should not flatten this into a single chat agent unless a feature explicitly requires it.
+### Server-built context
 
-### Context contract
-
-This is the key rule for the current architecture:
-
-- thread state is persisted
-- thread metadata is persisted
-- runtime context is invocation-scoped
-
-So app-specific runtime context is not automatically recovered just because a thread exists. If the graph requires typed context, the server must derive or inject that context on every run entrypoint.
-
-For Open Analyst, the browser should send lightweight routing metadata such as:
+The browser should send lightweight routing metadata such as:
 
 - `project_id`
 - `collection_id`
 - `analysis_mode`
 
-The server should expand those identifiers into the full typed runtime context for the graph.
+The server should expand those identifiers into the full invocation context.
 
 ## Anti-Patterns To Avoid
 
-- Rebuilding a same-origin chat proxy instead of using Agent Server directly
-- Treating thread metadata as a substitute for required graph context
-- Letting the browser be the source of truth for full runtime context
-- Giving the supervisor broad filesystem powers when delegation should provide tool isolation
-- Allowing research flows to wander the repo or filesystem instead of preferring retrieval and MCP tools
-- Keeping migration-only compatibility layers after the new runtime path is established
+- rebuilding a parallel assistant runtime in the web app
+- treating thread metadata as the full runtime context
+- letting the browser become the source of truth for execution state
+- giving the supervisor broad filesystem powers when delegation should isolate tool use
+- duplicating execution paths that drift from the supported workspace model
 
 ## Sources
 
@@ -178,4 +112,3 @@ The server should expand those identifiers into the full typed runtime context f
 - Agent Server API groups: https://docs.langchain.com/langsmith/server-api-ref
 - LangChain runtime context semantics: https://docs.langchain.com/oss/javascript/langchain/runtime
 - Custom context semantics: https://docs.langchain.com/oss/javascript/langchain/middleware/custom
-- Runtime context in LangChain v1 migration docs: https://docs.langchain.com/oss/python/migrate/langchain-v1

@@ -23,7 +23,6 @@ function defaultSkillRecords(): SkillConfig[] {
       enabled: true,
       config: {
         tools: [
-          'deep_research',
           'web_search',
           'web_fetch',
           'hf_daily_papers',
@@ -74,12 +73,11 @@ function builtinRuntimeSkills(): Skill[] {
     {
       id: 'builtin-web-research',
       name: 'Web Research',
-      description: 'Web search, fetch, and deep research workflow',
+      description: 'Web search, fetch, and paper capture workflow',
       type: 'builtin',
       enabled: true,
       createdAt: ts,
       tools: [
-        'deep_research',
         'web_search',
         'web_fetch',
         'hf_daily_papers',

@@ -1,32 +1,41 @@
+<p align="center">
+  <img src="resources/logo-open-analyst.svg" alt="Open Analyst" width="180" />
+</p>
+
 # Open Analyst
 
-Open Analyst is a chat-first research workspace built around a Deep Agents runtime, a React Router web app, AWS-backed persistence, and project-scoped artifact storage.
+Open Analyst is a chat-first research and reporting workspace built around a React Router app, a LangGraph/Deep Agents runtime, and an Analyst MCP acquisition service.
 
-## What Runs In This Repo
+## Product Model
 
-- `app/`: React Router 7 UI plus same-origin `/api/*` routes
-- `services/langgraph-runtime/`: Deep Agents runtime, LangGraph persistence, retrieval, and orchestration
-- `services/analyst-mcp/`: external literature search, collection, and artifact acquisition service
-- `skills/`: product skills loaded into the runtime
+The product is a single project workspace with three coordinated surfaces:
 
-## Current Product Model
+- left sidebar for projects, collections, settings, skills, and memory
+- center chat thread for the active conversation
+- right dock for `Sources`, `Canvas`, and artifact preview
 
-- The primary user surface is a project workspace with:
-  - center chat thread
-  - left control/navigation panel
-  - right context panel for canvas, source preview, and artifacts
-- A task record is the persisted chat thread.
-- The runtime is deepagents-first and uses LangGraph checkpoint/store persistence.
-- Analyst MCP is a connector service, not the main runtime.
-- The app shell persists project metadata and per-user UI settings with explicit SQL rather than an ORM/migration layer.
-- Source collection is approval-gated:
-  - retriever branches collect literature candidates in parallel
-  - the supervisor presents one consolidated approval to the user
-  - approved literature imports are executed in chunks so larger source sets do not block on one monolithic resume payload
-  - direct web-source staging still uses a per-source approval path
-  - imported files are stored in the configured artifact backend and indexed for retrieval
-- Captured workspace files now create real `artifacts` and `artifact_versions` records.
-- The runtime applies model-call admission control and retry/fallback middleware to reduce Bedrock/LiteLLM throttling failures.
+There are three explicit runtime modes:
+
+- `Chat`: lightweight conversation with read-only project context
+- `Research`: structured retrieval, approvals, and synthesis
+- `Product`: structured planning, drafting, packaging, and publishing
+
+The primary end-to-end workflow is:
+
+1. research a topic into a project collection
+2. approve and import sources
+3. take notes in canvas
+4. analyze sources and notes
+5. plan and draft a deliverable
+6. package and publish the result to `Reports`
+
+## Repo Layout
+
+- `app/`: React Router UI and same-origin product APIs
+- `services/langgraph-runtime/`: LangGraph Agent Server runtime and Deep Agents orchestration
+- `services/analyst-mcp/`: literature search, collection, and acquisition service
+- `skills/`: runtime skill bundles
+- `docs/`: architecture, deployment, and repository reference
 
 ## Quick Start
 
@@ -36,9 +45,9 @@ Open Analyst is a chat-first research workspace built around a Deep Agents runti
 - `pnpm`
 - Python 3.12+
 - `uv`
-- Docker only if you want local Postgres
-- A working LiteLLM endpoint
 - PostgreSQL with `pgvector`
+- a working LiteLLM endpoint
+- Docker only if you want local Postgres
 
 ### Environment
 
@@ -51,26 +60,12 @@ Copy [`.env.example`](/home/ubuntu/code/ARLIS/open-analyst/.env.example) to [`.e
 - `LITELLM_EMBEDDING_MODEL`
 - `ANALYST_MCP_API_KEY`
 
-Common service defaults:
+Common local defaults:
 
 - `LANGGRAPH_RUNTIME_URL=http://localhost:8081`
 - `ANALYST_MCP_BASE_URL=http://localhost:8000`
-- blank `ARTIFACT_STORAGE_BACKEND` means local project storage
-- `ARTIFACT_STORAGE_BACKEND=s3` enables S3-backed artifacts
-
-Useful runtime throttling controls:
-
-- `LITELLM_FALLBACK_CHAT_MODELS`
-- `CHAT_RETRY_MAX_RETRIES`
-- `CHAT_RETRY_INITIAL_DELAY_SECONDS`
-- `CHAT_RETRY_BACKOFF_FACTOR`
-- `CHAT_RETRY_MAX_DELAY_SECONDS`
-- `CHAT_RATE_LIMIT_RPS`
-- `CHAT_RATE_LIMIT_CHECK_EVERY_SECONDS`
-- `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
-- `CHAT_MAX_CONCURRENT_REQUESTS`
-
-If `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default request-rate and concurrency limits even when the optional knobs above are unset.
+- blank `ARTIFACT_STORAGE_BACKEND` for local file storage
+- `ARTIFACT_STORAGE_BACKEND=s3` for S3-backed storage
 
 ### Start The Stack
 
@@ -99,37 +94,28 @@ curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/capabilities
 
 ### Database
 
-- The web app uses `DATABASE_URL`.
-- The runtime uses the same database for:
-  - app tables
-  - LangGraph checkpointer state
-  - LangGraph store-backed long-term memory
-- Analyst MCP uses `ANALYST_MCP_POSTGRES_DSN` and falls back to `DATABASE_URL` if omitted.
+- the web app uses `DATABASE_URL`
+- the runtime uses the same database for application tables, LangGraph checkpoints, and LangGraph store-backed memory
+- Analyst MCP uses `ANALYST_MCP_POSTGRES_DSN` and falls back to `DATABASE_URL` if omitted
 
-### Artifacts And Files
+### Files And Artifacts
 
-- If `ARTIFACT_STORAGE_BACKEND` is blank, project artifacts persist locally.
-- If `ARTIFACT_STORAGE_BACKEND=s3`, project artifacts persist to S3.
-- Project-level overrides can still choose local or S3 independently.
-- The current AWS convention is a fresh prefix such as `open-analyst-vnext/<project-slug>/...`.
-- Generated files captured from the workspace are stored as versioned artifacts first.
-- Sources can optionally mirror stored files into `documents` for indexing and retrieval.
-- The UI serves source and artifact previews through same-origin content routes rather than direct storage URLs.
+- local storage is used when `ARTIFACT_STORAGE_BACKEND` is blank
+- S3 storage is used when `ARTIFACT_STORAGE_BACKEND=s3`
+- sources are imported into project documents for retrieval and preview
+- generated files are captured as versioned artifacts
+- published reports appear in the `Reports` collection
 
-### Memory
+## Main Commands
 
-- Short-term thread state: LangGraph checkpoints
-- Durable project memory: LangGraph store
-- Retrieval corpus: embedded project documents and promoted memories in Postgres/pgvector
-
-## Recommended AWS Setup
-
-- RDS Postgres database dedicated to this runtime
-- `pgvector` enabled
-- S3 bucket with a dedicated prefix for this branch/runtime
-- LiteLLM reachable from both the web app and the runtime
-
-This repo is already configured to work with an external AWS Postgres database and S3 bucket. Local Docker Postgres is optional, not required.
+- `pnpm dev`: web app
+- `pnpm dev:runtime`: runtime
+- `pnpm dev:analyst-mcp`: Analyst MCP
+- `pnpm dev:all`: full local stack
+- `pnpm build`: production web build
+- `pnpm start`: serve the built web app
+- `pnpm lint`: ESLint for `app/**/*.ts(x)`
+- `pnpm format`: Prettier for app code and root Markdown
 
 ## Documentation
 
@@ -139,12 +125,8 @@ This repo is already configured to work with an external AWS Postgres database a
 - [Repository Map](/home/ubuntu/code/ARLIS/open-analyst/docs/REPOSITORY_MAP.md)
 - [Analyst MCP README](/home/ubuntu/code/ARLIS/open-analyst/services/analyst-mcp/README.md)
 
-## Main Commands
+## License
 
-- `pnpm dev`: web app only
-- `pnpm dev:runtime`: Deep Agents runtime only
-- `pnpm dev:analyst-mcp`: Analyst MCP only
-- `pnpm dev:all`: full local stack
-- `pnpm build`: production web build
-- `pnpm start`: serve built web app
-- `pnpm lint`: ESLint for the app tree
+Open Analyst is released under the [MIT License](/home/ubuntu/code/ARLIS/open-analyst/LICENSE).
+
+Some bundled third-party skill materials keep their own license files under `skills/*/LICENSE.txt`. Those notices apply to the bundled third-party materials themselves.

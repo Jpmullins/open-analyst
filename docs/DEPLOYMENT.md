@@ -2,10 +2,10 @@
 
 ## Production Topology
 
-Run three processes or containers:
+Run three services:
 
 - web app
-- Deep Agents runtime
+- LangGraph runtime
 - Analyst MCP
 
 All three should share access to:
@@ -51,54 +51,51 @@ Common optional values:
 - `CHAT_RATE_LIMIT_MAX_BUCKET_SIZE`
 - `CHAT_MAX_CONCURRENT_REQUESTS`
 
-## AWS Recommendation
+## Recommended Infrastructure
 
 ### Postgres
 
-- use a dedicated RDS database for this runtime
+- use a dedicated Postgres instance
 - enable `pgvector`
 - allow the web app, runtime, and Analyst MCP to reach it
 
-### S3
+### Object Storage
 
-- use a dedicated prefix, for example `open-analyst-vnext/`
-- keep project artifacts, source files, and captured outputs under that prefix
+- use local storage for simple local development
+- use S3 for shared or production deployments
+- keep project artifacts, imported sources, and published outputs under a dedicated prefix
 
 ### LiteLLM
 
-- the runtime depends on a working chat endpoint and embedding endpoint
-- the runtime now adds shared admission control and transient retry/fallback handling around model calls
-- if `LITELLM_CHAT_MODEL` contains `bedrock`, the runtime applies conservative default request-rate and concurrency limits even if the optional `CHAT_*` knobs are unset
-- verify both before debugging runtime behavior:
+- both the runtime and Analyst MCP depend on working chat and embedding endpoints
+- the runtime adds admission control, retries, and fallback handling around model calls
+
+Verify the endpoint before debugging higher-level behavior:
 
 ```bash
 curl "$LITELLM_BASE_URL/models" -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 
-## Startup Order
+## Startup
 
-1. Ensure the target database exists.
-2. Build Python environments:
+### Local development
 
 ```bash
+pnpm install
 pnpm setup:python
+pnpm dev:all
 ```
 
-3. Start services:
+### Production-style web app
 
 ```bash
+pnpm install
+pnpm setup:python
+pnpm build
 pnpm start
 pnpm dev:runtime
 pnpm dev:analyst-mcp
 ```
-
-Or use:
-
-```bash
-pnpm dev:all
-```
-
-for a single local command.
 
 ## Health Checks
 
@@ -109,25 +106,25 @@ curl http://localhost:8000/health
 curl -H "x-api-key: $ANALYST_MCP_API_KEY" http://localhost:8000/api/health/details
 ```
 
-## Direct Browser Runtime Access
+## Browser To Runtime Connectivity
 
-The browser now talks directly to Agent Server for chat threads and streaming. That means:
+The browser talks directly to Agent Server for threads, runs, streaming, interrupts, and resume.
 
-- `LANGGRAPH_RUNTIME_URL` must point the web app at the public Agent Server origin.
-- Agent Server must allow the web app origin through CORS.
-- `OPEN_ANALYST_WEB_URL` is the safest way to tell Agent Server which app origin to use when building `api_base_url` for app-owned product routes.
+That means:
 
-For local development the default assumption is:
+- `LANGGRAPH_RUNTIME_URL` must point the web app at the reachable Agent Server origin
+- Agent Server must allow the web app origin through CORS
+- `OPEN_ANALYST_WEB_URL` should point the runtime back to the web app origin for product API callbacks
 
-- web app on `http://localhost:5173`
-- Agent Server on `http://localhost:8081`
-- Analyst MCP on `http://localhost:8000`
+Default local assumptions:
+
+- web app: `http://localhost:5173`
+- runtime: `http://localhost:8081`
+- Analyst MCP: `http://localhost:8000`
 
 ## Storage Behavior
 
-- blank `ARTIFACT_STORAGE_BACKEND` -> local persistence
-- `ARTIFACT_STORAGE_BACKEND=s3` -> S3 persistence
-- project-level overrides can still choose `local` or `s3`
-- Agent runtime project memories remain in LangGraph Store/Postgres; S3 is for shared large files and artifacts
-
-This behavior is intentional and should be preserved across environments.
+- blank `ARTIFACT_STORAGE_BACKEND`: local persistence
+- `ARTIFACT_STORAGE_BACKEND=s3`: S3 persistence
+- project-level overrides can still select local or S3
+- long-term memory stays in Postgres; large files and generated outputs live in artifact storage

@@ -232,6 +232,53 @@ class SupervisorToolGuard(AgentMiddleware if AgentMiddleware is not None else ob
         return await handler(request)
 
 
+class ModeToolGuard(AgentMiddleware if AgentMiddleware is not None else object):
+    """Restrict supervisor behavior by interaction mode."""
+
+    CHAT_BLOCKED_TOOLS = {"task", "write_todos", "approve_collected_literature", "propose_project_memory"}
+
+    def _analysis_mode(self, request: Any) -> str:
+        runtime = getattr(request, "runtime", None)
+        cfg = _get_project_config(runtime)
+        return _normalize_analysis_mode(cfg.get("analysis_mode"))
+
+    def _block(self, request: Any, reason: str) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "tool")
+        tool_call_id = str(getattr(request, "tool_call", {}).get("id") or f"blocked-{tool_name}")
+        return ToolMessage(
+            content=reason,
+            name=tool_name,
+            tool_call_id=tool_call_id,
+            status="error",
+        )
+
+    def wrap_tool_call(self, request: Any, handler: Any) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
+        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
+            return self._block(
+                request,
+                (
+                    f"{tool_name} is disabled in Chat mode. "
+                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
+                    "or Product mode for drafting and publication."
+                ),
+            )
+        return handler(request)
+
+    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+        tool_name = str(getattr(request, "tool_call", {}).get("name") or "")
+        if ToolMessage is not None and self._analysis_mode(request) == "chat" and tool_name in self.CHAT_BLOCKED_TOOLS:
+            return self._block(
+                request,
+                (
+                    f"{tool_name} is disabled in Chat mode. "
+                    "Chat mode is conversational and read-only. Switch to Research mode for structured retrieval "
+                    "or Product mode for drafting and publication."
+                ),
+            )
+        return await handler(request)
+
+
 class ResilientModelMiddleware(AgentMiddleware if AgentMiddleware is not None else object):
     """Add client-side admission control and graceful retry/fallback for transient model failures.
 
@@ -321,6 +368,15 @@ def _get_project_config(runtime: Any | None = None) -> dict[str, Any]:
     return context if context else {}
 
 
+def _normalize_analysis_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode == "product":
+        return "product"
+    if mode == "research":
+        return "research"
+    return "chat"
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
@@ -365,11 +421,31 @@ def _active_skill_summaries(cfg: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "project": cfg.get("project_name", ""),
-        "current_date": cfg.get("current_date", ""),
-        "connectors": cfg.get("active_connector_ids", []),
-        "direct_tools": [
+    analysis_mode = _normalize_analysis_mode(cfg.get("analysis_mode"))
+    direct_tools = [
+        {
+            "name": "search_project_documents",
+            "description": "Search indexed project documents already in the store.",
+        },
+        {
+            "name": "search_project_memories",
+            "description": "Search promoted long-term project memories.",
+        },
+        {
+            "name": "list_active_skills",
+            "description": "List the currently active skill packs.",
+        },
+        {
+            "name": "describe_runtime_capabilities",
+            "description": "Describe direct tools, subagents, connectors, and skills for this thread.",
+        },
+        {
+            "name": "list_canvas_documents",
+            "description": "Inspect existing canvas documents in the project.",
+        },
+    ]
+    if analysis_mode != "chat":
+        direct_tools = [
             {
                 "name": "task",
                 "description": "Delegate specialized work to a subagent. Use this for research, drafting, review, and source collection.",
@@ -378,31 +454,18 @@ def _runtime_capabilities_payload(cfg: dict[str, Any]) -> dict[str, Any]:
                 "name": "write_todos",
                 "description": "Create and update a visible plan for the current task.",
             },
-            {
-                "name": "search_project_documents",
-                "description": "Search indexed project documents already in the store.",
-            },
-            {
-                "name": "search_project_memories",
-                "description": "Search promoted long-term project memories.",
-            },
-            {
-                "name": "list_active_skills",
-                "description": "List the currently active skill packs.",
-            },
-            {
-                "name": "describe_runtime_capabilities",
-                "description": "Describe direct tools, subagents, connectors, and skills for this thread.",
-            },
-            {
-                "name": "list_canvas_documents",
-                "description": "Inspect existing canvas documents in the project.",
-            },
+            *direct_tools,
             {
                 "name": "propose_project_memory",
                 "description": "Persist a durable shared project memory for later retrieval.",
             },
-        ],
+        ]
+    return {
+        "project": cfg.get("project_name", ""),
+        "current_date": cfg.get("current_date", ""),
+        "analysis_mode": analysis_mode,
+        "connectors": cfg.get("active_connector_ids", []),
+        "direct_tools": direct_tools,
         "subagents": [
             {
                 "name": "reviewer",
@@ -1016,6 +1079,11 @@ def _system_prompt() -> str:
         "When the user asks what you can do, answer from the actual active tools, connectors, and skills. "
         "Your direct tools are limited to project retrieval, capability inspection, canvas inspection, "
         "and shared memory persistence; specialized work should be delegated.\n\n"
+        "## Modes\n"
+        "The active interaction mode arrives in the runtime system message.\n"
+        "- Chat mode: conversational, lightweight, and read-only. Do not create plans or delegate.\n"
+        "- Research mode: structured retrieval and synthesis.\n"
+        "- Product mode: structured planning, drafting, packaging, and publication.\n\n"
         "## Delegation\n"
         "Use the `task` tool to delegate specialized work to subagents:\n"
         "- subagent_type='reviewer': request clarification, branch analysis, and numbered user choices when the task is ambiguous\n"
@@ -1027,7 +1095,7 @@ def _system_prompt() -> str:
         "- subagent_type='packager': generate output files and format-specific deliverables\n"
         "- subagent_type='publisher': publish approved outputs and project artifacts\n"
         "- subagent_type='general-purpose': narrow fallback for synthesis that does not fit the named specialists\n\n"
-        "If the user wants to collect or add sources to the project, delegate immediately to "
+        "If the user wants to collect or add sources to the project while in Research or Product mode, delegate immediately to "
         "the retriever subagent. Retriever branches gather candidates first; then you call approve_collected_literature once to present one consolidated approval.\n\n"
         "Never call a tool that appears only under a subagent's capabilities as if it were a direct supervisor tool. "
         "Use task(subagent_type=...) for those capabilities.\n\n"
@@ -1097,6 +1165,8 @@ def _system_prompt() -> str:
         "12. task(packager): generate requested deliverable formats\n"
         "13. task(publisher): publish only after the user approves the product\n"
         "For file deliverables, especially ARLIS bulletins, a canvas draft alone is not complete. Completion requires a generated workspace file plus capture_artifact or publish_workspace_file so the output appears in project sources/artifacts.\n\n"
+        "ARLIS bulletin workflow rule: after the drafter creates the canvas bulletin draft, immediately delegate to the packager to generate the .docx and capture it into Reports. Do not leave the workflow parked at the canvas draft stage.\n"
+        "If the user asked to publish or deliver the bulletin in the same request, you already have publication approval for the final packaged file unless they explicitly asked to review before publish.\n\n"
         "## Rate limits\n"
         "Be efficient with tool calls. Synthesize after one or two targeted searches "
         "rather than exhaustive retrieval. Respect provider rate limits by batching or narrowing work when needed. "
@@ -1332,6 +1402,8 @@ async def _publish_canvas_document_api(
     *,
     add_to_sources: bool = False,
     change_summary: str = "Published from runtime",
+    collection_name: str | None = None,
+    collection_id: str | None = None,
 ) -> dict[str, Any] | None:
     api_base_url = str(api_base_url or "").rstrip("/")
     if not api_base_url:
@@ -1350,12 +1422,13 @@ async def _publish_canvas_document_api(
                 json={
                     "addToSources": add_to_sources,
                     "changeSummary": change_summary,
+                    "collectionName": collection_name or None,
+                    "collectionId": collection_id,
                 },
             )
             response.raise_for_status()
             payload = response.json()
-        document = payload.get("document") if isinstance(payload, dict) else None
-        return document if isinstance(document, dict) else None
+        return payload if isinstance(payload, dict) else None
     except Exception as exc:
         logger.warning("Publish canvas document API call failed: %s", exc)
         return None
@@ -1634,9 +1707,23 @@ def _safe_command_parts(command: str) -> list[str]:
     return parts
 
 
-def _map_command_parts(workspace_path: str, parts: list[str]) -> list[str]:
+def _expand_command_part(part: str, env_map: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("brace") or match.group("plain") or ""
+        return env_map.get(name, match.group(0))
+
+    return re.sub(
+        r"\$(?:\{(?P<brace>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))",
+        replace,
+        part,
+    )
+
+
+def _map_command_parts(workspace_path: str, parts: list[str], env_map: dict[str, str] | None = None) -> list[str]:
+    expanded_env = env_map or {}
     mapped: list[str] = []
     for part in parts:
+        part = _expand_command_part(part, expanded_env)
         if part.startswith("/skills/skills/"):
             mapped.append(
                 str((_skills_root() / part.removeprefix("/skills/skills/")).resolve())
@@ -1705,16 +1792,17 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
         working_dir = _resolve_workspace_path(workspace_path, cwd)
         if not working_dir.exists() or not working_dir.is_dir():
             raise RuntimeError(f"{cwd} is not a directory in the project workspace.")
-        parts = _map_command_parts(workspace_path, _safe_command_parts(command))
+        command_env = {
+            **os.environ,
+            "OPEN_ANALYST_REPO_ROOT": str(_repo_root()),
+            "OPEN_ANALYST_SKILLS_ROOT": str(_skills_root()),
+            "OPEN_ANALYST_PROJECT_WORKSPACE": str(_workspace_root(workspace_path)),
+        }
+        parts = _map_command_parts(workspace_path, _safe_command_parts(command), command_env)
         process = await asyncio.create_subprocess_exec(
             *parts,
             cwd=str(working_dir),
-            env={
-                **os.environ,
-                "OPEN_ANALYST_REPO_ROOT": str(_repo_root()),
-                "OPEN_ANALYST_SKILLS_ROOT": str(_skills_root()),
-                "OPEN_ANALYST_PROJECT_WORKSPACE": str(_workspace_root(workspace_path)),
-            },
+            env=command_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -2823,6 +2911,7 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
     async def publish_canvas_document(
         add_to_sources: bool = True,
         change_summary: str = "Published from runtime",
+        collection_name: str = "Reports",
         runtime: ToolRuntime = None,
     ) -> str:
         """Publish the primary canvas document into artifact storage and optionally add it to sources."""
@@ -2836,6 +2925,8 @@ def _build_tools() -> tuple[list[Any], dict[str, Any]]:
             project_id,
             add_to_sources=add_to_sources,
             change_summary=change_summary,
+            collection_name=collection_name if add_to_sources else None,
+            collection_id=cfg.get("collection_id") if not collection_name else None,
         )
         if isinstance(document, dict):
             artifact_payload = document.get("artifact") if isinstance(document.get("artifact"), dict) else None
@@ -3069,11 +3160,11 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "3. Use save_canvas_markdown to create or update drafts\n"
                 "4. Stage the draft for critique or user review in canvas\n"
                 "5. Leave packaging and publishing to the dedicated specialists\n"
-                "6. For ARLIS bulletins, produce the analytic content and hand off packaging. Do not treat the canvas draft as the finished deliverable.\n\n"
+                "6. For ARLIS bulletins, produce the analytic content in canvas only and hand off packaging. Do not attempt document generation, artifact capture, or publication from this role.\n\n"
                 "Follow active skill instructions (SKILL.md) precisely for structured products.\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief summary of what you produced (under 200 words)\n"
-                "- Include: draft title, where it was staged, and any unresolved issues\n"
+                "- Include: draft title, where it was staged, the exact next handoff needed, and any unresolved issues\n"
                 "- Do NOT return the full document content in your response\n"
                 "- Keep the full draft in canvas or referenced files; the supervisor only needs the summary"
             ),
@@ -3100,10 +3191,12 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "1. Read the approved canvas or workspace content referenced in the task\n"
                 "2. Use execute_command and packaging skills to produce the requested format\n"
                 "3. Use capture_artifact to register generated files for downstream publication or download\n"
-                "4. When the request is an ARLIS bulletin, follow the arlis-bulletin skill end to end: generate the .docx in the project workspace and capture it so it appears in project sources/artifacts\n\n"
+                "4. When the request is an ARLIS bulletin or other report deliverable, call capture_artifact with collectionName='Reports'\n"
+                "5. When the request is an ARLIS bulletin, follow the arlis-bulletin skill end to end: generate the .docx in the project workspace and capture it so it appears in the Reports collection and artifact store\n"
+                "6. For ARLIS bulletins captured into Reports, treat capture_artifact as the publication-complete step for the file deliverable unless the supervisor explicitly asks for an additional canvas publication action\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a concise packaging summary (under 200 words)\n"
-                "- Include: output format, filenames, artifact locations, and any generation issues\n"
+                "- Include: output format, filenames, artifact locations, whether it was captured into Reports, and any generation issues\n"
                 "- Do NOT restate the document content\n"
                 "- Leave publication to the publisher"
             ),
@@ -3168,7 +3261,8 @@ def _build_subagents(model: Any, tool_map: dict[str, Any]) -> list[dict[str, Any
                 "Workflow:\n"
                 "1. Verify which canvas document or workspace artifact has been approved for publication\n"
                 "2. Use the appropriate publish tool to publish it\n"
-                "3. Capture any resulting artifact metadata that downstream users need\n\n"
+                "3. For bulletins and report deliverables, publish into the Reports collection\n"
+                "4. Capture any resulting artifact metadata that downstream users need\n\n"
                 "IMPORTANT — Context management:\n"
                 "- Return ONLY a brief publication summary (under 150 words)\n"
                 "- Include: what was published, where it went, and any follow-up actions\n"
@@ -3304,6 +3398,7 @@ def _build_runtime_middleware() -> list[Any]:
         fallback_models = [_build_chat_model(model_name) for model_name in settings.fallback_chat_models]
         middleware.append(ResilientModelMiddleware(fallback_models=fallback_models))
         middleware.append(SupervisorToolGuard())
+        middleware.append(ModeToolGuard())
     return middleware
 
 

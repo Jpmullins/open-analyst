@@ -98,12 +98,18 @@ export async function action({
     const collectionName =
       typeof body.collectionName === "string" && body.collectionName.trim()
         ? body.collectionName.trim()
-        : "Artifacts";
-    const collection = await ensureCollection(
-      params.projectId,
-      collectionName,
-      "Published canvas drafts and deliverables"
-    );
+        : "Reports";
+    const requestedCollectionId =
+      typeof body.collectionId === "string" && body.collectionId.trim()
+        ? body.collectionId.trim()
+        : "";
+    const collection = requestedCollectionId
+      ? { id: requestedCollectionId }
+      : await ensureCollection(
+          params.projectId,
+          collectionName,
+          "Published reports and deliverables"
+        );
     const sourceUri = `artifact:${artifact.id}`;
     const existing = await getDocumentBySourceUri(params.projectId, sourceUri, "canvas");
     const doc = existing

@@ -3,9 +3,11 @@ import { useLocation, useMatches, useNavigate, useSearchParams } from "react-rou
 import {
   BookOpen,
   Bot,
-  FlaskConical,
   ListTodo,
+  MessageSquare,
   PanelRightOpen,
+  PenTool,
+  Search,
   ShieldAlert,
   Square,
 } from "lucide-react";
@@ -27,6 +29,8 @@ interface AssistantWorkspaceViewProps {
     analysisMode?: string | null;
   };
 }
+
+type AnalysisMode = "chat" | "research" | "product";
 
 type StreamTodo = {
   id?: string;
@@ -126,6 +130,13 @@ function deriveThreadSummary(prompt: string): string {
   const cleaned = prompt.replace(/\s+/g, " ").trim();
   if (!cleaned) return "";
   return cleaned.slice(0, 140);
+}
+
+function normalizeAnalysisMode(value: unknown): AnalysisMode {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "product") return "product";
+  if (mode === "research") return "research";
+  return "chat";
 }
 
 function summarizeMessageContent(content: unknown): string {
@@ -241,6 +252,7 @@ export function AssistantWorkspaceView({
   const hasAutoSubmittedPendingPromptRef = useRef(false);
   const [resumingInterruptId, setResumingInterruptId] = useState<string | null>(null);
   const activeCollectionId = useAppStore((state) => state.activeCollectionByProject[projectId] || null);
+  const setProjectActiveCollection = useAppStore((state) => state.setProjectActiveCollection);
   const appLayoutMatch = matches.find((match) => match.id === "routes/_app");
   const runtimeConfig = appLayoutMatch?.data as { langgraphRuntimeUrl?: unknown } | undefined;
   const agentServerUrl =
@@ -283,7 +295,6 @@ export function AssistantWorkspaceView({
   });
   type StreamSubmitOptions = NonNullable<Parameters<typeof stream.submit>[1]>;
 
-  const deepResearch = searchParams.get("deepResearch") === "true";
   const activePanel = searchParams.get("panel") || "";
   const isProjectHome = !initialAgentThreadId;
   const deferredStreamMessages = useDeferredValue(stream.messages || []);
@@ -306,15 +317,15 @@ export function AssistantWorkspaceView({
     const memoryCount = workspaceContext.memories.active.length;
     return `${connectorCount} connectors, ${skillCount} skills, ${memoryCount} memories active in project context`;
   }, [workspaceContext]);
-  const analysisMode = deepResearch ? "deep_research" : "chat";
+  const [selectedMode, setSelectedMode] = useState<AnalysisMode>(
+    normalizeAnalysisMode(threadMetadata?.analysisMode),
+  );
   const resolvedCollectionId = normalizeUuid(
     initialAgentThreadId
       ? activeCollectionId ?? threadMetadata?.collectionId ?? null
       : activeCollectionId
   );
-  const resolvedAnalysisMode = initialAgentThreadId
-    ? (threadMetadata?.analysisMode || "chat")
-    : analysisMode;
+  const resolvedAnalysisMode = selectedMode;
   const requestMetadata = useMemo(
     () => ({
       project_id: projectId,
@@ -323,6 +334,52 @@ export function AssistantWorkspaceView({
     }),
     [projectId, resolvedAnalysisMode, resolvedCollectionId],
   );
+
+  useEffect(() => {
+    setSelectedMode(normalizeAnalysisMode(threadMetadata?.analysisMode));
+  }, [threadMetadata?.analysisMode, initialAgentThreadId]);
+
+  useEffect(() => {
+    const collectionFromUrl = normalizeUuid(searchParams.get("collection"));
+    const preferredCollectionId = collectionFromUrl ?? normalizeUuid(threadMetadata?.collectionId ?? null);
+    if (!preferredCollectionId || preferredCollectionId === activeCollectionId) return;
+    setProjectActiveCollection(projectId, preferredCollectionId);
+  }, [
+    activeCollectionId,
+    projectId,
+    searchParams,
+    setProjectActiveCollection,
+    threadMetadata?.collectionId,
+  ]);
+
+  useEffect(() => {
+    if (!initialAgentThreadId) return;
+    const nextMode = normalizeAnalysisMode(threadMetadata?.analysisMode);
+    if (nextMode === selectedMode) return;
+    void fetch(`${agentServerUrl}/threads/${initialAgentThreadId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        metadata: {
+          project_id: projectId,
+          collection_id: resolvedCollectionId,
+          analysis_mode: selectedMode,
+        },
+      }),
+    }).catch((error) => {
+      console.error("[AssistantWorkspaceView] mode patch failed", error);
+    });
+  }, [
+    agentServerUrl,
+    initialAgentThreadId,
+    projectId,
+    resolvedCollectionId,
+    selectedMode,
+    threadMetadata?.analysisMode,
+  ]);
   const pendingPromptFromNavigation = useMemo(() => {
     const state = location.state as { pendingPrompt?: unknown } | null;
     return typeof state?.pendingPrompt === "string" && state.pendingPrompt.trim()
@@ -848,7 +905,11 @@ export function AssistantWorkspaceView({
                   <p className="mx-auto max-w-2xl text-sm text-text-secondary">
                     {isProjectHome
                       ? "You are back at the main project workspace. Start a fresh thread here, open sources from the right panel, or adjust settings and memory from the left panel."
-                      : "Ask for research, planning, synthesis, critique, argument mapping, or report drafting. Use the left panel for settings and thread context, and the right panel for sources, file preview, and canvas work."}
+                      : selectedMode === "chat"
+                        ? "Use Chat mode for conversation, quick questions, and read-only project context. Switch to Research or Product when you want a structured workflow."
+                        : selectedMode === "research"
+                          ? "Research mode is for structured retrieval, source review, synthesis, and confidence/gap analysis."
+                          : "Product mode is for planning, drafting, packaging, and publishing deliverables from your project research."}
                   </p>
                   {isProjectHome ? (
                     <div className="mt-5 flex items-center justify-center gap-3">
@@ -905,24 +966,31 @@ export function AssistantWorkspaceView({
       <div className="border-t border-border bg-background px-6 py-4">
         <div className="mx-auto max-w-4xl">
           <div className="mb-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setSearchParams(
-                  (previous) => {
-                    const next = new URLSearchParams(previous);
-                    if (deepResearch) next.delete("deepResearch");
-                    else next.set("deepResearch", "true");
-                    return next;
-                  },
-                  { replace: true },
-                )
-              }
-              className={`tag text-xs ${deepResearch ? "tag-active" : ""}`}
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              Deep Research
-            </button>
+            <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-1 py-1">
+              {([
+                { id: "chat", label: "Chat", icon: MessageSquare },
+                { id: "research", label: "Research", icon: Search },
+                { id: "product", label: "Product", icon: PenTool },
+              ] as const).map((mode) => {
+                const Icon = mode.icon;
+                const active = selectedMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setSelectedMode(mode.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active ? "bg-accent-muted text-accent" : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Icon className="h-3.5 w-3.5" />
+                      {mode.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             {stream.isLoading ? (
               <button
                 type="button"

@@ -156,24 +156,6 @@ const TOOL_DEFS: Array<{
   {
     type: "function",
     function: {
-      name: "deep_research",
-      description:
-        "Perform multi-step deep research: decompose query, search/fetch multiple sources, synthesize cited report, and store it.",
-      parameters: {
-        type: "object",
-        properties: {
-          question: { type: "string" },
-          breadth: { type: "number" },
-          fetch_limit: { type: "number" },
-          collectionName: { type: "string" },
-        },
-        required: ["question"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "collection_overview",
       description:
         "List what is in the active collection (or project) and summarize source contents.",

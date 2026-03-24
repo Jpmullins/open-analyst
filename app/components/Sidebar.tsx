@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useMatches, useNavigate, useParams, useRevalidator, useSearchParams } from "react-router";
+import { useMatches, useNavigate, useParams, useRevalidator, useSearchParams } from "react-router";
 import { useAppStore } from "~/lib/store";
 import {
   BrainCircuit,
@@ -41,7 +41,6 @@ export function Sidebar({ threads, collections, documentCounts }: SidebarProps) 
   const matches = useMatches();
   const { revalidate } = useRevalidator();
   const params = useParams();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [threadItems, setThreadItems] = useState(threads);
   const [renameDialog, setRenameDialog] = useState<SidebarThread | null>(null);
@@ -49,7 +48,7 @@ export function Sidebar({ threads, collections, documentCounts }: SidebarProps) 
   const activeProjectId = params.projectId || null;
   const activeThreadId = params.threadId || null;
   const activePanel = searchParams.get("panel");
-  const isSourcesView = activePanel === "sources" || location.pathname.endsWith("/knowledge");
+  const isSourcesView = activePanel === "sources";
   const isWorkspaceHome = !activeThreadId && !isSourcesView;
   const runtimeConfig = matches.find((match) => match.id === "routes/_app")?.data as
     | { langgraphRuntimeUrl?: unknown }
@@ -161,8 +160,20 @@ export function Sidebar({ threads, collections, documentCounts }: SidebarProps) 
 
   const handleCollectionClick = (collectionId: string) => {
     if (activeProjectId) {
-      navigate(`/projects/${activeProjectId}/knowledge?collection=${collectionId}`);
+      const next = new URLSearchParams(searchParams);
+      next.set("panel", "sources");
+      next.set("collection", collectionId);
+      navigate(`${buildWorkspacePath(activeProjectId, activeThreadId)}?${next.toString()}`);
     }
+  };
+
+  const buildThreadNavigationTarget = (threadId: string) => {
+    if (!activeProjectId) return "";
+    const next = new URLSearchParams(searchParams);
+    next.delete("panel");
+    next.delete("tab");
+    const query = next.toString();
+    return `${buildWorkspacePath(activeProjectId, threadId)}${query ? `?${query}` : ""}`;
   };
 
   const openContextPanel = () => {
@@ -332,11 +343,7 @@ export function Sidebar({ threads, collections, documentCounts }: SidebarProps) 
                 >
                   <button
                     className="flex-1 text-left min-w-0"
-                    onClick={() =>
-                      navigate(
-                        `/projects/${activeProjectId}/threads/${thread.id}`
-                      )
-                    }
+                    onClick={() => navigate(buildThreadNavigationTarget(thread.id))}
                   >
                     <div className="text-sm truncate">{thread.title}</div>
                     <div className="text-xs text-text-muted truncate">

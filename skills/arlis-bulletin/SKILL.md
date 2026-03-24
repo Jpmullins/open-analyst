@@ -37,25 +37,34 @@ Use this skill when the user wants to:
 
 ## Workflow Overview
 
+In Open Analyst this skill is split across specialist roles:
+- `argument-planner` formulates the KIQ, structure, and bulletin plan in canvas
+- `drafter` writes the analytic bulletin content in canvas
+- `packager` generates the `.docx`, runs final format-specific steps, and calls `capture_artifact`
+- `publisher` is optional for extra publication actions, but an ARLIS `.docx` captured into `Reports` already satisfies the normal publish requirement
+
+If you are operating in a role that cannot run commands or capture artifacts, stop after completing your stage and hand off explicitly to the next specialist. Do not try to complete the entire skill from a drafting-only role.
+
 1. **Gather input** — Read all available source material (see "Working with Input Files" below)
 2. **Read the analytic writing guide** — Read `references/analytic-writing-guide.md` for detailed standards on KIQs, BLUFs, argumentation, and the four-sweeps review
 3. **Read the template spec** — Read `references/template-spec.md` for exact formatting details
 4. **Formulate the KIQ** — Craft a two-part Key Intelligence Question based on the source material
 5. **Structured analysis** — Before drafting, apply structured analytic techniques (see "Structured Analysis" below)
 6. **Draft the content** — Write the BLUF, "What" section, "So What" section, and endnotes following IC analytic writing standards
-6. **Generate the document inside the project workspace** — Run `scripts/generate_bulletin.py` to clone the template and inject content. Save the final `.docx` under a workspace-relative folder such as `outputs/<topic-slug>/arlis-bulletin.docx`. Do not write outputs under the agent service directory.
-7. **Capture the finished document as a project artifact** — After generating the `.docx`, call `capture_artifact` with the workspace-relative path so the bulletin is registered in the project and stored in the configured artifact backend (local or S3).
-8. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
-9. **SAT evaluation** — Evaluate the draft against SAT standards (see "SAT Evaluation" below)
-10. **Visual QA** — Convert to PDF/images and visually inspect
+7. **Generate the document inside the project workspace** — Run `scripts/generate_bulletin.py` to clone the template and inject content. Save the final `.docx` under a workspace-relative folder such as `outputs/<topic-slug>/arlis-bulletin.docx`. Do not write outputs under the agent service directory.
+8. **Capture the finished document as a project artifact** — After generating the `.docx`, call `capture_artifact` with the workspace-relative path and `collectionName="Reports"` so the bulletin is registered in the `Reports` collection and stored in the configured artifact backend (local or S3).
+9. **Self-review using the four sweeps** — Apply the four-sweeps checklist to verify quality
+10. **SAT evaluation** — Evaluate the draft against SAT standards (see "SAT Evaluation" below)
+11. **Visual QA** — Convert to PDF/images and visually inspect
 
 ## Host Path Rules
 
-Deep Agents exposes skills under the virtual `/skills/...` filesystem for agent file tools, but shell commands and Python scripts run on the host filesystem. That means:
+Open Analyst `execute_command` runs processes directly, not through a shell. That means:
 
-- Use `/skills/...` only with agent file tools such as `read_file`, `write_file`, `glob`, or `grep`
-- Never hardcode `/skills/...` inside Python scripts or shell commands executed with `execute_command`
-- For shell/Python execution, use the host env vars injected by Open Analyst:
+- Do not use shell builtins such as `export`
+- Do not rely on shell chaining, pipes, or command substitution
+- You may reference skill assets either through `/skills/...` paths or through the injected `OPEN_ANALYST_*` variables inside individual command arguments
+- When you need Python-level path handling, use the injected env vars:
   - `$OPEN_ANALYST_SKILLS_ROOT` → real repo `skills/` directory
   - `$OPEN_ANALYST_REPO_ROOT` → repo root
   - `$OPEN_ANALYST_PROJECT_WORKSPACE` → current project workspace root
@@ -196,8 +205,8 @@ The "About ARLIS Insights" section and contact info are already in the template 
 ## Step 3: Generate the Document
 
 ```bash
-python "$OPEN_ANALYST_SKILLS_ROOT/arlis-bulletin/scripts/generate_bulletin.py" \
-  --template "$OPEN_ANALYST_SKILLS_ROOT/arlis-bulletin/assets/template.docx" \
+python /skills/arlis-bulletin/scripts/generate_bulletin.py \
+  --template /skills/arlis-bulletin/assets/template.docx \
   --output <output-path>/bulletin.docx \
   --title "Your Analytic Title Here" \
   --date "DD Month YYYY" \
@@ -230,7 +239,7 @@ After generating, apply the four-sweeps checklist. Read `references/analytic-wri
 Convert the output to images and inspect:
 
 ```bash
-python "$OPEN_ANALYST_REPO_ROOT/skills/docx/scripts/office/soffice.py" --headless --convert-to pdf <output>.docx
+python /skills/docx/scripts/office/soffice.py --headless --convert-to pdf <output>.docx
 pdftoppm -jpeg -r 150 <output>.pdf page
 ```
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFetcher } from "react-router";
+import { useFetcher, useRevalidator, useSearchParams } from "react-router";
 import { BookOpen, Check, FileText, GripVertical, Link2, Loader2, X } from "lucide-react";
 import { useAppStore } from "~/lib/store";
 import type { ArtifactMeta } from "~/lib/types";
@@ -72,6 +72,8 @@ function getArtifactMeta(projectId: string, document: HeadlessDocument): Artifac
 
 export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
   const { activeCollectionByProject, setProjectActiveCollection, openFileViewer } = useAppStore();
+  const [, setSearchParams] = useSearchParams();
+  const { revalidate } = useRevalidator();
   const [sourceUrl, setSourceUrl] = useState("");
   const [isSubmittingUrl, setIsSubmittingUrl] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -151,6 +153,18 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
 
   const handleCollectionChange = (collectionId: string) => {
     setProjectActiveCollection(projectId, collectionId);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (collectionId) {
+          next.set("collection", collectionId);
+        } else {
+          next.delete("collection");
+        }
+        return next;
+      },
+      { replace: true }
+    );
   };
 
   const handleMouseDown = (event: React.MouseEvent) => {
@@ -181,6 +195,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
       }
       setSourceUrl("");
       reload();
+      revalidate();
     } finally {
       setIsSubmittingUrl(false);
     }
@@ -197,6 +212,7 @@ export function KnowledgePanel({ projectId, onClose }: KnowledgePanelProps) {
         throw new Error(`Failed to ${action} batch`);
       }
       reload();
+      revalidate();
     } finally {
       setBusyBatchId(null);
     }

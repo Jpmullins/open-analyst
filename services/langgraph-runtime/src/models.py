@@ -28,7 +28,7 @@ class RuntimeProjectContext(TypedDict):
     shared_storage_prefix: str
     current_date: str
     current_datetime_utc: str
-    analysis_mode: Literal["chat", "deep_research"]
+    analysis_mode: Literal["chat", "research", "product"]
     brief: str
     retrieval_policy: dict[str, Any]
     memory_profile: dict[str, Any]

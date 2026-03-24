@@ -99,7 +99,16 @@ def _get_collection_id(body: dict[str, Any]) -> str | None:
 def _get_analysis_mode(body: dict[str, Any]) -> str:
     metadata = _json_object(body.get("metadata"))
     context = _json_object(body.get("context"))
-    return _trimmed(metadata.get("analysis_mode") or context.get("analysis_mode"))
+    return _normalize_analysis_mode(metadata.get("analysis_mode") or context.get("analysis_mode"))
+
+
+def _normalize_analysis_mode(value: Any) -> str:
+    mode = _trimmed(value).lower()
+    if mode == "product":
+        return "product"
+    if mode == "research":
+        return "research"
+    return "chat"
 
 
 def _get_input_prompt(body: dict[str, Any]) -> str:
@@ -135,11 +144,13 @@ def _active_skill_names(runtime_context: dict[str, Any]) -> list[str]:
 
 
 def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: str) -> str:
+    mode = _normalize_analysis_mode(analysis_mode)
     lines = [
         f"Current UTC date: {_trimmed(runtime_context.get('current_date')) or 'unknown'}.",
         f"Current UTC timestamp: {_trimmed(runtime_context.get('current_datetime_utc')) or 'unknown'}.",
         "Interpret relative time references like recent, latest, today, this week, this month, and this year using this date.",
     ]
+    lines.append(f"Active interaction mode: {mode}.")
     active_skill_names = _active_skill_names(runtime_context)
     if active_skill_names:
         lines.append(f"Relevant skill packs for this request: {', '.join(active_skill_names)}.")
@@ -148,15 +159,35 @@ def build_runtime_system_prompt(runtime_context: dict[str, Any], analysis_mode: 
             [
                 "This request matches the arlis-bulletin skill.",
                 "Do not stop at a canvas markdown draft. Completion requires generating the bulletin .docx in the project workspace and capturing it into project sources/artifacts.",
+                "Execute ARLIS bulletin requests as a staged workflow: argument-planner creates the plan, drafter creates the canvas draft, and packager generates and captures the final .docx into Reports.",
+                "If the user explicitly asks to publish or deliver the bulletin in this same request, treat that as publication approval for the final packaged file unless they explicitly ask to review a draft first.",
                 "If the user asks for a bulletin but key product framing is missing, ask a concise clarifying question with 2-4 numbered options and a custom option before drafting.",
             ]
         )
-    if analysis_mode == "deep_research":
+    if mode == "chat":
         lines.extend(
             [
-                "Deep research mode is active.",
-                "Plan before acting, delegate evidence collection to the researcher first,",
-                "use grounded sources, and synthesize only after retrieval has produced enough support.",
+                "Chat mode is active.",
+                "Stay conversational and lightweight.",
+                "You may inspect existing project context read-only, but do not create visible plans, delegate to subagents, stage retrieval workflows, or publish artifacts in this mode.",
+                "If the user asks for structured evidence gathering or deliverable production, recommend switching to Research or Product mode.",
+            ]
+        )
+    elif mode == "research":
+        lines.extend(
+            [
+                "Research mode is active.",
+                "Use structured retrieval and synthesis.",
+                "For multi-step work, create a visible plan, gather grounded evidence, and synthesize only after retrieval has produced enough support.",
+            ]
+        )
+    elif mode == "product":
+        lines.extend(
+            [
+                "Product mode is active.",
+                "Treat this as deliverable-oriented work.",
+                "Use structured planning, drafting, critique, packaging, and publication behavior.",
+                "If key framing is missing for a product request, ask concise clarifying questions before substantial drafting.",
             ]
         )
     return " ".join(lines)

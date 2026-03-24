@@ -5,6 +5,13 @@ import { buildWorkspaceContext } from "~/lib/workspace-context.server";
 
 const RUNTIME_URL = env.LANGGRAPH_RUNTIME_URL;
 
+function normalizeAnalysisMode(value: unknown): "chat" | "research" | "product" {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "product") return "product";
+  if (mode === "research") return "research";
+  return "chat";
+}
+
 export async function loader({
   params,
 }: {
@@ -37,10 +44,7 @@ export async function loader({
       threadMetadata: {
         collectionId:
           normalizeUuid(metadata.collection_id),
-        analysisMode:
-          typeof metadata.analysis_mode === "string" && metadata.analysis_mode.trim()
-            ? metadata.analysis_mode.trim()
-            : "chat",
+        analysisMode: normalizeAnalysisMode(metadata.analysis_mode),
       },
     };
   } catch (error) {

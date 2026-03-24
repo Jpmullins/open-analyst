@@ -1,14 +1,14 @@
 # Analyst MCP
 
-Analyst MCP is the external research and acquisition service used by Open Analyst for literature search, article collection, artifact download, and connector-style workflows.
+Analyst MCP is the external literature search and acquisition service used by Open Analyst.
+
+It is not the main conversation runtime. The LangGraph runtime calls Analyst MCP when it needs external papers, collection artifacts, or download workflows.
 
 ## Role In The Stack
 
-- Open Analyst web app: product UI and persistence
-- LangGraph runtime: main deepagents-based analyst runtime
-- Analyst MCP: external search and acquisition service
-
-Analyst MCP is not the primary conversation runtime. It is a specialized service the runtime can call when it needs external papers, collections, or acquired artifacts.
+- Open Analyst web app: workspace UI and product APIs
+- LangGraph runtime: main analyst runtime and workflow coordinator
+- Analyst MCP: external search, collection, and artifact acquisition
 
 ## Start
 
@@ -19,7 +19,7 @@ pnpm setup:python
 pnpm dev:analyst-mcp
 ```
 
-Health:
+Health checks:
 
 ```bash
 curl http://localhost:8000/health
@@ -41,13 +41,14 @@ Usually set these in the repo-root [`.env`](/home/ubuntu/code/ARLIS/open-analyst
 
 If `ANALYST_MCP_POSTGRES_DSN` is omitted, the service falls back to `DATABASE_URL`.
 
-## Current Use Cases
+## Main Responsibilities
 
 - literature search across configured providers
-- selective collection of matched articles
-- paper metadata and artifact lookup
-- collection indexing and collection artifact workflows
-- project-scoped artifact storage when Open Analyst passes project headers
+- article collection
+- paper metadata lookup
+- source artifact acquisition
+- collection indexing
+- project-scoped storage when Open Analyst passes workspace headers
 
 ## Main APIs
 
@@ -87,7 +88,7 @@ If `ANALYST_MCP_POSTGRES_DSN` is omitted, the service falls back to `DATABASE_UR
 
 Without Open Analyst project headers, Analyst MCP uses its own service-level storage settings.
 
-With Open Analyst headers, storage becomes project-scoped and aligns with the active workspace slug and artifact backend.
+With Open Analyst headers, storage becomes project-scoped and aligns with the active workspace slug and configured artifact backend.
 
 ### Local Layout
 
@@ -100,8 +101,3 @@ With Open Analyst headers, storage becomes project-scoped and aligns with the ac
 ```text
 s3://<bucket>/<prefix>/<workspace-slug>/<provider>/<source_id>/<source_id>.<suffix>
 ```
-
-## Notes
-
-- Open Analyst can mirror collected artifacts into project documents so runtime retrieval and file preview work from the main app.
-- The runtime now uses a trimmed `search_literature` result format so the agent can synthesize instead of re-reading huge raw payloads.

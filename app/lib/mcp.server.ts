@@ -105,7 +105,6 @@ function getAnalystMcpDefaults(): { url: string; apiKey: string } {
 const LOCAL_RESEARCH_TOOL_NAMES = new Set([
   'web_search',
   'web_fetch',
-  'deep_research',
   'hf_daily_papers',
   'hf_paper',
 ]);

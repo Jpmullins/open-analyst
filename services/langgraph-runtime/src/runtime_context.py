@@ -25,7 +25,6 @@ LOCAL_TOOL_DEFINITIONS: list[dict[str, str]] = [
     {"name": "web_search", "description": "Search the web for a query and return summary results"},
     {"name": "hf_daily_papers", "description": "Fetch Hugging Face daily papers for a date"},
     {"name": "hf_paper", "description": "Fetch a Hugging Face paper by arXiv id"},
-    {"name": "deep_research", "description": "Perform multi-step deep research with cited synthesis"},
     {"name": "collection_overview", "description": "Summarize the active collection or project"},
     {"name": "collection_artifact_metadata", "description": "List stored artifact metadata"},
     {"name": "capture_artifact", "description": "Capture a generated workspace file into the project store"},
@@ -64,7 +63,6 @@ DEFAULT_SKILL_RECORDS: list[dict[str, Any]] = [
         "enabled": True,
         "config": {
             "tools": [
-                "deep_research",
                 "web_search",
                 "web_fetch",
                 "hf_daily_papers",
@@ -98,6 +96,15 @@ DEFAULT_SKILL_RECORDS: list[dict[str, Any]] = [
 
 def _trimmed(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_analysis_mode(value: Any) -> str:
+    mode = _trimmed(value).lower()
+    if mode == "product":
+        return "product"
+    if mode == "research":
+        return "research"
+    return "chat"
 
 
 def _trimmed_or_none(value: Any) -> str | None:
@@ -518,7 +525,7 @@ class RuntimeContextService:
             "shared_storage_prefix": shared_storage["prefix"],
             "current_date": now.date().isoformat(),
             "current_datetime_utc": now.isoformat().replace("+00:00", "Z"),
-            "analysis_mode": _trimmed(analysis_mode) or "chat",
+            "analysis_mode": _normalize_analysis_mode(analysis_mode),
             "brief": _trimmed(profile.get("brief")),
             "retrieval_policy": _json_object(profile.get("retrieval_policy")),
             "memory_profile": _json_object(profile.get("memory_profile")),
